@@ -15,7 +15,11 @@ class MockAgentService(IAgentService):
     def __init__(self) -> None:
         self.should_fail = False
 
-    async def chat(self, message: str, thread_id: str | None = None) -> tuple[str, str]:
+    async def chat(
+        self, message: str, thread_id: str | None = None,
+        user_context: dict[str, Any] | None = None,
+    ) -> tuple[str, str]:
+        self.last_user_context = user_context
         if self.should_fail:
             raise RuntimeError("Сервис Ollama временно недоступен")
         if not message.strip():
@@ -32,7 +36,9 @@ class MockDocumentService(IDocumentService):
         self.should_fail = False
 
     def index_document(
-        self, title: str, content: str, metadata: dict[str, Any] | None = None
+        self, title: str, content: str, metadata: dict[str, Any] | None = None,
+        is_public: bool = False, allowed_roles: list[str] | None = None,
+        allowed_departments: list[str] | None = None, owner_id: str | None = None,
     ) -> DocumentMetadata:
         if self.should_fail:
             raise RuntimeError("Сбой подключения к Qdrant")
@@ -161,5 +167,5 @@ def test_create_document_uses_run_sync(monkeypatch) -> None:
         "/api/v1/documents", json={"title": "Тест", "content": "Контент"}
     )
     assert response.status_code == 201
-    assert len(run_sync_called) == 1
-    assert run_sync_called[0] == doc_svc.index_document
+    # Sync dependencies (including token verification) also run in the thread pool.
+    assert run_sync_called.count(doc_svc.index_document) == 1

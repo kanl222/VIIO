@@ -6,7 +6,7 @@ from apiagent.config import Settings
 
 def test_default_settings() -> None:
     """Проверка значений конфигурации по умолчанию с LM Studio в качестве основного провайдера."""
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.llm_provider == "lmstudio"
     assert settings.lmstudio_base_url == "http://localhost:1234/v1"

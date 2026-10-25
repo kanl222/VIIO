@@ -21,6 +21,7 @@ FROM python:3.12-slim AS runner
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app/src" \
     PATH="/app/.venv/bin:$PATH"
 
 # Копируем виртуальное окружение и исходный код

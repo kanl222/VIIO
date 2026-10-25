@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -101,12 +102,15 @@ class QdrantVectorStoreAdapter(IVectorStore):
         self._ensure_collection()
         return self._store.add_texts(texts=texts, metadatas=metadatas)
 
-    def similarity_search(self, query: str, k: int = 4) -> list[Document]:
+    def similarity_search(
+        self, query: str, k: int = 4, filter: Any | None = None
+    ) -> list[Document]:
         """Поиск наиболее релевантных фрагментов по запросу.
 
         Args:
             query: Текстовый поисковый запрос.
             k: Количество возвращаемых результатов.
+            filter: Опциональный фильтр метаданных (qdrant models.Filter).
 
         Returns:
             Список объектов Document с текстом и метаданными. Пустой список, если коллекция еще не создана.
@@ -114,10 +118,60 @@ class QdrantVectorStoreAdapter(IVectorStore):
         try:
             if not self._client.collection_exists(self._collection_name):
                 return []
-            return self._store.similarity_search(query=query, k=k)
+            semantic = self._store.similarity_search(query=query, k=k, filter=filter)
+            titles = self._find_acronym_titles(query, k, filter)
+            if not titles:
+                return semantic
+            # Exact system names are often lost by embeddings on short acronym questions.
+            combined = []
+            seen = set()
+            for doc in titles[:max(1, k // 2)] + semantic + titles:
+                identity = (doc.metadata.get("document_id"), doc.metadata.get("chunk_index"), doc.page_content)
+                if identity not in seen:
+                    seen.add(identity)
+                    combined.append(doc)
+                if len(combined) == k:
+                    break
+            return combined
         except Exception as exc:
             logger.error("Ошибка выполнения similarity_search в Qdrant: %s", exc)
             raise
+
+    def _find_acronym_titles(self, query: str, k: int, access_filter: Any | None) -> list[Document]:
+        terms = re.findall(r"\b[A-ZА-ЯЁ][A-ZА-ЯЁ0-9]{2,11}\b", query)
+        if not terms and re.fullmatch(r"[a-zа-яё]{3,12}", query.strip()):
+            terms = [query.strip().upper()]
+        if not terms or k <= 0:
+            return []
+        variants = set(terms)
+        for term in terms:
+            # ИСЛО and ИС ЛО / ИС «ЛО» should find the same title; likewise other initialisms.
+            variants.update(f"{term[:index]} {term[index:]}" for index in range(2, len(term) - 1))
+        title_filter = models.Filter(should=[models.FieldCondition(
+            key="metadata.title", match=models.MatchText(text=value)
+        ) for value in sorted(variants)])
+        combined_filter = models.Filter(must=[access_filter, title_filter]) if access_filter is not None else title_filter
+        points, _ = self._client.scroll(
+            collection_name=self._collection_name, scroll_filter=combined_filter,
+            limit=64, with_payload=True, with_vectors=False,
+        )
+        normalized = {term.casefold() for term in terms}
+        documents = [Document(page_content=point.payload.get("page_content", ""), metadata=point.payload.get("metadata", {}))
+                     for point in points if point.payload and point.payload.get("page_content")]
+        documents.sort(key=lambda doc: (
+            re.sub(r"[^\w]", "", str(doc.metadata.get("title", ""))).casefold() not in normalized,
+            doc.metadata.get("chunk_index", 0), str(doc.metadata.get("title", "")),
+        ))
+        # Give distinct source documents a chance before adding subsequent chunks.
+        first, remaining, seen = [], [], set()
+        for doc in documents:
+            identity = doc.metadata.get("document_id", doc.metadata.get("title"))
+            if identity in seen:
+                remaining.append(doc)
+            else:
+                seen.add(identity)
+                first.append(doc)
+        return (first + remaining)[:k]
 
     def count(self) -> int:
         """Получение общего числа точек в коллекции.

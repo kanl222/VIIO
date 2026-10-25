@@ -20,7 +20,7 @@ class MockVectorStore:
     def add_texts(self, texts: list[str], metadatas: list[dict] | None = None) -> list[str]:
         return []
 
-    def similarity_search(self, query: str, k: int = 4) -> list[Document]:
+    def similarity_search(self, query: str, k: int = 4, filter=None) -> list[Document]:
         self.last_query = query
         return self.search_results
 
@@ -48,7 +48,7 @@ def test_create_knowledge_search_tool_empty_results() -> None:
     tool = create_knowledge_search_tool(mock_store)
 
     output = tool.invoke({"query": "несуществующий запрос"})
-    assert output == "Ничего не найдено в базе знаний."
+    assert output == "Ничего не найдено в базе знаний в рамках ваших прав доступа."
 
 
 @pytest.mark.asyncio

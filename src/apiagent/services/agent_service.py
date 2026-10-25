@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 import uuid
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from apiagent.interfaces._protocols import IAgentService
@@ -27,12 +28,32 @@ class AgentService(IAgentService):
         """
         self._graph = graph
 
-    async def chat(self, message: str, thread_id: str | None = None) -> tuple[str, str]:
+    @property
+    def checkpointer(self) -> BaseCheckpointSaver | None:
+        """Текущий используемый чекпоинтер сессий графа агента."""
+        return getattr(self._graph, "checkpointer", None)
+
+    def set_checkpointer(self, checkpointer: BaseCheckpointSaver) -> None:
+        """Динамическая замена или установка чекпоинтера в графе агента.
+
+        Args:
+            checkpointer: Экземпляр чекпоинтера (например, AsyncPostgresSaver или MemorySaver).
+        """
+        self._graph.checkpointer = checkpointer
+
+    async def chat(
+        self,
+        message: str,
+        thread_id: str | None = None,
+        user_context: dict[str, Any] | None = None,
+        *, reference_context: str | None = None,
+    ) -> tuple[str, str]:
         """Отправка сообщения агенту в рамках указанной или вновь созданной сессии.
 
         Args:
             message: Текст запроса пользователя.
             thread_id: Идентификатор сессии. Если не указан, создается новый UUID.
+            user_context: Контекст безопасности пользователя (user_id, role, departments).
 
         Returns:
             Кортеж (ответ_агента, thread_id_сессии).
@@ -46,22 +67,34 @@ class AgentService(IAgentService):
             raise ValueError("Сообщение не может быть пустым")
 
         effective_thread_id = thread_id.strip() if thread_id and thread_id.strip() else str(uuid.uuid4())
-        config = {"configurable": {"thread_id": effective_thread_id}}
+        config = {
+            "configurable": {
+                "thread_id": effective_thread_id,
+                "user_context": user_context or {},
+            }
+        }
 
-        logger.info("Обработка сообщения агентом (thread_id: %s)", effective_thread_id)
+        logger.info(
+            "Обработка сообщения агентом (thread_id: %s, role: %s)",
+            effective_thread_id,
+            (user_context or {}).get("role", "guest"),
+        )
 
         try:
             result = await self._graph.ainvoke(
                 {"messages": [("user", clean_message)]},
                 config=config,
+                **({"context": {"reference_context": reference_context}} if reference_context else {}),
             )
         except Exception as exc:
+            exc_msg = str(exc) or repr(exc) or type(exc).__name__
             logger.error(
                 "Ошибка при вызове графа агента (thread_id: %s): %s",
                 effective_thread_id,
-                exc,
+                exc_msg,
+                exc_info=True,
             )
-            raise
+            raise RuntimeError(exc_msg) from exc
 
         messages = result.get("messages", [])
         if not messages:

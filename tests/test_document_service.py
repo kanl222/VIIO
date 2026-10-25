@@ -2,7 +2,7 @@
 
 from typing import Any
 import pytest
-from apiagent.services.document_service import DocumentService
+from apiagent.services.document_service import DocumentService, split_document_text
 
 
 class MockVectorStore:
@@ -76,3 +76,18 @@ def test_count_documents() -> None:
     assert service.count_documents() == 0
     service.index_document(title="Док 1", content="Короткий текст")
     assert service.count_documents() >= 1
+
+
+def test_word_chunks_preserve_overlap_and_line_breaks():
+    content = ' '.join(f'слово{i}' for i in range(1200)).replace('слово10 ', 'слово10\n\n')
+    chunks = split_document_text(content, 512, 100, 'words')
+    assert [len(chunk.split()) for chunk in chunks] == [512, 512, 376]
+    assert chunks[0].split()[-100:] == chunks[1].split()[:100]
+    assert '\n\n' in chunks[0]
+    assert chunks[-1].endswith('слово1199')
+
+
+@pytest.mark.parametrize('size,overlap', [(0, 0), (10, 10), (10, -1)])
+def test_invalid_chunk_settings_are_rejected(size, overlap):
+    with pytest.raises(ValueError):
+        split_document_text('Текст', size, overlap, 'words')

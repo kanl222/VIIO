@@ -44,12 +44,15 @@ class IVectorStore(Protocol):
         """
         ...
 
-    def similarity_search(self, query: str, k: int = 4) -> list[Any]:
+    def similarity_search(
+        self, query: str, k: int = 4, filter: Any | None = None
+    ) -> list[Any]:
         """Поиск наиболее релевантных фрагментов по семантическому запросу.
 
         Args:
             query: Текстовый поисковый запрос пользователя.
             k: Максимальное количество возвращаемых релевантных фрагментов.
+            filter: Опциональный фильтр метаданных (например, qdrant models.Filter).
 
         Returns:
             Список найденных документов с текстом и метаданными.
@@ -70,7 +73,14 @@ class IDocumentService(Protocol):
     """Интерфейс сервиса управления документами базы знаний."""
 
     def index_document(
-        self, title: str, content: str, metadata: dict[str, Any] | None = None
+        self,
+        title: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        is_public: bool = False,
+        allowed_roles: list[str] | None = None,
+        allowed_departments: list[str] | None = None,
+        owner_id: str | None = None,
     ) -> DocumentMetadata:
         """Индексация документа с разбиением на чанки и записью в векторное хранилище.
 
@@ -78,6 +88,10 @@ class IDocumentService(Protocol):
             title: Заголовок или название документа.
             content: Полный текст документа.
             metadata: Дополнительные пользовательские метаданные (источник, автор и др.).
+            is_public: Общедоступен ли документ для всех пользователей компании.
+            allowed_roles: Список ролей, имеющих доступ к документу.
+            allowed_departments: Список подразделений/отделов, имеющих доступ.
+            owner_id: Идентификатор владельца/автора документа.
 
         Returns:
             Объект DocumentMetadata с результатом индексации.
@@ -97,12 +111,18 @@ class IDocumentService(Protocol):
 class IAgentService(Protocol):
     """Интерфейс сервиса оркестрации AI-агента."""
 
-    async def chat(self, message: str, thread_id: str | None = None) -> tuple[str, str]:
+    async def chat(
+        self,
+        message: str,
+        thread_id: str | None = None,
+        user_context: dict[str, Any] | None = None,
+    ) -> tuple[str, str]:
         """Отправка сообщения диалоговому агенту и получение ответа.
 
         Args:
             message: Текст входящего запроса пользователя.
             thread_id: Опциональный идентификатор существующей сессии диалога.
+            user_context: Контекст безопасности пользователя (user_id, role, departments).
 
         Returns:
             Кортеж (ответ_агента, thread_id_сессии).

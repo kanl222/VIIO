@@ -3,6 +3,8 @@
 from langchain_core.embeddings import FakeEmbeddings
 from qdrant_client import QdrantClient
 from apiagent.utils.vector_store import QdrantVectorStoreAdapter
+from apiagent.tools.search_tool import build_access_filter
+from langchain_core.documents import Document
 
 
 def test_qdrant_vector_store_adapter_in_memory() -> None:
@@ -51,3 +53,26 @@ def test_qdrant_vector_store_race_condition_already_exists(monkeypatch) -> None:
 
     # Метод не должен выбрасывать исключение
     adapter._ensure_collection()
+
+
+def test_acronym_title_search_boosts_exact_source_without_bypassing_acl(monkeypatch) -> None:
+    client = QdrantClient(":memory:")
+    adapter = QdrantVectorStoreAdapter(client, FakeEmbeddings(size=8), "acronym_collection")
+    adapter.add_texts(
+        ["Описание системы", "Секретный документ", "Общий регламент"],
+        [
+            {"title": "ИСЛО", "document_id": "public-system", "chunk_index": 0,
+             "is_public": False, "allowed_roles": ["employee"], "allowed_departments": []},
+            {"title": "ИСЛО", "document_id": "secret-system", "chunk_index": 0,
+             "is_public": False, "allowed_roles": ["admin"], "allowed_departments": []},
+            {"title": "Регламент", "document_id": "general", "chunk_index": 0,
+             "is_public": True, "allowed_roles": [], "allowed_departments": []},
+        ],
+    )
+    # Reproduce embeddings ranking a generic result first for a short acronym.
+    generic = Document(page_content="Общий регламент", metadata={"document_id": "general", "chunk_index": 0})
+    monkeypatch.setattr(adapter._store, "similarity_search", lambda **kwargs: [generic])
+    docs = adapter.similarity_search("Что такое ИСЛО?", k=3, filter=build_access_filter({"role": "employee", "departments": []}))
+    assert docs[0].metadata["document_id"] == "public-system"
+    assert all(doc.metadata["document_id"] != "secret-system" for doc in docs)
+    assert len({doc.metadata["document_id"] for doc in docs}) == len(docs)

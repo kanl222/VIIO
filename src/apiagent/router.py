@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 import anyio.to_thread
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from apiagent.config import Settings
@@ -30,6 +30,23 @@ class HealthResponse(BaseModel):
     documents_count: int = Field(description="Количество документов/чанков в базе знаний.")
 
 
+class UserContext(BaseModel):
+    """Схема контекста пользователя для разграничения доступа к знаниям (RBAC).
+
+    Attributes:
+        user_id: Идентификатор пользователя.
+        role: Роль пользователя в системе (например, 'admin', 'employee', 'guest').
+        departments: Список подразделений/отделов пользователя.
+    """
+
+    user_id: str | None = Field(default=None, description="Идентификатор пользователя.")
+    role: str = Field(default="employee", description="Роль пользователя в системе.")
+    departments: list[str] = Field(
+        default_factory=lambda: ["general"],
+        description="Список подразделений/отделов пользователя.",
+    )
+
+
 class DocumentCreateRequest(BaseModel):
     """Схема запроса на добавление документа в базу знаний.
 
@@ -37,11 +54,25 @@ class DocumentCreateRequest(BaseModel):
         title: Название или заголовок документа.
         content: Полный текст документа.
         metadata: Произвольные пользовательские метаданные.
+        is_public: Флаг публичной доступности документа для всех пользователей.
+        allowed_roles: Список ролей, имеющих доступ к документу.
+        allowed_departments: Список подразделений, имеющих доступ к документу.
+        owner_id: Идентификатор владельца/автора документа.
     """
 
     title: str = Field(..., min_length=1, description="Заголовок документа.")
     content: str = Field(..., min_length=1, description="Содержимое документа для индексации.")
     metadata: dict[str, Any] | None = Field(default=None, description="Дополнительные метаданные документа.")
+    is_public: bool = Field(default=False, description="Доступен ли документ публично для всех.")
+    allowed_roles: list[str] = Field(
+        default_factory=lambda: ["employee"],
+        description="Список ролей с правом доступа к документу.",
+    )
+    allowed_departments: list[str] = Field(
+        default_factory=lambda: ["general"],
+        description="Список подразделений с правом доступа к документу.",
+    )
+    owner_id: str | None = Field(default=None, description="Идентификатор владельца документа.")
 
 
 class DocumentCreateResponse(BaseModel):
@@ -66,10 +97,15 @@ class ChatRequest(BaseModel):
     Attributes:
         message: Текст вопроса или запроса пользователя.
         thread_id: Опциональный идентификатор существующей сессии диалога.
+        user_context: Контекст безопасности пользователя для фильтрации знаний (RBAC).
     """
 
     message: str = Field(..., min_length=1, description="Текст сообщения для агента.")
     thread_id: str | None = Field(default=None, description="Идентификатор сессии диалога.")
+    user_context: UserContext | None = Field(
+        default=None,
+        description="Контекст безопасности пользователя для фильтрации знаний.",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -100,6 +136,21 @@ def create_api_router(
         Сконфигурированный экземпляр APIRouter.
     """
     router = APIRouter()
+
+    def verify_internal_token(
+        x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+    ) -> None:
+        """Проверка секретного токена межсервисной аутентификации.
+
+        Raises:
+            HTTPException: 401 при несовпадении или отсутствии токена, если токен настроен.
+        """
+        if settings.internal_api_key:
+            if not x_internal_token or x_internal_token != settings.internal_api_key:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Недействительный или отсутствующий межсервисный токен (X-Internal-Token).",
+                )
 
     @router.get(
         "/health",
@@ -135,9 +186,10 @@ def create_api_router(
         status_code=status.HTTP_201_CREATED,
         summary="Добавление документа в базу знаний",
         tags=["Documents"],
+        dependencies=[Depends(verify_internal_token)],
     )
     async def create_document(request: DocumentCreateRequest) -> DocumentCreateResponse:
-        """Принимает документ, разбивает на чанки и индексирует в Qdrant."""
+        """Принимает документ, разбивает на чанки и индексирует в Qdrant с атрибутами доступа."""
         if not request.title.strip() or not request.content.strip():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -150,6 +202,10 @@ def create_api_router(
                 request.title,
                 request.content,
                 request.metadata,
+                request.is_public,
+                request.allowed_roles,
+                request.allowed_departments,
+                request.owner_id,
             )
             return DocumentCreateResponse(
                 document_id=result.document_id,
@@ -175,6 +231,7 @@ def create_api_router(
         status_code=status.HTTP_200_OK,
         summary="Отправка сообщения диалоговому агенту",
         tags=["Chat"],
+        dependencies=[Depends(verify_internal_token)],
     )
     async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         """Отправляет сообщение агенту LangGraph и возвращает ответ модели."""
@@ -188,6 +245,7 @@ def create_api_router(
             reply, thread_id = await agent_service.chat(
                 message=request.message,
                 thread_id=request.thread_id,
+                user_context=request.user_context.model_dump() if request.user_context else None,
             )
             return ChatResponse(reply=reply, thread_id=thread_id)
         except ValueError as exc:
@@ -196,10 +254,11 @@ def create_api_router(
                 detail=str(exc),
             ) from exc
         except Exception as exc:
-            logger.error("Ошибка при обработке сообщения агентом: %s", exc)
+            exc_msg = str(exc) or repr(exc) or type(exc).__name__
+            logger.error("Ошибка при обработке сообщения агентом: %s", exc_msg, exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Ошибка взаимодействия с агентом: {exc}",
+                detail=f"Ошибка взаимодействия с агентом: {exc_msg}",
             ) from exc
 
     return router

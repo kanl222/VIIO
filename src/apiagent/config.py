@@ -5,7 +5,7 @@
 """
 
 from typing import Literal
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,12 @@ class Settings(BaseSettings):
         ollama_embedding_model: Имя модели для формирования эмбеддингов в Ollama.
         qdrant_url: URL векторного хранилища Qdrant.
         qdrant_collection_name: Имя коллекции в Qdrant для хранения документов.
+        postgres_host: Хост для подключения к PostgreSQL.
+        postgres_port: Порт для подключения к PostgreSQL.
+        postgres_db: Имя базы данных агента.
+        postgres_user: Пользователь базы данных PostgreSQL.
+        postgres_password: Пароль пользователя PostgreSQL.
+        internal_api_key: Секретный токен для межсервисной аутентификации (X-Internal-Token).
         api_host: Хост для запуска HTTP сервера FastAPI.
         api_port: Порт для запуска HTTP сервера FastAPI.
     """
@@ -37,6 +43,18 @@ class Settings(BaseSettings):
         default="lmstudio",
         description="Активный провайдер языковых моделей: 'lmstudio' или 'ollama'.",
     )
+
+    coding_agent_enabled: bool = True
+    coding_model: str | None = None
+    coding_allowed_roles: list[str] = Field(default_factory=lambda: ["programmer", "admin"])
+    coding_context_max_chars: int = Field(default=6000, ge=1000, le=24000)
+    # Independent generation budgets for the consultant and text-only coder.
+    chat_temperature: float = Field(default=0.0, ge=0, le=2)
+    chat_top_p: float = Field(default=1.0, gt=0, le=1)
+    chat_max_tokens: int = Field(default=2048, ge=128, le=32768)
+    coding_temperature: float = Field(default=0.0, ge=0, le=2)
+    coding_top_p: float = Field(default=1.0, gt=0, le=1)
+    coding_max_tokens: int = Field(default=4096, ge=128, le=32768)
 
     # Настройки LM Studio (OpenAI-compatible)
     lmstudio_base_url: str = Field(
@@ -79,6 +97,44 @@ class Settings(BaseSettings):
         default="knowledge_base",
         description="Название коллекции векторов в Qdrant.",
     )
+    # Настройки PostgreSQL для хранения состояния агента (LangGraph Checkpointer)
+    rag_chunk_unit: Literal["characters", "words"] = "characters"
+    rag_chunk_size: int = Field(default=500, gt=0)
+    rag_chunk_overlap: int = Field(default=50, ge=0)
+
+    @model_validator(mode="after")
+    def validate_chunk_overlap(self) -> "Settings":
+        if self.rag_chunk_overlap >= self.rag_chunk_size:
+            raise ValueError("RAG_CHUNK_OVERLAP должен быть меньше RAG_CHUNK_SIZE")
+        return self
+
+    postgres_host: str = Field(
+        default="localhost",
+        description="Хост для подключения к PostgreSQL.",
+    )
+    postgres_port: int = Field(
+        default=5432,
+        ge=1,
+        le=65535,
+        description="Порт для подключения к PostgreSQL.",
+    )
+    postgres_db: str = Field(
+        default="agent_db",
+        description="Имя базы данных агента.",
+    )
+    postgres_user: str = Field(
+        default="postgres",
+        description="Пользователь базы данных PostgreSQL.",
+    )
+    postgres_password: str = Field(
+        default="postgres",
+        description="Пароль пользователя PostgreSQL.",
+    )
+    internal_api_key: str | None = Field(
+        default=None,
+        description="Секретный токен для межсервисной аутентификации (X-Internal-Token).",
+    )
+
     api_host: str = Field(
         default="0.0.0.0",
         description="Сетевой интерфейс для привязки FastAPI сервера.",
