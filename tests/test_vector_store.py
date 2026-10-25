@@ -31,3 +31,23 @@ def test_qdrant_vector_store_adapter_in_memory() -> None:
     results = adapter.similarity_search("возврат", k=2)
     assert len(results) == 2
     assert any("возврат" in doc.page_content.lower() for doc in results)
+
+
+def test_qdrant_vector_store_race_condition_already_exists(monkeypatch) -> None:
+    """Проверка корректной обработки ситуации, когда коллекция уже создана параллельным потоком."""
+    client = QdrantClient(":memory:")
+    embeddings = FakeEmbeddings(size=8)
+    adapter = QdrantVectorStoreAdapter(
+        client=client,
+        embeddings=embeddings,
+        collection_name="race_collection",
+    )
+
+    # Симулируем, что collection_exists вернул False, но create_collection выбросил ошибку 'already exists'
+    def fake_create_collection(*args, **kwargs):
+        raise ValueError("Collection race_collection already exists")
+
+    monkeypatch.setattr(client, "create_collection", fake_create_collection)
+
+    # Метод не должен выбрасывать исключение
+    adapter._ensure_collection()

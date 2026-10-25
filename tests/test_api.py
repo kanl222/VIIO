@@ -134,3 +134,31 @@ def test_chat_endpoint_service_error_handling() -> None:
 
     response = custom_client.post("/api/v1/chat", json={"message": "Привет"})
     assert response.status_code in (500, 503)
+
+
+def test_create_document_uses_run_sync(monkeypatch) -> None:
+    """Проверка, что вызов index_document делегируется в anyio.to_thread.run_sync."""
+    import anyio.to_thread
+
+    run_sync_called = []
+    original_run_sync = anyio.to_thread.run_sync
+
+    async def fake_run_sync(func, *args, **kwargs):
+        run_sync_called.append(func)
+        return await original_run_sync(func, *args, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", fake_run_sync)
+
+    doc_svc = MockDocumentService()
+    app = create_app(
+        settings=Settings(),
+        agent_service=MockAgentService(),
+        document_service=doc_svc,
+    )
+    test_client = TestClient(app)
+    response = test_client.post(
+        "/api/v1/documents", json={"title": "Тест", "content": "Контент"}
+    )
+    assert response.status_code == 201
+    assert len(run_sync_called) == 1
+    assert run_sync_called[0] == doc_svc.index_document

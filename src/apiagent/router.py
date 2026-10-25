@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -107,7 +108,7 @@ def create_api_router(
     async def get_health() -> HealthResponse:
         """Возвращает статус доступности сервиса и число проиндексированных фрагментов."""
         try:
-            doc_count = document_service.count_documents()
+            doc_count = await anyio.to_thread.run_sync(document_service.count_documents)
             return HealthResponse(
                 status="healthy",
                 model=settings.ollama_model,
@@ -136,10 +137,11 @@ def create_api_router(
             )
 
         try:
-            result = document_service.index_document(
-                title=request.title,
-                content=request.content,
-                metadata=request.metadata,
+            result = await anyio.to_thread.run_sync(
+                document_service.index_document,
+                request.title,
+                request.content,
+                request.metadata,
             )
             return DocumentCreateResponse(
                 document_id=result.document_id,

@@ -59,17 +59,26 @@ class QdrantVectorStoreAdapter(IVectorStore):
                 )
                 sample_embedding = self._embeddings.embed_query("ping")
                 vector_size = len(sample_embedding)
-                self._client.create_collection(
-                    collection_name=self._collection_name,
-                    vectors_config=models.VectorParams(
-                        size=vector_size, distance=models.Distance.COSINE
-                    ),
-                )
-                logger.info(
-                    "Коллекция %s создана с размерностью векторов %d",
-                    self._collection_name,
-                    vector_size,
-                )
+                try:
+                    self._client.create_collection(
+                        collection_name=self._collection_name,
+                        vectors_config=models.VectorParams(
+                            size=vector_size, distance=models.Distance.COSINE
+                        ),
+                    )
+                    logger.info(
+                        "Коллекция %s создана с размерностью векторов %d",
+                        self._collection_name,
+                        vector_size,
+                    )
+                except Exception as create_exc:
+                    if "already exists" in str(create_exc).lower():
+                        logger.info(
+                            "Коллекция %s уже была создана параллельным процессом",
+                            self._collection_name,
+                        )
+                    else:
+                        raise
         except Exception as exc:
             logger.error("Ошибка при проверке/создании коллекции %s: %s", self._collection_name, exc)
             raise
