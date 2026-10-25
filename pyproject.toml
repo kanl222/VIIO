@@ -13,6 +13,7 @@ dependencies = [
     "langchain>=1.4.7",
     "langchain-ollama>=1.1.0",
     "langchain-qdrant>=1.1.0",
+    "langchain-text-splitters>=1.1.3",
     "langgraph>=1.2.17",
     "pydantic-settings>=2.16.1",
     "pytest>=9.1.1",

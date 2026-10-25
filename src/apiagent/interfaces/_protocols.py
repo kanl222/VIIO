@@ -1,0 +1,110 @@
+"""Протоколы и абстракции микросервиса APIAgent.
+
+Определяет интерфейсы для инверсии зависимостей (DIP) и разделения интерфейсов (ISP):
+IVectorStore, IDocumentService, IAgentService, а также схемы данных документов.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Protocol, runtime_checkable
+from pydantic import BaseModel, Field
+
+
+class DocumentMetadata(BaseModel):
+    """Метаданные проиндексированного документа.
+
+    Attributes:
+        document_id: Уникальный идентификатор документа.
+        title: Заголовок документа.
+        chunks_count: Количество текстовых фрагментов (чанков), на которые был разбит документ.
+        status: Текущий статус обработки документа ("indexed").
+    """
+
+    document_id: str = Field(description="Уникальный идентификатор документа.")
+    title: str = Field(description="Заголовок документа.")
+    chunks_count: int = Field(description="Число фрагментов, сохраненных в векторной базе.")
+    status: str = Field(default="indexed", description="Статус индексации документа.")
+
+
+@runtime_checkable
+class IVectorStore(Protocol):
+    """Интерфейс адаптера векторного хранилища эмбеддингов."""
+
+    def add_texts(
+        self, texts: list[str], metadatas: list[dict[str, Any]] | None = None
+    ) -> list[str]:
+        """Добавление фрагментов текста и связанных метаданных в векторное хранилище.
+
+        Args:
+            texts: Список текстовых фрагментов для сохранения.
+            metadatas: Список словарей с метаданными, соответствующими каждому фрагменту.
+
+        Returns:
+            Список строковых идентификаторов добавленных записей в хранилище.
+        """
+        ...
+
+    def similarity_search(self, query: str, k: int = 4) -> list[Any]:
+        """Поиск наиболее релевантных фрагментов по семантическому запросу.
+
+        Args:
+            query: Текстовый поисковый запрос пользователя.
+            k: Максимальное количество возвращаемых релевантных фрагментов.
+
+        Returns:
+            Список найденных документов с текстом и метаданными.
+        """
+        ...
+
+    def count(self) -> int:
+        """Получение общего количества векторных записей в хранилище.
+
+        Returns:
+            Число документов/фрагментов в коллекции.
+        """
+        ...
+
+
+@runtime_checkable
+class IDocumentService(Protocol):
+    """Интерфейс сервиса управления документами базы знаний."""
+
+    def index_document(
+        self, title: str, content: str, metadata: dict[str, Any] | None = None
+    ) -> DocumentMetadata:
+        """Индексация документа с разбиением на чанки и записью в векторное хранилище.
+
+        Args:
+            title: Заголовок или название документа.
+            content: Полный текст документа.
+            metadata: Дополнительные пользовательские метаданные (источник, автор и др.).
+
+        Returns:
+            Объект DocumentMetadata с результатом индексации.
+        """
+        ...
+
+    def count_documents(self) -> int:
+        """Получение количества фрагментов документов в базе знаний.
+
+        Returns:
+            Общее число проиндексированных фрагментов.
+        """
+        ...
+
+
+@runtime_checkable
+class IAgentService(Protocol):
+    """Интерфейс сервиса оркестрации AI-агента."""
+
+    async def chat(self, message: str, thread_id: str | None = None) -> tuple[str, str]:
+        """Отправка сообщения диалоговому агенту и получение ответа.
+
+        Args:
+            message: Текст входящего запроса пользователя.
+            thread_id: Опциональный идентификатор существующей сессии диалога.
+
+        Returns:
+            Кортеж (ответ_агента, thread_id_сессии).
+        """
+        ...
