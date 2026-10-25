@@ -1,0 +1,302 @@
+[
+  {
+    "filename": "1081353_3b502281894041cdabf550db218c77ec-161026-1012-54.pdf",
+    "title": "Инструкция по работе с программой по учеткам",
+    "sha256": "9e622785bc75c3c847c0c1ab90109bdd17115786ecae7c3ed94468e133890102",
+    "pages": 3,
+    "characters": 2186,
+    "document_id": "doc-364c3e98",
+    "chunks_count": 6,
+    "status": "indexed"
+  },
+  {
+    "filename": "1081494_f317c68a0db14406b5e43b8483107f15-161026-1012-56.pdf",
+    "title": "Обновление палат отделений из ЕЦП в",
+    "sha256": "31e40986d0be9b7e310fbd5252952ba5d0c987926eff5a0e52e3434c8c3f11ba",
+    "pages": 2,
+    "characters": 723,
+    "document_id": "doc-b14e696d",
+    "chunks_count": 3,
+    "status": "indexed"
+  },
+  {
+    "filename": "132251652_fb31348ecf814b18817b12c73b7c21aa-161026-1011-32.pdf",
+    "title": "Шаблоны. Регистр. ПФР. Инвалиды.",
+    "sha256": "18a7f754dcd45d13d9021ef15d7d7631f373d1a24b2a3f617c7c7d88e3ce17c4",
+    "pages": 3,
+    "characters": 5337,
+    "document_id": "doc-f184a49c",
+    "chunks_count": 13,
+    "status": "indexed"
+  },
+  {
+    "filename": "177963015_8b600573c1794a02b84e5b169ad9a4b3-161026-1001-8.pdf",
+    "title": "Registr.Выписка",
+    "sha256": "9d6cb547d552d69d64be3d15bc8f973bedfc6f65b43db301fdcf30d930ecf01f",
+    "pages": 3,
+    "characters": 3277,
+    "document_id": "doc-0cdc8776",
+    "chunks_count": 8,
+    "status": "indexed"
+  },
+  {
+    "filename": "179732493_92c9a6db4e5f4bc6ac05af5b27e16235-161026-1001-12.pdf",
+    "title": "registrTEMP.Выписка",
+    "sha256": "1cd7d1689a3a416a53f9626452c4adf596b5cae78ef98dc385835794a1ef8e12",
+    "pages": 3,
+    "characters": 3902,
+    "document_id": "doc-7eb870bb",
+    "chunks_count": 11,
+    "status": "indexed"
+  },
+  {
+    "filename": "179732505_5f131979be2046f58aebed3bbe18fc9b-161026-1010-22.pdf",
+    "title": "TestDataBase.Отпуск Online",
+    "sha256": "e0d2fb03e89ad54cdbdd7a11d4c5528427a7e8279cf848b6c060d114cc77ea22",
+    "pages": 5,
+    "characters": 8237,
+    "document_id": "doc-bdb176ab",
+    "chunks_count": 20,
+    "status": "indexed"
+  },
+  {
+    "filename": "179732507_dbf309859dbf45b988a05f1c08d84fcc-161026-1010-24.pdf",
+    "title": "TestDataBase.Платный отпуск",
+    "sha256": "da9675d274a9b4d8d2c221ecf17d7d0533ef0a167288b250183bdbbc6e396d0c",
+    "pages": 1,
+    "characters": 868,
+    "document_id": "doc-58d291e2",
+    "chunks_count": 2,
+    "status": "indexed"
+  },
+  {
+    "filename": "179732509_6b6fe11c157d404bb5a41265d0227782-161026-1010-26.pdf",
+    "title": "Шаблоны. Регистр. ВЗН",
+    "sha256": "02e73e8ab2f17fb8dd315344cfe05c9010557006d158707dc8ecf1b623793188",
+    "pages": 5,
+    "characters": 6640,
+    "document_id": "doc-c5acf357",
+    "chunks_count": 17,
+    "status": "indexed"
+  },
+  {
+    "filename": "183009318_f79e1a33fd9c4977a80d9e187071162e-161026-1002-14.pdf",
+    "title": "TestDataBase.Выписка",
+    "sha256": "724ff04a2707c82c47e6b4224e6cae675187887ff6ea421f560c2fdb1cba49a5",
+    "pages": 1,
+    "characters": 1474,
+    "document_id": "doc-6dcee819",
+    "chunks_count": 3,
+    "status": "indexed"
+  },
+  {
+    "filename": "185761795_39198dbb3ee7487e92b0c4d2a34aa210-161026-1011-28.pdf",
+    "title": "Шаблоны. Регистр. Орфанные",
+    "sha256": "59383b3a53e9b746e5bdad060130807a0e97895d11a6fb2147803e32b43684ec",
+    "pages": 3,
+    "characters": 2667,
+    "document_id": "doc-fc8976f7",
+    "chunks_count": 7,
+    "status": "indexed"
+  },
+  {
+    "filename": "188186625_1186368d131b47aba9ef672fb5fb4e61-161026-1010-18.pdf",
+    "title": "Registr.Ручные рецепты",
+    "sha256": "d21e0e645a2c01510815cbd116932e9f1e8a6df3ec99127bcb586f53b26c3be3",
+    "pages": 3,
+    "characters": 2219,
+    "document_id": "doc-7ca2f859",
+    "chunks_count": 6,
+    "status": "indexed"
+  },
+  {
+    "filename": "20119567_8618fb4c799c48d3a82c048062ed9e61-161026-1011-38.pdf",
+    "title": "ИС \"ЛО\"",
+    "sha256": "85b1b51d00c5212c47391c12964e47c2dc987f02eeb36342e83b91ab5efd8164",
+    "pages": 1,
+    "characters": 466,
+    "document_id": "doc-992e89ef",
+    "chunks_count": 1,
+    "status": "indexed"
+  },
+  {
+    "filename": "20119652_8b875996e6cb469bace160732f27705a-161026-1011-36.pdf",
+    "title": "Аномалии при подсчете Инвалидов на примере",
+    "sha256": "876a3b425a21b3d27dbab1ada700121b2554b52f69476167137e7b1f89c5e230",
+    "pages": 4,
+    "characters": 5424,
+    "document_id": "doc-5cc72500",
+    "chunks_count": 14,
+    "status": "indexed"
+  },
+  {
+    "filename": "236781649_2f231be56ade478d8efe2dfc4185a117-161026-0950-2.pdf",
+    "title": "Шаблоны",
+    "sha256": "43a5333edc2ead7ab86e45e8447ceb518a80fb0d17013f46aa3c80dc6c75cab2",
+    "pages": 2,
+    "characters": 1585,
+    "document_id": "doc-185a03b6",
+    "chunks_count": 5,
+    "status": "indexed"
+  },
+  {
+    "filename": "237994009_102c64fdc2e4473e9f8308547ade176d-161026-1011-30.pdf",
+    "title": "Шаблоны. Регистр. ПФР",
+    "sha256": "89657620eb9c60befb0b0483e774e2ecfb6f07564e3604fd8016b893cd525db7",
+    "pages": 3,
+    "characters": 5574,
+    "document_id": "doc-8864a143",
+    "chunks_count": 13,
+    "status": "indexed"
+  },
+  {
+    "filename": "247758849_6bc1a772c57c4814b6f55b3f049b9aa2-161026-1011-40.pdf",
+    "title": "Модуля формирования отчетов ИСЛО 2.0",
+    "sha256": "a90bdfde1c490702567867c3a0f79595ad0b8f4a54bbbf6a7181c8b97ff8c1e4",
+    "pages": 4,
+    "characters": 4462,
+    "document_id": "doc-674b51e5",
+    "chunks_count": 11,
+    "status": "indexed"
+  },
+  {
+    "filename": "263782402_50093db2942449dea1a54de625d698c2-161026-1010-20.pdf",
+    "title": "TestDataBase.Отпуск. Где и когда обслужен",
+    "sha256": "2104aea13018dcdf36ea646390e18b48755ea43bd6210e0ecd544e486573c300",
+    "pages": 1,
+    "characters": 1175,
+    "document_id": "doc-9a1955c5",
+    "chunks_count": 3,
+    "status": "indexed"
+  },
+  {
+    "filename": "263782408_02d7be8021e84adf85af4eeac091b71e-161026-1001-4.pdf",
+    "title": "Шаблон. Анализ выписанных и отпущенных",
+    "sha256": "d2d94c9925b0963b78bcccee4bcf41a9eb3387f09b588339744be882aed05d6b",
+    "pages": 3,
+    "characters": 4729,
+    "document_id": "doc-eeadacef",
+    "chunks_count": 12,
+    "status": "indexed"
+  },
+  {
+    "filename": "269975556_d4aa24d061284106a75092f78d31539e-161026-1001-6.pdf",
+    "title": "registrTEMP. Просмотр измененных обьектов в",
+    "sha256": "318a010a3aa2d3ce0c5f10d99e170853a1a18d77e3c63494f179a3e480f55ff4",
+    "pages": 1,
+    "characters": 619,
+    "document_id": "doc-a8eced2a",
+    "chunks_count": 2,
+    "status": "indexed"
+  },
+  {
+    "filename": "285278209_77cc1f49b73a4f63828bf22e5de55a5d-161026-1002-16.pdf",
+    "title": "TestDataBase. Выписка. Когда, кто, из какой Мо",
+    "sha256": "6bd3920a7c7410582e21c6e184fb34e70cf48c2ac43bc8db9b6fc933cc3b143b",
+    "pages": 1,
+    "characters": 514,
+    "document_id": "doc-fb7f9fb9",
+    "chunks_count": 2,
+    "status": "indexed"
+  },
+  {
+    "filename": "289144834_8f81f7d56574487fa3ec1c10e651eb22-161026-1001-10.pdf",
+    "title": "Registr. Доступные на выписку ЛС (DrugOpen)",
+    "sha256": "c7d48fca1419d831b383d68882f98cc186baedff8e8cf615462a551c5a20b5e6",
+    "pages": 2,
+    "characters": 2407,
+    "document_id": "doc-a1e5a22b",
+    "chunks_count": 6,
+    "status": "indexed"
+  },
+  {
+    "filename": "297107459_64a269aebaac4a62ad02643c0062e45b-161026-1011-34.pdf",
+    "title": "Шаблоны. Регистр. ПФР. Рецепты по инвалидам.",
+    "sha256": "2ed2d64be9cd5828d51c21e2af8a6a5fa95e9953cc5671aab997e39eb095f856",
+    "pages": 5,
+    "characters": 10987,
+    "document_id": "doc-8b5fd273",
+    "chunks_count": 28,
+    "status": "indexed"
+  },
+  {
+    "filename": "318275590_4400b997816a4287ac9cff5aab5b4d18-161026-1012-48.pdf",
+    "title": "Типы полей для отчетов SSRS",
+    "sha256": "8910752723e540231c5ba33e493f5afda10aa862468e33d248007c011a02ecd1",
+    "pages": 1,
+    "characters": 1818,
+    "document_id": "doc-fedda5c1",
+    "chunks_count": 4,
+    "status": "indexed"
+  },
+  {
+    "filename": "318275597_91c40b51cb3049f98018a21b8fba3675-161026-1012-46.pdf",
+    "title": "Создание нового отчета ИСЛО",
+    "sha256": "e0e2af420b052e65a2f75bd6fed46a80840ccc7930d519c9b660905cad81022d",
+    "pages": 5,
+    "characters": 6316,
+    "document_id": "doc-4b749434",
+    "chunks_count": 15,
+    "status": "indexed"
+  },
+  {
+    "filename": "323223565_e5ab6fb059894d6db2b1869b44629078-161026-1012-44.pdf",
+    "title": "Создание нового отчета SSRS",
+    "sha256": "f46ec521641bfb933542b86c8583cd71bb9e9723e51cbd372c964a03c22f7fd8",
+    "pages": 1,
+    "characters": 266,
+    "document_id": "doc-0b55291a",
+    "chunks_count": 1,
+    "status": "indexed"
+  },
+  {
+    "filename": "323223569_45105cd8f0cf455f987ad06d8a03b46d-161026-1011-42.pdf",
+    "title": "Добавление нового отчета в SSRSReport",
+    "sha256": "57ef7fdc1ae2b3897a38517693446af4f6de820d275653adce4c69e1a83abf4a",
+    "pages": 1,
+    "characters": 723,
+    "document_id": "doc-cbcd7191",
+    "chunks_count": 2,
+    "status": "indexed"
+  },
+  {
+    "filename": "323223571_3fa807f6adf842298e6742c02316ebce-161026-1012-50.pdf",
+    "title": "Ключевые файлы модуля",
+    "sha256": "4dae0cb8834f6e7e84c2455cf98f2c17d0a2db1e78f6c3cdbeebb2b3fbb24a73",
+    "pages": 1,
+    "characters": 997,
+    "document_id": "doc-0a759595",
+    "chunks_count": 3,
+    "status": "indexed"
+  },
+  {
+    "filename": "328335378_0049bd07648e4553a1275b3919cd9af0-161026-1012-52.pdf",
+    "title": "Плюсы ИС ЛО по сравнению с ЕЦП",
+    "sha256": "e5e783d0eab71a4bd3c4f390968a6b6981f1333984f0dd915375578d818ffa70",
+    "pages": 1,
+    "characters": 1953,
+    "document_id": "doc-aa5ff2fd",
+    "chunks_count": 5,
+    "status": "indexed"
+  },
+  {
+    "filename": "46694414_a8270945e8644f2490984e47a125cad0-161026-1012-60.pdf",
+    "title": "Фишечки",
+    "sha256": "ed324bf5af35857b797a0f7403ff1d63588e7aa89093d9b0853099be1d9ea109",
+    "pages": 1,
+    "characters": 1365,
+    "document_id": "doc-6e49efef",
+    "chunks_count": 3,
+    "status": "indexed"
+  },
+  {
+    "filename": "53149701_1785d21998994e4c92d01854ea5079f9-161026-1012-58.pdf",
+    "title": "Типы документов в ИС \"ЛО\"",
+    "sha256": "e2470f1d9ddfebcc243fce8821cd60ce781405201a1e1282542af2909d9fa8a1",
+    "pages": 1,
+    "characters": 852,
+    "document_id": "doc-b6b851d9",
+    "chunks_count": 2,
+    "status": "indexed"
+  }
+]

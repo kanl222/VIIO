@@ -1,0 +1,67 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: apiagent_qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      # The official image has Bash but no wget/curl. Check HTTP readiness directly.
+      test:
+        - CMD
+        - bash
+        - -ec
+        - 'exec 3<>/dev/tcp/127.0.0.1/6333; printf "GET /readyz HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r protocol status rest <&3; test "$$status" = 200'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  apiagent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: apiagent_service
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
+      - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
+      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-qwen/qwen3-4b-2507}
+      - LMSTUDIO_EMBEDDING_MODEL=${LMSTUDIO_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-knowledge_base}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - CODING_AGENT_ENABLED=${CODING_AGENT_ENABLED:-true}
+      - CODING_MODEL=${CODING_MODEL:-}
+      - CODING_ALLOWED_ROLES=${CODING_ALLOWED_ROLES:-["programmer","admin"]}
+      - CODING_CONTEXT_MAX_CHARS=${CODING_CONTEXT_MAX_CHARS:-6000}
+      - CHAT_TEMPERATURE=${CHAT_TEMPERATURE:-0.0}
+      - CHAT_TOP_P=${CHAT_TOP_P:-1.0}
+      - CHAT_MAX_TOKENS=${CHAT_MAX_TOKENS:-2048}
+      - CODING_TEMPERATURE=${CODING_TEMPERATURE:-0.0}
+      - CODING_TOP_P=${CODING_TOP_P:-1.0}
+      - CODING_MAX_TOKENS=${CODING_MAX_TOKENS:-4096}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:

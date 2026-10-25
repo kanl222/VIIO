@@ -1,10 +1,48 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Environment variables
+.env
+.env.local
+.env.*.local
 
-# Virtual environments
-.venv
+# Storage and runtime keys
+coding-workspace/
+qdrant_storage/
+data/
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+env/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Generated builds and local agent/test artifacts
+dist/
+dist-server/
+WebChat/server/**/*.js
+tmp/
+.superpowers/
+.impeccable/hook.cache.json
+APIAgent/tests/repro_bug.py
+APIAgent/tests/scratch_debug.py

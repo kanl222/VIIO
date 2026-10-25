@@ -1,0 +1,155 @@
+import { Router, type RequestHandler } from 'express';
+import type pg from 'pg';
+import { getPool, checkDbHealth } from '../db.js';
+import { createAuthMiddleware, type AuthenticatedRequest } from '../auth.js';
+
+const roles = new Set(['employee', 'manager', 'programmer', 'admin']);
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const userColumns = 'id, username, role, departments, created_at';
+
+function stringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 30 && value.every(
+    item => typeof item === 'string' && item.trim().length > 0 && item.length <= 64
+  );
+}
+
+export function createAdminRouter(
+  poolProvider: () => pg.Pool = getPool,
+  fetchFn: typeof fetch = fetch,
+  agentUrl: () => string = () => process.env.AGENTAI_URL || 'http://127.0.0.1:8000'
+): Router {
+  const router = Router();
+  router.use(createAuthMiddleware(poolProvider));
+  router.use(((req: AuthenticatedRequest, res, next) => {
+    if (req.user?.role !== 'admin') {
+      res.status(403).json({ detail: 'Этот раздел доступен только администратору.' });
+      return;
+    }
+    next();
+  }) as RequestHandler);
+
+  router.get('/overview', async (_req, res) => {
+    try {
+      const pool = poolProvider();
+      const [counts, database, agent] = await Promise.all([
+        pool.query(`SELECT
+          (SELECT COUNT(*)::int FROM users) AS users,
+          (SELECT COUNT(*)::int FROM conversations) AS conversations,
+          (SELECT COUNT(*)::int FROM messages) AS messages,
+          (SELECT COUNT(*)::int FROM sessions WHERE expires_at > CURRENT_TIMESTAMP) AS sessions`),
+        checkDbHealth(pool),
+        fetchFn(`${agentUrl().replace(/\/+$/, '')}/health`, { signal: AbortSignal.timeout(5000) })
+          .then(async response => response.ok ? await response.json() as {
+            status: string; model?: string; provider?: string; documents_count?: number;
+          } : null)
+          .catch(() => null),
+      ]);
+      res.json({
+        counts: counts.rows[0], database,
+        agent: agent ? {
+          healthy: agent.status === 'healthy', model: agent.model,
+          provider: agent.provider, chunks: agent.documents_count,
+        } : { healthy: false },
+        checked_at: new Date().toISOString(),
+      });
+    } catch {
+      res.status(503).json({ detail: 'Не удалось загрузить состояние системы. Повторите запрос.' });
+    }
+  });
+
+  router.get('/users', async (req, res) => {
+    const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 64) : '';
+    const page = Math.max(1, Math.min(10000, Number(req.query.page) || 1));
+    if (!Number.isInteger(page)) {
+      res.status(400).json({ detail: 'Некорректный номер страницы.' });
+      return;
+    }
+    try {
+      const pool = poolProvider();
+      // Literal substring search: user input does not become a wildcard expression.
+      const [users, total] = await Promise.all([
+        pool.query(`SELECT ${userColumns} FROM users
+          WHERE strpos(lower(username), lower($1)) > 0
+          ORDER BY created_at DESC, id LIMIT 20 OFFSET $2`, [search, (page - 1) * 20]),
+        pool.query(`SELECT COUNT(*)::int AS count FROM users
+          WHERE strpos(lower(username), lower($1)) > 0`, [search]),
+      ]);
+      res.json({ users: users.rows, total: total.rows[0].count, page, page_size: 20 });
+    } catch {
+      res.status(503).json({ detail: 'Не удалось загрузить пользователей. Повторите запрос.' });
+    }
+  });
+
+  router.patch('/users/:id', async (req: AuthenticatedRequest, res) => {
+    const { role, departments } = req.body || {};
+    if (!uuid.test(String(req.params.id)) || !roles.has(role) || !stringList(departments)) {
+      res.status(400).json({ detail: 'Укажите корректную роль и список отделов (до 30 значений).' });
+      return;
+    }
+    let client: pg.PoolClient | undefined;
+    try {
+      client = await poolProvider().connect();
+      await client.query('BEGIN');
+      await client.query("SET LOCAL statement_timeout = '5s'");
+      // Serialize role changes so two administrators cannot demote each other concurrently.
+      await client.query('SELECT pg_advisory_xact_lock(864210)');
+      const actor = await client.query('SELECT role FROM users WHERE id = $1', [req.user!.id]);
+      if (actor.rows[0]?.role !== 'admin') {
+        await client.query('ROLLBACK');
+        res.status(403).json({ detail: 'Права администратора изменились. Обновите страницу.' });
+        return;
+      }
+      const target = await client.query('SELECT role FROM users WHERE id = $1', [req.params.id]);
+      if (!target.rows.length) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ detail: 'Пользователь не найден.' });
+        return;
+      }
+      if (target.rows[0].role === 'admin' && role !== 'admin') {
+        const admins = await client.query("SELECT COUNT(*)::int AS count FROM users WHERE role = 'admin'");
+        if (admins.rows[0].count <= 1) {
+          await client.query('ROLLBACK');
+          res.status(409).json({ detail: 'В системе должен остаться хотя бы один администратор.' });
+          return;
+        }
+      }
+      const updated = await client.query(`UPDATE users SET role = $1, departments = $2
+        WHERE id = $3 RETURNING ${userColumns}`, [role, [...new Set(departments.map(d => d.trim()))], req.params.id]);
+      await client.query('COMMIT');
+      res.json({ user: updated.rows[0] });
+    } catch {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      res.status(503).json({ detail: 'Не удалось сохранить права. Повторите запрос.' });
+    } finally {
+      client?.release();
+    }
+  });
+
+  router.post('/documents', async (req: AuthenticatedRequest, res) => {
+    const { title, content, is_public = false, allowed_roles = ['employee'], allowed_departments = ['general'] } = req.body || {};
+    if (typeof title !== 'string' || !title.trim() || title.length > 255 ||
+        typeof content !== 'string' || !content.trim() || content.length > 500000 ||
+        typeof is_public !== 'boolean' || !stringList(allowed_roles) || !stringList(allowed_departments)) {
+      res.status(400).json({ detail: 'Проверьте название, текст (до 500 000 символов) и права доступа.' });
+      return;
+    }
+    try {
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        signal: AbortSignal.timeout(120000),
+        body: JSON.stringify({ title: title.trim(), content: content.trim(), is_public,
+          allowed_roles, allowed_departments, owner_id: req.user!.id }),
+      });
+      if (!response.ok) {
+        res.status(502).json({ detail: 'Не удалось добавить документ. Проверьте состояние агента и повторите запрос.' });
+        return;
+      }
+      const data = await response.json() as { document_id: string; title: string; chunks_count: number; status: string };
+      res.status(201).json({ document_id: data.document_id, title: data.title, chunks_count: data.chunks_count, status: data.status });
+    } catch {
+      res.status(502).json({ detail: 'Сервис базы знаний недоступен или не успел ответить. Перед повторной отправкой проверьте состояние сервиса.' });
+    }
+  });
+  return router;
+}
