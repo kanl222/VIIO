@@ -56,7 +56,7 @@ class MockDocumentService(IDocumentService):
 @pytest.fixture
 def client() -> TestClient:
     """Фикстура тестового клиента FastAPI с мок-сервисами."""
-    settings = Settings(ollama_model="test-llama")
+    settings = Settings(lmstudio_model="test-model", llm_provider="lmstudio")
     agent_svc = MockAgentService()
     doc_svc = MockDocumentService()
     app = create_app(
@@ -73,7 +73,8 @@ def test_health_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["model"] == "test-llama"
+    assert data["model"] == "test-model"
+    assert data["provider"] == "lmstudio"
     assert data["documents_count"] == 5
 
 

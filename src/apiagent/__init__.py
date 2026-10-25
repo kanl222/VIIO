@@ -1,7 +1,7 @@
 """Composition Root микросервиса APIAgent.
 
 Является единственным местом сборки графа зависимостей (DI), инициализации FastAPI
-приложения и точкой входа запуска микросервиса.
+приложения и точкой входа запуска микросервиса. Поддерживает LM Studio и Ollama.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from fastapi import FastAPI
 from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langgraph.checkpoint.memory import MemorySaver
 from qdrant_client import QdrantClient
 
@@ -43,15 +44,25 @@ def create_app(
 
     if document_service is None or agent_service is None:
         logger.info(
-            "Инициализация инфраструктурных компонентов: Qdrant (%s), Ollama (%s)",
+            "Инициализация инфраструктурных компонентов: Qdrant (%s), Провайдер LLM (%s)",
             app_settings.qdrant_url,
-            app_settings.ollama_base_url,
+            app_settings.llm_provider,
         )
         qdrant_client = QdrantClient(url=app_settings.qdrant_url)
-        embeddings = OllamaEmbeddings(
-            base_url=app_settings.ollama_base_url,
-            model=app_settings.ollama_embedding_model,
-        )
+
+        if app_settings.llm_provider == "lmstudio":
+            embeddings = OpenAIEmbeddings(
+                base_url=app_settings.lmstudio_base_url,
+                api_key=app_settings.lmstudio_api_key,
+                model=app_settings.lmstudio_embedding_model,
+                check_embedding_ctx_length=False,
+            )
+        else:
+            embeddings = OllamaEmbeddings(
+                base_url=app_settings.ollama_base_url,
+                model=app_settings.ollama_embedding_model,
+            )
+
         vector_store = QdrantVectorStoreAdapter(
             client=qdrant_client,
             embeddings=embeddings,
@@ -62,10 +73,19 @@ def create_app(
             document_service = DocumentService(vector_store=vector_store)
 
         if agent_service is None:
-            llm = ChatOllama(
-                base_url=app_settings.ollama_base_url,
-                model=app_settings.ollama_model,
-            )
+            if app_settings.llm_provider == "lmstudio":
+                llm = ChatOpenAI(
+                    base_url=app_settings.lmstudio_base_url,
+                    api_key=app_settings.lmstudio_api_key,
+                    model=app_settings.lmstudio_model,
+                    temperature=0.0,
+                )
+            else:
+                llm = ChatOllama(
+                    base_url=app_settings.ollama_base_url,
+                    model=app_settings.ollama_model,
+                )
+
             search_tool = create_knowledge_search_tool(vector_store=vector_store)
             checkpointer = MemorySaver()
             graph = build_agent_graph(
@@ -77,7 +97,7 @@ def create_app(
 
     app = FastAPI(
         title="APIAgent",
-        description="LangGraph RAG Agent REST API с Qdrant и Docker",
+        description="LangGraph RAG Agent REST API с Qdrant и поддержкой LM Studio / Ollama",
         version="0.1.0",
     )
 

@@ -19,11 +19,13 @@ class HealthResponse(BaseModel):
 
     Attributes:
         status: Текущий статус сервиса ("healthy").
-        model: Имя используемой LLM модели Ollama.
+        provider: Активный провайдер языковых моделей ("lmstudio" или "ollama").
+        model: Имя используемой LLM модели.
         documents_count: Число проиндексированных фрагментов документов.
     """
 
     status: str = Field(default="healthy", description="Статус работоспособности сервиса.")
+    provider: str = Field(default="lmstudio", description="Активный провайдер языковых моделей.")
     model: str = Field(description="Наименование активной языковой модели.")
     documents_count: int = Field(description="Количество документов/чанков в базе знаний.")
 
@@ -109,9 +111,15 @@ def create_api_router(
         """Возвращает статус доступности сервиса и число проиндексированных фрагментов."""
         try:
             doc_count = await anyio.to_thread.run_sync(document_service.count_documents)
+            active_model = (
+                settings.lmstudio_model
+                if settings.llm_provider == "lmstudio"
+                else settings.ollama_model
+            )
             return HealthResponse(
                 status="healthy",
-                model=settings.ollama_model,
+                provider=settings.llm_provider,
+                model=active_model,
                 documents_count=doc_count,
             )
         except Exception as exc:

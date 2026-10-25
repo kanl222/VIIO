@@ -1,6 +1,6 @@
 # APIAgent: LangGraph RAG Agent REST API
 
-Масштабируемый REST API микросервис на FastAPI для диалогового AI-агента на базе LangGraph с поддержкой сессионной памяти, векторного хранилища Qdrant, локальных моделей Ollama и развертыванием в Docker.
+Масштабируемый REST API микросервис на FastAPI для диалогового AI-агента на базе LangGraph с поддержкой сессионной памяти, векторного хранилища Qdrant, локальных моделей **LM Studio** (или Ollama) и развертыванием в Docker.
 
 ---
 
@@ -13,9 +13,9 @@
   - `graph_builder.py` — компиляция графа состояний LangGraph (`StateGraph`) с поддержкой инструментов и `MemorySaver` checkpointer.
   - `agent_service.py` — оркестрация сессий диалога и асинхронное взаимодействие с агентом.
 - **`src/apiagent/tools/`** — инструменты LangChain (`search_knowledge_base`) для обращения к базе знаний.
-- **`src/apiagent/utils/`** — инфраструктурные адаптеры (`QdrantVectorStoreAdapter`) с автосозданием коллекции (cold start).
-- **`src/apiagent/router.py`** — тонкий HTTP-роутер с Pydantic DTO и обработкой ошибок.
-- **`src/apiagent/__init__.py`** — Composition Root (сборка DI-графа и фабрика `create_app`).
+- **`src/apiagent/utils/`** — инфраструктурные адаптеры (`QdrantVectorStoreAdapter`) с автосозданием коллекции (cold start) и защитой от гонок.
+- **`src/apiagent/router.py`** — тонкий HTTP-роутер с Pydantic DTO, неблокирующим вызовом через `anyio.to_thread` и обработкой ошибок.
+- **`src/apiagent/__init__.py`** — Composition Root (сборка DI-графа с поддержкой провайдеров **LM Studio** и **Ollama**).
 - **`src/apiagent/runner.py`** — запуск ASGI-сервера Uvicorn.
 
 ---
@@ -24,11 +24,13 @@
 
 - Python `>= 3.12`
 - Менеджер пакетов [uv](https://docs.astral.sh/uv/)
-- Запущенный локальный экземпляр [Ollama](https://ollama.com/) с загруженными моделями:
+- Запущенный локальный сервер [LM Studio](https://lmstudio.ai/) с моделями чата и эмбеддингов:
   ```bash
-  ollama pull llama3.1
-  ollama pull nomic-embed-text
+  lms server start
   ```
+  *Примеры установленных локальных моделей:*
+  - LLM: `qwen/qwen3-4b-2507`, `google/gemma-4-e2b`, `qwen/qwen3.5-9b`
+  - Embeddings: `text-embedding-nomic-embed-text-v1.5`, `text-embedding-multilingual-e5-base`
 - Векторная база данных Qdrant (локально или через Docker)
 
 ---
@@ -40,27 +42,32 @@
    cd APIAgent
    ```
 
-2. **Создание файла переменных окружения:**
+2. **Запуск сервера LM Studio:**
+   ```bash
+   lms server start
+   ```
+
+3. **Создание файла конфигурации `.env`:**
    ```bash
    cp .env.example .env
    ```
 
-3. **Установка зависимостей с помощью `uv`:**
+4. **Установка зависимостей с помощью `uv`:**
    ```bash
    uv sync
    ```
 
-4. **Запуск сервиса:**
+5. **Запуск сервиса APIAgent:**
    ```bash
    uv run apiagent
    ```
-   Сервер запустится по адресу: `http://localhost:8000`. Интерактивная документация Swagger доступна по адресу `http://localhost:8000/docs`.
+   Сервер запустится по адресу: `http://localhost:8000`. Интерактивная Swagger-документация: `http://localhost:8000/docs`.
 
 ---
 
 ## Запуск в Docker Compose
 
-Для запуска сервиса вместе с Qdrant выполните:
+Для запуска сервиса вместе с контейнером Qdrant выполните:
 
 ```bash
 docker compose up -d --build
@@ -68,7 +75,7 @@ docker compose up -d --build
 
 - Сервис Qdrant доступен на порту `6333`
 - Сервис APIAgent доступен на порту `8000`
-- Подключение к хостовой Ollama настроено через `host.docker.internal:11434`
+- Подключение к хостовому серверу LM Studio настроено через `http://host.docker.internal:1234/v1`
 
 Остановка контейнеров:
 ```bash
@@ -90,7 +97,8 @@ curl -X GET http://localhost:8000/health
 ```json
 {
   "status": "healthy",
-  "model": "llama3.1",
+  "provider": "lmstudio",
+  "model": "qwen/qwen3-4b-2507",
   "documents_count": 12
 }
 ```
