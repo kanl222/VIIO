@@ -65,6 +65,7 @@ services:
       - RAG_CHUNK_UNIT=${RAG_CHUNK_UNIT:-characters}
       - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
       - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-50}
+      - RAG_CONTEXT_MAX_CHARS=${RAG_CONTEXT_MAX_CHARS:-12000}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=agent_db
@@ -83,6 +84,16 @@ services:
       - CODING_TEMPERATURE=${CODING_TEMPERATURE:-0.0}
       - CODING_TOP_P=${CODING_TOP_P:-1.0}
       - CODING_MAX_TOKENS=${CODING_MAX_TOKENS:-4096}
+      - PGSQL_ENABLED=${PGSQL_ENABLED:-false}
+      - PGSQL_MCP_URL=${PGSQL_MCP_URL:-http://postgres-tool:8000/sse}
+      - PGSQL_MAX_ROWS=${PGSQL_MAX_ROWS:-100}
+      - PGSQL_MAX_CHARS=${PGSQL_MAX_CHARS:-12000}
+      - PGSQL_TIMEOUT_SECONDS=${PGSQL_TIMEOUT_SECONDS:-40}
+      - PDF_ENGINE=${PDF_ENGINE:-auto}
+      - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+      - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
+      - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+      - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -139,6 +150,49 @@ services:
     networks:
       - viio_net
 
+
+  postgres-tool:
+    image: crystaldba/postgres-mcp@sha256:dbbd346860d29f1543e991f30f3284bf4ab5f096d049ecc3426528f20b1b6e6b
+    profiles: [postgres]
+    entrypoint: [python, /viio/start.py]
+    environment:
+      - PGSQL_HOST=${PGSQL_HOST:-host.docker.internal}
+      - PGSQL_PORT=${PGSQL_PORT:-5432}
+      - PGSQL_DATABASE=${PGSQL_DATABASE:-}
+      - PGSQL_USER=${PGSQL_USER:-}
+      - PGSQL_PASSWORD=${PGSQL_PASSWORD:-}
+      - PGSQL_SSLMODE=${PGSQL_SSLMODE:-prefer}
+    volumes:
+      - ./postgres-tool/start.py:/viio/start.py:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - viio_net
+
+  pdf-worker:
+    build: ./pdf-worker
+    profiles: [pdf]
+    environment:
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-viio-internal-secret-token}
+      - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+      - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
+      - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+      - DOCLING_CPU_THREADS=${DOCLING_CPU_THREADS:-2}
+    volumes:
+      - docling_models:/models
+    mem_limit: 4g
+    cpus: 2
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+    networks:
+      - viio_net
+
 networks:
   viio_net:
     driver: bridge
@@ -146,3 +200,4 @@ networks:
 volumes:
   qdrant_storage:
   postgres_data:
+  docling_models:

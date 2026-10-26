@@ -25,7 +25,7 @@ def test_full_graph_with_tools():
     reply, tid = asyncio.run(svc1.chat("Привет", thread_id="t-1", user_context={"role": "employee"}))
     assert reply == "Привет, я бот!"
     assert tid == "t-1"
-    mock_store.similarity_search.assert_called_once()
+    mock_store.similarity_search.assert_not_called()
     mock_store.reset_mock()
 
     # 2. LLM calls the tool search_knowledge_base

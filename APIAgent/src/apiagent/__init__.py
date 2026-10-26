@@ -21,6 +21,8 @@ from apiagent.interfaces._protocols import IAgentService, IDocumentService
 from apiagent.models import create_chat_model, create_coding_model, create_embeddings
 from apiagent.router import create_api_router
 from apiagent.services.agent_service import AgentService
+from apiagent.services.database_agent import DatabaseAgentService
+from apiagent.tools.postgres_tool import create_postgres_readonly_tool
 from apiagent.services.coding_agent import (
     CODING_SYSTEM_PROMPT, DELEGATION_PROMPT, CodingAgentService,
     MultiAgentService, create_coding_delegation_tool,
@@ -153,10 +155,15 @@ def create_app(
                 tools=active_tools,
                 checkpointer=initial_checkpointer,
                 system_prompt=DEFAULT_SYSTEM_PROMPT + (DELEGATION_PROMPT if coding_service else ""),
+                context_max_chars=app_settings.rag_context_max_chars,
             )
             agent_service = AgentService(graph=graph)
             if coding_service:
                 agent_service = MultiAgentService(agent_service, coding_service)
+            agent_service = DatabaseAgentService(
+                agent_service, llm, create_postgres_readonly_tool(app_settings),
+                enabled=app_settings.pgsql_enabled,
+            )
 
     app = FastAPI(
         title="APIAgent",

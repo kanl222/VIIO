@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 import anyio.to_thread
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from apiagent.config import Settings
 from apiagent.interfaces._protocols import IAgentService, IDocumentService
+from apiagent.services.pdf_extraction import PdfExtractionService, PdfExtractionError
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,7 @@ def create_api_router(
         Сконфигурированный экземпляр APIRouter.
     """
     router = APIRouter()
+    pdf_service = PdfExtractionService(settings)
 
     def verify_internal_token(
         x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
@@ -151,6 +153,21 @@ def create_api_router(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Недействительный или отсутствующий межсервисный токен (X-Internal-Token).",
                 )
+
+    @router.post("/api/v1/documents/extract-pdf", dependencies=[Depends(verify_internal_token)], tags=["Documents"])
+    async def extract_pdf(request: Request) -> dict:
+        """Extract preview text only; the administrator indexes it with explicit ACL later."""
+        if request.headers.get("content-type", "").split(";")[0] != "application/pdf":
+            raise HTTPException(415, "Передайте PDF с Content-Type: application/pdf.")
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > settings.pdf_max_bytes:
+                raise HTTPException(413, "Размер PDF превышает лимит 10 МБ.")
+            data.extend(chunk)
+        try:
+            return await pdf_service.extract(bytes(data))
+        except PdfExtractionError as exc:
+            raise HTTPException(exc.status, exc.detail) from None
 
     @router.get(
         "/health",

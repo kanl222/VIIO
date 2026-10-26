@@ -1,4 +1,4 @@
-import { Router, type RequestHandler } from 'express';
+import { Router, raw, type RequestHandler } from 'express';
 import type pg from 'pg';
 import { getPool, checkDbHealth } from '../db.js';
 import { createAuthMiddleware, type AuthenticatedRequest } from '../auth.js';
@@ -122,6 +122,36 @@ export function createAdminRouter(
       res.status(503).json({ detail: 'Не удалось сохранить права. Повторите запрос.' });
     } finally {
       client?.release();
+    }
+  });
+
+  router.post('/documents/extract-pdf', raw({ type: 'application/pdf', limit: '10mb' }), async (req, res) => {
+    if (!Buffer.isBuffer(req.body) || !req.body.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+      res.status(400).json({ detail: 'Выберите корректный PDF-файл.' });
+      return;
+    }
+    try {
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/extract-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/pdf', 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        body: new Uint8Array(req.body),
+        // Cover the API's configurable 300s conversion limit plus transport time.
+        signal: AbortSignal.timeout(330000),
+      });
+      if (!response.ok) {
+        const status = [400, 413, 415, 422, 429, 503, 504].includes(response.status) ? response.status : 502;
+        const data = await response.json().catch(() => ({})) as { detail?: unknown };
+        res.status(status).json({ detail: typeof data.detail === 'string' ? data.detail : 'Не удалось извлечь текст PDF.' });
+        return;
+      }
+      const data = await response.json() as { content?: unknown; pages?: unknown; engine?: unknown };
+      if (typeof data.content !== 'string' || !data.content.trim() || data.content.length > 500000) {
+        res.status(422).json({ detail: 'Не удалось получить текст PDF допустимого размера.' });
+        return;
+      }
+      res.json({ content: data.content, pages: data.pages, engine: data.engine });
+    } catch {
+      res.status(502).json({ detail: 'Сервис обработки PDF недоступен. Повторите загрузку позже.' });
     }
   });
 

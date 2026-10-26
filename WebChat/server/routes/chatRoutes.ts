@@ -40,6 +40,11 @@ export function createChatRouter(
     }
 
     const cleanMessage = message.trim();
+    const databaseRequest = /^\/db(?:\s|$)/i.test(cleanMessage);
+    if (databaseRequest && !['programmer', 'admin'].includes(req.user?.role || '')) {
+      res.status(403).json({ detail: 'Доступ к PostgreSQL разрешён только программистам и администраторам.' });
+      return;
+    }
     const cleanAttachments = Array.isArray(attachments) ? attachments : [];
     const pool = poolProvider();
 
@@ -61,7 +66,8 @@ export function createChatRouter(
       await pool.query(
         `INSERT INTO messages (conversation_id, sender, text, attachments)
          VALUES ($1, $2, $3, $4)`,
-        [conversation_id, 'user', cleanMessage, JSON.stringify(cleanAttachments)]
+        [conversation_id, 'user', databaseRequest ? '[Запрос PostgreSQL — не сохраняется]' : cleanMessage,
+          JSON.stringify(databaseRequest ? [] : cleanAttachments)]
       );
 
       // 3. Вызываем сервис диалогового агента APIAgent
@@ -127,7 +133,7 @@ export function createChatRouter(
         `INSERT INTO messages (conversation_id, sender, text, attachments)
          VALUES ($1, $2, $3, $4)
          RETURNING id, created_at`,
-        [conversation_id, 'assistant', replyText, '[]']
+        [conversation_id, 'assistant', databaseRequest ? '[Ответ PostgreSQL показан без сохранения. Повторите /db запрос при необходимости.]' : replyText, '[]']
       );
 
       // 5. Обновляем время активности диалога

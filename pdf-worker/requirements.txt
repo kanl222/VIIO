@@ -1,0 +1,4 @@
+docling==2.142.1
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+pypdf>=6,<7

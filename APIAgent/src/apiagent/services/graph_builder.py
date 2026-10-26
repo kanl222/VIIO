@@ -40,7 +40,18 @@ def messages_with_reference(messages: Sequence[BaseMessage], reference: str | No
             )})
     return prepared
 
-def messages_with_retrieved_context(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+def needs_automatic_search(question: str) -> bool:
+    """Skip only standalone social messages and commands routed to specialists."""
+    if re.match(r"^/(?:code|db)(?:\s|$)", question.strip(), re.I):
+        return False
+    return not bool(re.fullmatch(
+        r"\s*(?:привет|здравствуй(?:те)?|доброе утро|добрый (?:день|вечер)|"
+        r"спасибо(?: большое)?|благодарю|пока|до свидания|hello|hi|thanks|thank you)[\s!.,?]*",
+        question, re.I,
+    ))
+
+
+def messages_with_retrieved_context(messages: Sequence[BaseMessage], context_max_chars: int = 12000) -> list[BaseMessage]:
     """Present automatic retrieval as user context while retaining the raw audit history.
 
     Only the current turn's context is injected. Earlier automatic search results
@@ -53,21 +64,26 @@ def messages_with_retrieved_context(messages: Sequence[BaseMessage]) -> list[Bas
         for call in m.tool_calls if call.get("id", "").startswith("knowledge-")
     }
     context = []
+    remaining = max(0, context_max_chars)
     prepared = []
+    question_position = None
     for index, message in enumerate(messages):
         if isinstance(message, AIMessage) and message.tool_calls and all(
             call.get("id") in automatic_ids for call in message.tool_calls
         ):
             continue
         if isinstance(message, ToolMessage) and message.tool_call_id in automatic_ids:
-            if index > latest_question:
-                context.append(str(message.content))
+            if index > latest_question and remaining > 0:
+                part = str(message.content)[:remaining]
+                context.append(part)
+                remaining -= len(part) + 2
             continue
+        if index == latest_question:
+            question_position = len(prepared)
         prepared.append(message)
-    if context and latest_question >= 0:
+    if context and question_position is not None:
         question = messages[latest_question]
-        position = next(i for i, m in enumerate(prepared) if m is question)
-        prepared[position] = question.model_copy(update={"content": (
+        prepared[question_position] = question.model_copy(update={"content": (
             "Результат поиска в доступных документах (справочные данные):\n\n"
             + "\n\n".join(context)
             + "\n\nОтветьте на вопрос по найденным сведениям, укажите названия источников. "
@@ -82,6 +98,7 @@ def build_agent_graph(
     tools: Sequence[BaseTool] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     system_prompt: str | None = None,
+    context_max_chars: int = 12000,
 ) -> CompiledStateGraph:
     """Сборка и компиляция StateGraph агента с поддержкой инструментов и сохранением состояния.
 
@@ -103,7 +120,7 @@ def build_agent_graph(
         llm_with_tools = llm.bind_tools(active_tools)
 
         async def agent_node(state: MessagesState) -> dict[str, Any]:
-            messages = messages_with_retrieved_context(state["messages"])
+            messages = messages_with_retrieved_context(state["messages"], context_max_chars)
             if not any(isinstance(m, SystemMessage) for m in messages):
                 messages = [SystemMessage(content=effective_prompt)] + messages
             response = await llm_with_tools.ainvoke(messages)
@@ -113,7 +130,7 @@ def build_agent_graph(
         builder.add_node("tools", ToolNode(active_tools))
         if any(tool.name == "search_knowledge_base" for tool in active_tools):
             def prepare_search(state: MessagesState) -> dict[str, Any]:
-                # Every turn must retrieve, even when the model decides not to call tools.
+                # Domain questions retrieve even when the model never emits tool calls.
                 question = next(m.content for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
                 return {"messages": [AIMessage(content="", tool_calls=[{
                     "name": "search_knowledge_base", "args": {"query": str(question)},
@@ -121,7 +138,11 @@ def build_agent_graph(
                 }])]}
 
             builder.add_node("prepare_search", prepare_search)
-            builder.add_edge(START, "prepare_search")
+            def route_search(state: MessagesState) -> str:
+                question = next((str(m.content) for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), "")
+                return "prepare_search" if needs_automatic_search(question) else "agent"
+
+            builder.add_conditional_edges(START, route_search, {"prepare_search": "prepare_search", "agent": "agent"})
             builder.add_edge("prepare_search", "tools")
         else:
             builder.add_edge(START, "agent")

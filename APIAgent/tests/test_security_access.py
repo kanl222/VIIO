@@ -213,7 +213,7 @@ def test_router_security_dependencies_and_token_validation() -> None:
     # 4. Если internal_api_key не задан в settings -> токен не требуется
     settings_no_key = Settings(internal_api_key=None)
     router_open = create_api_router(mock_agent, mock_doc, settings_no_key)
-    open_verify_fn = router_open.routes[1].dependencies[0].dependency
+    open_verify_fn = next(route for route in router_open.routes if route.path == "/api/v1/chat").dependencies[0].dependency
     open_verify_fn(None)  # не выбрасывает исключение
 
 

@@ -142,9 +142,13 @@ function KnowledgePanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [extractionInfo, setExtractionInfo] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); setSaving(true); setError(''); setSuccess('');
+    event.preventDefault();
+    if (extracting) return;
+    setSaving(true); setError(''); setSuccess('');
     try {
       const result = await adminApi.addDocument({ title, content, is_public: access === 'public',
         allowed_roles: access === 'employees' ? ['employee', 'manager'] : [],
@@ -152,36 +156,44 @@ function KnowledgePanel() {
       });
       setSuccess(`«${result.title}» добавлен в базу знаний. Создано фрагментов: ${result.chunks_count}.`);
       setTitle(''); setContent('');
+      setExtractionInfo('');
       if (fileInput.current) fileInput.current.value = '';
     } catch (err) { setError(errorText(err)); }
     finally { setSaving(false); }
   };
   const readFile = async (file?: File) => {
     if (!file) return;
-    setError(''); setSuccess('');
-    if (!/\.(txt|md|markdown)$/i.test(file.name) || file.size > 2 * 1024 * 1024) {
-      setError('Выберите текстовый файл TXT или Markdown размером до 2 МБ.'); return;
+    setError(''); setSuccess(''); setExtractionInfo('');
+    const pdf = /\.pdf$/i.test(file.name);
+    if (!/\.(txt|md|markdown|pdf)$/i.test(file.name) || file.size > (pdf ? 10 : 2) * 1024 * 1024) {
+      setError('Выберите PDF до 10 МБ или TXT/Markdown до 2 МБ.'); return;
     }
+    setExtracting(true);
     try {
-      const text = await file.text();
+      const extracted = pdf ? await adminApi.extractPdf(file) : null;
+      const text = extracted ? extracted.content : await file.text();
       if (text.length > 500000) { setError('В документе больше 500 000 символов. Разделите его на части.'); return; }
       setContent(text); if (!title) setTitle(file.name.replace(/\.[^.]+$/, '').slice(0, 255));
-    } catch { setError('Не удалось прочитать файл. Попробуйте вставить текст вручную.'); }
+      if (extracted) setExtractionInfo(`Из PDF получен текст: ${extracted.pages} стр. Проверьте его перед добавлением в базу знаний.`);
+    } catch (err) { setError(errorText(err)); }
+    finally { setExtracting(false); }
   };
   return <>
     <div className="page-heading"><div><h1>База знаний</h1><p>Добавляйте материалы, чтобы ассистент отвечал на основе документов компании.</p></div></div>
-    <div className="knowledge-layout"><form className="document-form" onSubmit={submit} aria-busy={saving}>
+    <div className="knowledge-layout"><form className="document-form" onSubmit={submit} aria-busy={saving || extracting}>
       <div className="section-heading"><h2>Новый документ</h2><FileText size={19} aria-hidden="true" /></div>
       {error && <Notice>{error}</Notice>}{success && <Notice success><Check size={18} aria-hidden="true" />{success}</Notice>}
-      <label className="field">Название<input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Например, регламент работы с клиентами" maxLength={255} disabled={saving} /></label>
-      <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать текстовый файл</strong><small>TXT или Markdown, до 2 МБ · либо вставьте текст ниже</small></span><input ref={fileInput} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" disabled={saving} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать текстовый файл" /></label>
-      <label className="field">Содержание<textarea required value={content} onChange={e => setContent(e.target.value)} placeholder="Вставьте текст документа…" rows={10} maxLength={500000} disabled={saving} /><small className="character-count">{content.length.toLocaleString('ru-RU')} / 500 000 символов</small></label>
-      <fieldset disabled={saving}><legend>Кому доступен документ</legend><div className="access-options">{[
+      <label className="field">Название<input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Например, регламент работы с клиентами" maxLength={255} disabled={saving || extracting} /></label>
+      <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать файл</strong><small>PDF до 10 МБ · TXT или Markdown до 2 МБ</small></span><input ref={fileInput} type="file" accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown" disabled={saving || extracting} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать PDF или текстовый файл" /></label>
+      {extracting && <p className="field-help" role="status"><Loader2 size={16} className="animate-spin" /> Извлекаем текст. Для сканов обработка может занять несколько минут.</p>}
+      {extractionInfo && <p className="field-help" role="status">{extractionInfo}</p>}
+      <label className="field">Содержание<textarea required value={content} onChange={e => setContent(e.target.value)} placeholder="Вставьте текст документа…" rows={10} maxLength={500000} disabled={saving || extracting} /><small className="character-count">{content.length.toLocaleString('ru-RU')} / 500 000 символов</small></label>
+      <fieldset disabled={saving || extracting}><legend>Кому доступен документ</legend><div className="access-options">{[
         ['employees', 'Сотрудникам', 'Сотрудники, руководители и программисты'], ['departments', 'Подразделениям', 'Только выбранные отделы'], ['private', 'Администраторам', 'Ограниченный доступ'], ['public', 'Всем', 'Включая гостевые запросы'],
       ].map(([value, label, hint]) => <label key={value} className={`access-option ${access === value ? 'access-selected' : ''}`}><input type="radio" name="document-access" checked={access === value} onChange={() => setAccess(value)} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</div></fieldset>
-      {access === 'departments' && <label className="field">Подразделения<input required value={departments} onChange={e => setDepartments(e.target.value)} placeholder="finance, it" disabled={saving} maxLength={1950} /><small>Названия через запятую, как в профилях пользователей.</small></label>}
-      <div className="form-actions"><button className="button button-primary" type="submit" disabled={saving || !title.trim() || !content.trim()}>{saving ? <Loader2 className="animate-spin" size={17} /> : <Upload size={17} />}{saving ? 'Добавляем документ…' : 'Добавить в базу знаний'}</button></div>
-    </form><aside className="document-help"><BookOpen size={25} aria-hidden="true" /><h2>Знания для точных ответов</h2><p>Добавляйте регламенты, инструкции и ответы на частые вопросы. Текст будет разбит на фрагменты для поиска.</p><h3>Проверьте перед загрузкой</h3><ul><li>У документа понятное название.</li><li>Содержание актуально и не дублирует другие материалы.</li><li>Права соответствуют содержимому.</li></ul><p>Администраторы и автор документа сохраняют доступ при любых настройках. Права на роль и подразделение действуют независимо: достаточно одного совпадения.</p><p className="section-note">PDF и DOCX в этой форме не поддерживаются. Скопируйте текст или сохраните документ в TXT.</p></aside></div>
+      {access === 'departments' && <label className="field">Подразделения<input required value={departments} onChange={e => setDepartments(e.target.value)} placeholder="finance, it" disabled={saving || extracting} maxLength={1950} /><small>Названия через запятую, как в профилях пользователей.</small></label>}
+      <div className="form-actions"><button className="button button-primary" type="submit" disabled={saving || extracting || !title.trim() || !content.trim()}>{saving ? <Loader2 className="animate-spin" size={17} /> : <Upload size={17} />}{saving ? 'Добавляем документ…' : 'Добавить в базу знаний'}</button></div>
+    </form><aside className="document-help"><BookOpen size={25} aria-hidden="true" /><h2>Знания для точных ответов</h2><p>Добавляйте регламенты, инструкции и ответы на частые вопросы. Текст будет разбит на фрагменты для поиска.</p><h3>Проверьте перед загрузкой</h3><ul><li>У документа понятное название.</li><li>Содержание актуально и не дублирует другие материалы.</li><li>Права соответствуют содержимому.</li></ul><p>Администраторы и автор документа сохраняют доступ при любых настройках. Права на роль и подразделение действуют независимо: достаточно одного совпадения.</p><p className="section-note">PDF: до 10 МБ и 50 страниц. Сначала проверьте извлечённый текст, затем задайте доступ и добавьте документ. DOCX пока не поддерживается.</p></aside></div>
   </>;
 }
 

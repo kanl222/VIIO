@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from apiagent.interfaces._protocols import IVectorStore
 
@@ -116,7 +117,7 @@ class QdrantVectorStoreAdapter(IVectorStore):
             Список объектов Document с текстом и метаданными. Пустой список, если коллекция еще не создана.
         """
         try:
-            if not self._client.collection_exists(self._collection_name):
+            if k <= 0:
                 return []
             semantic = self._store.similarity_search(query=query, k=k, filter=filter)
             titles = self._find_acronym_titles(query, k, filter)
@@ -134,6 +135,12 @@ class QdrantVectorStoreAdapter(IVectorStore):
                     break
             return combined
         except Exception as exc:
+            # Query directly: a missing collection is the cold-start case.
+            # Do not cache existence or swallow network/authentication failures.
+            if isinstance(exc, UnexpectedResponse) and exc.status_code == 404:
+                return []
+            if isinstance(exc, ValueError) and str(exc) == f"Collection {self._collection_name} not found":
+                return []
             logger.error("Ошибка выполнения similarity_search в Qdrant: %s", exc)
             raise
 

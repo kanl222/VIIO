@@ -22,6 +22,9 @@ app.patch('/api/admin/users/:id', (req, res) => {
   Object.assign(user, req.body); res.json({ user });
 });
 app.post('/api/admin/documents', (req, res) => res.status(201).json({ document_id: 'preview-only', title: req.body.title, chunks_count: 2 }));
+app.post('/api/admin/documents/extract-pdf', express.raw({ type: 'application/pdf', limit: '10mb' }), (_req, res) => {
+  setTimeout(() => res.json({ content: 'Согласование: 3 рабочих дня.\nПроверьте текст перед добавлением.', pages: 1, engine: 'docling-cpu' }), 500);
+});
 app.post('/api/auth/logout', (_req, res) => res.json({ ok: true }));
 app.use(express.static(fileURLToPath(new URL('../dist', import.meta.url))));
 app.listen(3100, '0.0.0.0', () => console.log('UI fixture preview on port 3100. No production API or database access.'));

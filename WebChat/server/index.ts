@@ -97,6 +97,10 @@ export function createApp(options?: AppOptions): express.Express {
 
   // 7. Глобальный обработчик ошибок
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    if (err.type === 'entity.too.large') {
+      res.status(413).json({ detail: 'Размер файла превышает допустимый лимит.' });
+      return;
+    }
     console.error('[Server] Unhandled error:', err);
     res.status(500).json({ detail: 'Внутренняя ошибка сервера' });
   });

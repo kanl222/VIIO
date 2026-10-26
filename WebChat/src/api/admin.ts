@@ -22,3 +22,6 @@ export const addDocument = (document: {
 }) => apiFetch<{ document_id: string; title: string; chunks_count: number }>('/api/admin/documents', {
   method: 'POST', body: JSON.stringify(document),
 });
+export const extractPdf = (file: File) => apiFetch<{ content: string; pages: number; engine: string }>(
+  '/api/admin/documents/extract-pdf', { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file }
+);

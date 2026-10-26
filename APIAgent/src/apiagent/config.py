@@ -56,6 +56,18 @@ class Settings(BaseSettings):
     coding_top_p: float = Field(default=1.0, gt=0, le=1)
     coding_max_tokens: int = Field(default=4096, ge=128, le=32768)
 
+    pgsql_enabled: bool = False
+    pgsql_mcp_url: str = "http://postgres-tool:8000/sse"
+    pgsql_max_rows: int = Field(default=100, ge=1, le=500)
+    pgsql_max_chars: int = Field(default=12000, ge=500, le=50000)
+    pgsql_timeout_seconds: int = Field(default=40, ge=5, le=90)
+    pdf_engine: Literal["auto", "pypdf", "docling"] = "auto"
+    pdf_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
+    pdf_max_pages: int = Field(default=50, ge=1, le=200)
+    pdf_max_chars: int = Field(default=500000, ge=100, le=500000)
+    pdf_timeout_seconds: int = Field(default=120, ge=10, le=300)
+    docling_url: str = "http://pdf-worker:8080"
+
     # Настройки LM Studio (OpenAI-compatible)
     lmstudio_base_url: str = Field(
         default="http://localhost:1234/v1",
@@ -101,6 +113,7 @@ class Settings(BaseSettings):
     rag_chunk_unit: Literal["characters", "words"] = "characters"
     rag_chunk_size: int = Field(default=500, gt=0)
     rag_chunk_overlap: int = Field(default=50, ge=0)
+    rag_context_max_chars: int = Field(default=12000, ge=1000, le=48000)
 
     @model_validator(mode="after")
     def validate_chunk_overlap(self) -> "Settings":

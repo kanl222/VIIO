@@ -217,7 +217,7 @@ async function startServer(app) {
       let bodyData = null;
 
       if (options.body) {
-        bodyData = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+        bodyData = Buffer.isBuffer(options.body) || typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
         if (!headers['Content-Length'] && !headers['content-length']) {
           headers['Content-Length'] = Buffer.byteLength(bodyData);
         }
@@ -290,6 +290,43 @@ async function adminFixture(role = 'admin', fetchFn = async () => ({ ok: true, j
   return { ...server, pool, id, cookie: `${SESSION_COOKIE_NAME}=${sid}` };
 }
 
+for (const role of ['employee', 'manager']) {
+  test(`PostgreSQL chat denies ${role} before forwarding or storing the request`, async () => {
+    let calls = 0;
+    const f = await adminFixture(role, async () => { calls++; throw new Error('must not forward'); });
+    try {
+      const r = await f.request('/api/chat', { method: 'POST', headers: { Cookie: f.cookie, 'Content-Type': 'application/json' }, body: { conversation_id: 'test', message: '/db SELECT 1' } });
+      assert.equal(r.status, 403);
+      assert.equal(calls, 0);
+      assert.equal(f.pool.messages.length, 0);
+    } finally { await f.close(); }
+  });
+}
+
+for (const role of ['programmer', 'admin']) {
+  test(`PostgreSQL chat allows ${role} but never saves queries or database results`, async () => {
+    let forwarded;
+    const f = await adminFixture(role, async (_url, options) => {
+      forwarded = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ reply: 'PRIVATE_DATABASE_RESULT', thread_id: 'db-thread' }) };
+    });
+    try {
+      const headers = { Cookie: f.cookie, 'Content-Type': 'application/json' };
+      const created = await f.request('/api/conversations', { method: 'POST', headers, body: { title: 'DB test' } });
+      const conversation = (await created.json()).conversation;
+      const r = await f.request('/api/chat', { method: 'POST', headers, body: { conversation_id: conversation.id, message: '/DB SELECT private_field FROM test_table' } });
+      assert.equal(r.status, 200);
+      assert.equal((await r.json()).reply, 'PRIVATE_DATABASE_RESULT');
+      assert.equal(forwarded.user_context.role, role);
+      assert.equal(f.pool.messages.length, 2);
+      for (const msg of f.pool.messages) {
+        assert.equal(JSON.stringify(msg).includes('PRIVATE_DATABASE_RESULT'), false);
+        assert.equal(JSON.stringify(msg).includes('private_field'), false);
+      }
+    } finally { await f.close(); }
+  });
+}
+
 test('Admin API rejects anonymous and non-admin users on every route', async () => {
   const fixture = await adminFixture('employee');
   try {
@@ -298,6 +335,53 @@ test('Admin API rejects anonymous and non-admin users on every route', async () 
       assert.equal((await fixture.request(`/api/admin${path}`, { method, headers: { Cookie: fixture.cookie } })).status, 403);
     }
   } finally { await fixture.close(); }
+});
+
+test('PDF extraction is restricted to admins before reading or forwarding data', async () => {
+  for (const role of ['employee', 'programmer', 'manager']) {
+    let calls = 0;
+    const f = await adminFixture(role, async () => { calls++; throw new Error('must not forward'); });
+    try {
+      const headers = { 'Content-Type': 'application/pdf' };
+      const body = Buffer.from('%PDF-1.4 test');
+      assert.equal((await f.request('/api/admin/documents/extract-pdf', { method:'POST', headers, body })).status, 401);
+      assert.equal((await f.request('/api/admin/documents/extract-pdf', { method:'POST', headers:{...headers,Cookie:f.cookie}, body })).status, 403);
+      assert.equal(calls, 0);
+    } finally { await f.close(); }
+  }
+});
+
+test('Admin PDF extraction forwards binary with server token but does not index', async () => {
+  const bytes = Buffer.from('%PDF-1.4 test fixture');
+  const calls = [];
+  const f = await adminFixture('admin', async (url, options) => {
+    calls.push(url);
+    assert.deepEqual(Buffer.from(options.body), bytes);
+    assert.equal(options.headers['Content-Type'],'application/pdf');
+    assert.ok(options.headers['X-Internal-Token']);
+    return { ok:true, json:async () => ({content:'Preview text',pages:2,engine:'docling-cpu'}) };
+  });
+  try {
+    const r = await f.request('/api/admin/documents/extract-pdf', { method:'POST',headers:{Cookie:f.cookie,'Content-Type':'application/pdf'},body:bytes });
+    assert.equal(r.status,200);
+    assert.equal((await r.json()).content,'Preview text');
+    assert.equal(calls.length,1);
+    assert.ok(calls[0].endsWith('/api/v1/documents/extract-pdf'));
+  } finally { await f.close(); }
+});
+
+test('Invalid PDF and CPU extraction failures are reported without adding knowledge', async () => {
+  let calls=0;
+  const f=await adminFixture('admin',async()=>{calls++;return {ok:false,status:503,json:async()=>({detail:'Docling unavailable'})};});
+  try {
+    const headers={Cookie:f.cookie,'Content-Type':'application/pdf'};
+    assert.equal((await f.request('/api/admin/documents/extract-pdf',{method:'POST',headers,body:Buffer.from('not PDF')})).status,400);
+    assert.equal(calls,0);
+    const r=await f.request('/api/admin/documents/extract-pdf',{method:'POST',headers,body:Buffer.from('%PDF-1.4 test')});
+    assert.equal(r.status,503);
+    assert.equal((await r.json()).detail,'Docling unavailable');
+    assert.equal(calls,1);
+  } finally { await f.close(); }
 });
 
 test('Admin overview and user search expose counts and safe user fields', async () => {

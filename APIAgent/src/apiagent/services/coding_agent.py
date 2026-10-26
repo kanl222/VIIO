@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import uuid
+from weakref import WeakValueDictionary
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
@@ -28,7 +29,7 @@ CODING_INTENT = re.compile(
     r"исходник|исходн[а-я]*\s+код|программирован|рефактор|отладк|"
     r"(?:напиш|напис|созда|исправ|перепиш|перепис|проверь|провер|измен|добав)[\s\S]{0,80}"
     r"(?:\bкод\b|функци|метод|юнит.?тест|unit.?test)|"
-    r"(?:оптимиз|ускор)[\s\S]{0,60}(?:запрос|отч[её]т|код)|"
+    r"(?:оптимиз|ускор)[\s\S]{0,60}(?:\bкод\b|функци|алгоритм)|"
     r"(?:ошибк|баг)[\s\S]{0,50}(?:\bкод[ае]?\b|сборк|компиля|функци)",
     re.IGNORECASE,
 )
@@ -51,8 +52,9 @@ class CodingAgentService(AgentService):
         self.allowed_roles = allowed_roles
         self.knowledge_search = knowledge_search
         self.context_max_chars = context_max_chars
-        # Serialize calls to the stateful specialist.
-        self._lock = asyncio.Lock()
+        # Serialize only writes to the same user's conversation checkpoint.
+        # Entries disappear once the last holder/waiter releases its reference.
+        self._locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
     async def chat(self, message, thread_id=None, user_context=None, *, knowledge_query: str | None = None):
         if (not user_context or not user_context.get("user_id") or user_context.get("role") not in {"programmer", "admin"}
@@ -62,8 +64,9 @@ class CodingAgentService(AgentService):
         identity = json.dumps([thread_id, user_context["user_id"]], ensure_ascii=False)
         # Separate text-only history from the former file/tool agent's checkpoints.
         coding_thread = "coder-text-" + hashlib.sha256(identity.encode()).hexdigest()
+        lock = self._locks.setdefault(coding_thread, asyncio.Lock())
         async with asyncio.timeout(90):
-            async with self._lock:
+            async with lock:
                 # Do not inherit the supervisor's Pregel config/checkpoint namespace.
                 task = asyncio.create_task(
                     self._answer(message, coding_thread, user_context, knowledge_query), context=contextvars.Context(),
