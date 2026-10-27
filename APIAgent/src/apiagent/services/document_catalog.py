@@ -77,6 +77,8 @@ class DocumentRecord:
     updated_at: datetime
     family_id: str | None = None
     is_active: bool = True
+    document_kind: str = 'document'
+    original_filename: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "DocumentRecord":
@@ -99,6 +101,8 @@ class DocumentRecord:
             updated_at=row["updated_at"],
             family_id=row.get('family_id', row['id']),
             is_active=row.get('is_active', True),
+            document_kind=row.get('document_kind', 'document'),
+            original_filename=row.get('original_filename'),
         )
 
 
@@ -154,10 +158,16 @@ class DocumentCatalogService:
             await conn.execute(CATALOG_DDL)
             await conn.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS family_id varchar(64)')
             await conn.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true')
+            await conn.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_kind text NOT NULL DEFAULT 'document'")
+            await conn.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS original_filename varchar(255)')
             await conn.execute('UPDATE documents SET family_id=id WHERE family_id IS NULL')
             await conn.execute('ALTER TABLE documents ALTER COLUMN family_id SET NOT NULL')
             await conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS documents_family_version ON documents(family_id,version)')
             await conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS documents_one_active ON documents(family_id) WHERE is_active')
+            from apiagent.services.knowledge_data import KNOWLEDGE_DDL
+            await conn.execute(KNOWLEDGE_DDL)
+            from apiagent.services.personal_memory import MEMORY_DDL
+            await conn.execute(MEMORY_DDL)
         logger.info("Каталог документов: схема инициализирована")
 
     # ------------------------------------------------------------------
@@ -183,6 +193,8 @@ class DocumentCatalogService:
         version: int = 1,
         parent_id: str | None = None,
         is_active: bool = True,
+        document_kind: str = 'document',
+        original_filename: str | None = None,
     ) -> DocumentRecord:
         """Создать новую запись в каталоге."""
         roles = allowed_roles if allowed_roles is not None else ["employee"]
@@ -196,8 +208,8 @@ class DocumentCatalogService:
                 INSERT INTO documents
                     (id, title, mime_type, file_size, sha256, owner_id,
                      is_public, allowed_roles, allowed_departments,
-                     storage_key, chunks_count, status,family_id,version,parent_id,is_active)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     storage_key, chunks_count, status,family_id,version,parent_id,is_active,document_kind,original_filename)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(id) DO UPDATE SET storage_key=EXCLUDED.storage_key,
                     status=EXCLUDED.status,chunks_count=EXCLUDED.chunks_count,updated_at=now()
                 RETURNING *
@@ -207,6 +219,8 @@ class DocumentCatalogService:
                     is_public, roles, depts,
                     storage_key, chunks_count, status,
                     family_id or doc_id, version, parent_id, is_active,
+                    document_kind,
+                    original_filename,
                 ),
             )
             row = await cur.fetchone()  # type: ignore[assignment]
@@ -352,6 +366,7 @@ class DocumentCatalogService:
             cursor = await conn.execute("UPDATE documents SET is_active=false,status='superseded',updated_at=now() WHERE id=%s AND is_active RETURNING id", (parent_id,))
             if not await cursor.fetchone():
                 raise ValueError('Актуальная версия изменилась. Выберите документ заново.')
+            await conn.execute('DELETE FROM document_publications WHERE document_id=%s', (parent_id,))
             activated = await conn.execute("UPDATE documents SET is_active=true,status='ready',updated_at=now() WHERE id=%s AND family_id=(SELECT family_id FROM documents WHERE id=%s) AND NOT is_active RETURNING id", (identifier, parent_id))
             if not await activated.fetchone():
                 raise ValueError('Подготовленная версия не найдена')

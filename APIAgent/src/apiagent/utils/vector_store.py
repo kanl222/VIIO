@@ -214,9 +214,12 @@ class QdrantVectorStoreAdapter(IVectorStore):
                 meta = (point.payload or {}).get('metadata', {})
                 identifier = meta.get('document_id')
                 if identifier and meta.get('ingestion_ready') is not False:
-                    record = found.setdefault(identifier, {**meta, 'chunks_count': 0})
+                    record = found.setdefault(identifier, {**meta, 'chunks_count': 0, '_search_parts': []})
                     record['chunks_count'] += 1
+                    record.setdefault('_search_parts', []).append((meta.get('chunk_index', 0), (point.payload or {}).get('page_content', '')))
             if offset is None:
+                for record in found.values():
+                    record['search_text'] = '\n\n'.join(text for _, text in sorted(record.pop('_search_parts')))
                 return list(found.values())
 
     def count(self) -> int:

@@ -4,6 +4,8 @@
 def can_read_document(record, context):
     context = context or {}
     role = str(context.get("role", "guest")).lower()
+    if getattr(record, 'document_kind', 'document') == 'code' and role not in {'admin', 'programmer'}:
+        return False
     if role == "admin" or record.is_public:
         return True
     roles = {role, "employee"} if role == "programmer" else {role}

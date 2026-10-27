@@ -86,7 +86,7 @@ class AgentService(IAgentService):
             result = await self._graph.ainvoke(
                 {"messages": [("user", clean_message)]},
                 config=config,
-                context={"access_scope": scope_key(user_context), **({"reference_context": reference_context} if reference_context else {})},
+                context={"access_scope": scope_key(user_context), 'user_notes': (user_context or {}).get('_user_notes', ''), **({"reference_context": reference_context} if reference_context else {})},
             )
         except Exception as exc:
             exc_msg = str(exc) or repr(exc) or type(exc).__name__

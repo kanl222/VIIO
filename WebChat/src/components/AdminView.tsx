@@ -138,6 +138,43 @@ function UsersPanel({ currentUser, onAccessChanged }: { currentUser: User; onAcc
   </>;
 }
 
+function PublicationPanel({ document, onClose }: { document: CatalogDocument; onClose: () => void }) {
+  const [title, setTitle] = useState(document.title);
+  const [content, setContent] = useState('');
+  const [published, setPublished] = useState(false);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    adminApi.getPublication(document.id, controller.signal).then(result => {
+      if (result.publication) { setTitle(result.publication.title); setContent(result.publication.content); setPublished(true); }
+    }).catch(err => { if (!controller.signal.aborted) setError(errorText(err)); })
+      .finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    return () => controller.abort();
+  }, [document.id]);
+  const save = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(''); setSuccess('');
+    try { await adminApi.publishDocument(document.id, { title, content }); setPublished(true); setSuccess('Текст опубликован для внешнего консультанта.'); }
+    catch (err) { setError(errorText(err)); } finally { setBusy(false); }
+  };
+  const withdraw = async () => {
+    setBusy(true); setError(''); setSuccess('');
+    try { await adminApi.withdrawPublication(document.id); setPublished(false); setSuccess('Публикация отозвана. Внешний API больше не использует этот текст.'); }
+    catch (err) { setError(errorText(err)); } finally { setBusy(false); }
+  };
+  return <form className="document-form" onSubmit={save} aria-busy={busy}>
+    <div className="section-heading"><h2>Материал для внешнего консультанта</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Закрыть публикацию"><X size={18} /></button></div>
+    {error && <Notice>{error}</Notice>}{success && <Notice success>{success}</Notice>}
+    <p>Опубликуйте только текст, предназначенный внешним пользователям. Внутреннее содержание документа не переносится автоматически.</p>
+    <label className="field">Публичное название<input value={title} maxLength={255} required disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
+    <label className="field">Проверенный публичный текст<textarea rows={12} value={content} maxLength={50000} required disabled={busy} onChange={event => setContent(event.target.value)} /></label>
+    <div className="form-actions"><button className="button button-primary" disabled={busy || !content.trim()}>Опубликовать для внешнего API</button>
+      {published && <button type="button" className="button button-secondary" disabled={busy} onClick={withdraw}>Отозвать публикацию</button>}</div>
+    <p>После выпуска новой версии документа публикацию потребуется подтвердить заново.</p>
+  </form>;
+}
+
 function DocumentVersionsPanel({ docId, onClose, onUpload, onDownload }: {
   docId: string; onClose: () => void;
   onUpload: (file: File, current: CatalogDocument) => Promise<void>;
@@ -173,8 +210,8 @@ function DocumentVersionsPanel({ docId, onClose, onUpload, onDownload }: {
           {item.has_original && <button className="text-button" type="button" onClick={() => onDownload(item)}><Download size={14} aria-hidden="true" /> Скачать</button>}
         </li>)}
       </ul>
-      {current && <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Загрузить новую версию</strong><small>Один PDF, TXT или Markdown до 10 МБ. Права доступа сохранятся.</small></span>
-        <input type="file" accept=".pdf,.txt,.md,.markdown" disabled={uploading} aria-label="Файл новой версии документа" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} />
+      {current && <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Загрузить новую версию</strong><small>Один PDF, TXT, Markdown или исходник до 10 МБ. Код доступен только программистам и администраторам.</small></span>
+        <input type="file" accept=".pdf,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={uploading} aria-label="Файл новой версии документа" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} />
       </label>}
       {uploading && <p role="status">Сохраняем файл новой версии…</p>}
     </>}
@@ -212,6 +249,7 @@ function KnowledgePanel() {
   const [bulkTasks, setBulkTasks] = useState<BulkUploadTaskResult[]>([]);
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const [versionsFor, setVersionsFor] = useState<string | null>(null);
+  const [publicationFor, setPublicationFor] = useState<CatalogDocument | null>(null);
   const [uploadReview, setUploadReview] = useState<adminApi.UploadReview | null>(null);
   const [bulkAction, setBulkAction] = useState<string | null>(null);
   const reviewEditor = useRef<HTMLTextAreaElement>(null);
@@ -241,7 +279,7 @@ function KnowledgePanel() {
       const a = document.createElement('a');
       a.href = url;
       const suffix = ({ 'application/pdf': '.pdf', 'text/plain': '.txt', 'text/markdown': '.md' } as Record<string, string>)[doc.mime_type] || '';
-      a.download = doc.title.toLowerCase().endsWith(suffix) ? doc.title : doc.title + suffix;
+      a.download = doc.original_filename || (doc.title.toLowerCase().endsWith(suffix) ? doc.title : doc.title + suffix);
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -391,7 +429,7 @@ function KnowledgePanel() {
   };
 
   const uploadVersion = async (file: File, current: CatalogDocument) => {
-    if (!/\.(pdf|txt|md|markdown)$/i.test(file.name) || file.size > 10 * 1024 * 1024) throw new Error('Выберите PDF, TXT или Markdown до 10 МБ.');
+    if (!/\.(pdf|txt|md|markdown|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(file.name) || file.size > 10 * 1024 * 1024) throw new Error('Выберите PDF, TXT или Markdown до 10 МБ.');
     const result = await adminApi.bulkUpload([file], { is_public: current.is_public,
       allowed_roles: current.allowed_roles, allowed_departments: current.allowed_departments, version_parent_id: current.id });
     const task = result.tasks[0];
@@ -407,7 +445,7 @@ function KnowledgePanel() {
     const newFiles: File[] = [];
     for (let i = 0; i < selected.length; i++) {
       const f = selected[i];
-      if (/\.(txt|md|markdown|pdf)$/i.test(f.name) && f.size <= 10 * 1024 * 1024) {
+      if (/\.(txt|md|markdown|pdf|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(f.name) && f.size <= 10 * 1024 * 1024) {
         newFiles.push(f);
       }
     }
@@ -458,6 +496,8 @@ function KnowledgePanel() {
                     <tr key={doc.id}>
                       <td>
                         <strong>{doc.title}</strong>
+                        {doc.document_kind !== 'code' && <button type="button" className="text-button" onClick={() => setPublicationFor(doc)}>Внешняя публикация</button>}
+                        {doc.document_kind === 'code' && <small>Исходный код · только программистам и администраторам</small>}
                         <small style={{ display: 'block', color: 'var(--muted)', fontSize: 11 }}>{doc.id}</small>
                       </td>
                       <td><button className="text-button" type="button" onClick={() => setVersionsFor(doc.id)} aria-label={`Версии документа ${doc.title}`}>v{doc.version} · История</button></td>
@@ -505,6 +545,7 @@ function KnowledgePanel() {
 
     {tab === 'catalog' && versionsFor && <DocumentVersionsPanel key={`${versionsFor}-${catalogRevision}`} docId={versionsFor}
       onClose={() => setVersionsFor(null)} onUpload={uploadVersion} onDownload={handleDownload} />}
+    {tab === 'catalog' && publicationFor && <PublicationPanel key={publicationFor.id} document={publicationFor} onClose={() => setPublicationFor(null)} />}
 
     {tab === 'upload' && (
       <div className="knowledge-layout">
@@ -512,7 +553,7 @@ function KnowledgePanel() {
           <div className="section-heading"><h2>Новый документ</h2><FileText size={19} aria-hidden="true" /></div>
           {error && <Notice>{error}</Notice>}{success && <Notice success><Check size={18} aria-hidden="true" />{success}</Notice>}
           <label className="field">Название<input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Например, регламент работы с клиентами" maxLength={255} disabled={saving || extracting} /></label>
-          <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать файл</strong><small>PDF до 10 МБ · TXT или Markdown до 2 МБ</small></span><input ref={fileInput} type="file" accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown" disabled={saving || extracting} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать PDF или текстовый файл" /></label>
+          <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать файл</strong><small>PDF до 10 МБ · TXT или Markdown до 2 МБ</small></span><input ref={fileInput} type="file" accept=".pdf,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={saving || extracting} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать PDF или текстовый файл" /></label>
           {extracting && <p className="field-help" role="status"><Loader2 size={16} className="animate-spin" /> Извлекаем текст. Для сканов обработка может занять несколько минут.</p>}
           {extractionInfo && <p className="field-help" role="status">{extractionInfo}</p>}
           <label className="field">Содержание<textarea required value={content} onChange={e => setContent(e.target.value)} placeholder="Вставьте текст документа…" rows={10} maxLength={500000} disabled={saving || extracting} /><small className="character-count">{content.length.toLocaleString('ru-RU')} / 500 000 символов</small></label>
@@ -543,13 +584,13 @@ function KnowledgePanel() {
             <Upload size={19} aria-hidden="true" />
             <span>
               <strong>Выбрать несколько файлов</strong>
-              <small>PDF, TXT, Markdown до 10 МБ каждый (до 50 файлов за раз)</small>
+              <small>PDF, TXT, Markdown и исходный код до 10 МБ каждый (до 50 файлов за раз)</small>
             </span>
             <input
               ref={bulkInputRef}
               type="file"
               multiple
-              accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown"
+              accept=".pdf,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h"
               disabled={bulkUploading}
               onChange={e => handleBulkFileSelect(e.target.files)}
               aria-label="Выбрать несколько файлов"
@@ -635,6 +676,7 @@ function KnowledgePanel() {
           <h3>Особенности</h3>
           <ul>
             <li>Каждый файл получает независимый статус.</li>
+            <li>Исходный код доступен только программистам и администраторам независимо от общих прав партии.</li>
             <li>Ошибочный или повреждённый файл не останавливает обработку остальных.</li>
             <li>Одинаковые файлы автоматически распознаются по хешу.</li>
             <li>Задание в очереди или на проверке можно отменить. Начавшуюся обработку отменить нельзя.</li>

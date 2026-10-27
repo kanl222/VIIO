@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     coding_model: str | None = None
     coding_allowed_roles: list[str] = Field(default_factory=lambda: ["programmer", "admin"])
     coding_context_max_chars: int = Field(default=6000, ge=1000, le=24000)
+    conversation_summary_enabled: bool = True
+    conversation_summary_after: int = Field(default=24, ge=12, le=100)
+    conversation_history_max_chars: int = Field(default=18000, ge=4000, le=60000)
+    consultant_enabled: bool = False
+    consultant_api_key: str | None = None
     # Independent generation budgets for the consultant and text-only coder.
     chat_temperature: float = Field(default=0.0, ge=0, le=2)
     chat_top_p: float = Field(default=1.0, gt=0, le=1)

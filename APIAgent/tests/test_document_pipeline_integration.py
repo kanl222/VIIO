@@ -55,7 +55,7 @@ async def pipeline(tmp_path):
     await queue.setup()
     app = FastAPI()
     app.include_router(create_api_router(MagicMock(), documents, settings,
-        catalog_service=catalog, file_store=store, bulk_queue=queue, ingestion_service=ingestion))
+        catalog_service=catalog, file_store=store, bulk_queue=queue, ingestion_service=ingestion, knowledge_data=ingestion.data))
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://test',
                                 headers={'X-Internal-Token': 'integration-key'}) as client:
         try:
@@ -395,3 +395,120 @@ async def test_invalid_activation_does_not_remove_current_version(pipeline):
     with pytest.raises(ValueError, match='Подготовленная версия'):
         await catalog.activate_version('doc-missing', root.document_id)
     assert (await catalog.get(root.document_id)).is_active
+
+
+async def test_code_is_private_even_to_owner_employee_and_has_line_references(pipeline):
+    from apiagent.services.enhanced_retrieval import EnhancedRetrieval
+    from apiagent.tools.search_tool import build_access_filter, create_knowledge_search_tool
+    client, queue, catalog, adapter, ingestion, _ = pipeline
+    source = b'import os\n\ndef CalculateInvoiceTotal(items):\n    return sum(items)\n'
+    response = await client.post('/api/v1/documents/bulk-upload', params={'owner_id': 'former-admin', 'is_public': True, 'allowed_departments': 'general'},
+        files=[('files', ('billing.py', source, 'text/plain'))])
+    queue.start()
+    result = await terminal(queue, response.json()['tasks'][0]['task_id'])
+    assert result.status == 'ready', result.error
+    record = await catalog.get(result.document_id)
+    assert record.document_kind == 'code' and record.original_filename == 'billing.py'
+    assert not record.is_public and record.allowed_departments == []
+    employee = {'user_id': 'former-admin', 'role': 'employee', 'departments': ['general']}
+    programmer = {'user_id': 'coder', 'role': 'programmer', 'departments': []}
+    assert await ingestion.data.lexical('billing', programmer)
+    assert not await ingestion.data.lexical('CalculateInvoiceTotal', employee)
+    assert not adapter.similarity_search('CalculateInvoiceTotal', filter=build_access_filter(employee))
+    denied = await client.get('/api/v1/documents/download/' + record.id, params={'user_role': 'employee', 'user_id': 'former-admin', 'departments': 'general'})
+    assert denied.status_code == 403
+    tool = EnhancedRetrieval(adapter, ingestion.data).tool(create_knowledge_search_tool(adapter), 3)
+    reference = await tool.ainvoke({'query': 'CalculateInvoiceTotal'}, config={'configurable': {'user_context': programmer}})
+    assert 'billing.py' in reference and 'строки' in reference and 'CalculateInvoiceTotal' in reference
+    original = await client.get('/api/v1/documents/download/' + record.id, params={'user_role': 'programmer'})
+    assert original.content == source and 'billing.py' in original.headers['content-disposition']
+    publish = await client.post('/api/v1/documents/publication/' + record.id, params={'publisher_id': 'admin'}, json={'title': 'Code', 'content': 'public code'})
+    assert publish.status_code == 409
+
+
+async def test_lexical_search_filters_departments_and_archived_versions(pipeline):
+    from apiagent.services.enhanced_retrieval import EnhancedRetrieval
+    _, _, _, adapter, ingestion, _ = pipeline
+    await ingestion.index_text(DocumentCreateRequest(title='Policy', content='Согласование служебных поездок',
+        allowed_roles=[], allowed_departments=['hr']))
+    allowed = {'user_id': 'hr-user', 'role': 'employee', 'departments': ['hr']}
+    assert await ingestion.data.lexical('согласования поездок', allowed)
+    assert not await ingestion.data.lexical('поездок', {'role': 'employee', 'departments': ['it']})
+    # Lexical retrieval remains useful if the semantic service is unavailable.
+    class FailedVector:
+        def similarity_search(self, **kwargs):
+            raise RuntimeError('offline')
+    assert await EnhancedRetrieval(FailedVector(), ingestion.data).search('поездок', allowed, 2)
+
+
+async def test_personal_facts_persist_deduplicate_and_follow_access_scope(pipeline):
+    from apiagent.services.personal_memory import PersonalFacts
+    _, _, catalog, _, _, _ = pipeline
+    facts = PersonalFacts(catalog)
+    alice = {'user_id': 'alice', 'role': 'programmer', 'departments': ['it']}
+    identifiers = await asyncio.gather(*(facts.remember(alice, 'conversation', 'Use Python 3.12') for _ in range(2)))
+    assert identifiers[0] == identifiers[1]
+    recovered = PersonalFacts(catalog)
+    assert (await recovered.list(alice))[0]['source_thread'] == 'conversation'
+    assert not await recovered.list({**alice, 'user_id': 'bob'})
+    assert not await recovered.list({**alice, 'role': 'employee'})
+    assert not await recovered.list({**alice, 'departments': ['hr']})
+    assert not await recovered.forget({**alice, 'user_id': 'bob'}, identifiers[0])
+    with pytest.raises(ValueError, match='Пароли'):
+        await facts.remember(alice, 'conversation', 'password=secret-value')
+    assert await recovered.forget(alice, identifiers[0])
+    assert not await recovered.list(alice)
+
+
+async def test_public_api_never_uses_internal_public_documents_or_client_roles(pipeline):
+    from apiagent.services.public_consultant import PublicConsultant
+    from langchain_core.messages import AIMessage
+    client, _, catalog, _, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Internal policy', content='INTERNAL_SECRET internal details', is_public=True))
+    class Model:
+        def __init__(self):
+            self.calls = []
+        async def ainvoke(self, messages):
+            self.calls.append(messages)
+            return AIMessage(content='Support is available Monday.')
+    model = Model()
+    consultant = PublicConsultant(ingestion.data, model)
+    app = FastAPI()
+    settings = Settings(consultant_enabled=True, consultant_api_key='k' * 40, internal_api_key='internal')
+    app.include_router(create_api_router(MagicMock(), ingestion.documents, settings, catalog_service=catalog,
+        knowledge_data=ingestion.data, consultant_service=consultant))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://test') as external:
+        path = '/api/v1/consultant/chat'
+        assert (await external.post(path, json={'message': 'Support'}, headers={'X-Internal-Token': 'internal'})).status_code == 401
+        assert (await external.post(path, json={'message': 'Support', 'user_context': {'role': 'admin'}}, headers={'X-Consultant-Key': 'k' * 40})).status_code == 422
+        response = await external.post(path, json={'message': 'Support'}, headers={'X-Consultant-Key': 'k' * 40})
+        assert response.status_code == 200 and not response.json()['sources'] and not model.calls
+        published = await client.post('/api/v1/documents/publication/' + root.document_id, params={'publisher_id': 'admin'},
+            json={'title': 'Public support', 'content': 'Support is available Monday.'})
+        assert published.status_code == 200
+        response = await external.post(path, json={'message': 'Support'}, headers={'X-Consultant-Key': 'k' * 40})
+        assert response.status_code == 200 and len(response.json()['sources']) == 1
+        assert 'INTERNAL_SECRET' not in str(model.calls)
+        assert set(response.json()['sources'][0]) == {'publication_id', 'title'}
+        await client.delete('/api/v1/documents/publication/' + root.document_id)
+        response = await external.post(path, json={'message': 'Support'}, headers={'X-Consultant-Key': 'k' * 40})
+        assert not response.json()['sources'] and len(model.calls) == 1
+
+
+async def test_publication_is_withdrawn_on_new_version_and_during_generation(pipeline):
+    from apiagent.services.public_consultant import PublicConsultant
+    from langchain_core.messages import AIMessage
+    _, _, _, _, ingestion, store = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Support', content='Internal support'))
+    await ingestion.data.publish(root.document_id, 'Support', 'Support on Monday', 'admin')
+    class WithdrawingModel:
+        async def ainvoke(self, messages):
+            await ingestion.data.withdraw(root.document_id)
+            return AIMessage(content='Stale public answer')
+    result = await PublicConsultant(ingestion.data, WithdrawingModel()).chat('Support')
+    assert not result['sources'] and 'Stale public answer' not in result['reply']
+    await ingestion.data.publish(root.document_id, 'Support', 'Support on Monday', 'admin')
+    task = BulkUploadTask(uuid.uuid4().hex, 'new.txt', b'New support content', 'Support', None, False,
+        'text/plain', [], [], version_parent_id=root.document_id)
+    await ingestion(task, store.save(task.data, suffix='.txt'))
+    assert not await ingestion.data.public_search('Support')

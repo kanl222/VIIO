@@ -10,6 +10,7 @@ import uuid
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from apiagent.interfaces._protocols import DocumentMetadata, IDocumentService, IVectorStore
+from apiagent.services.code_documents import split_code
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,8 @@ class DocumentService(IDocumentService):
         doc_id = document_id or f"doc-{uuid.uuid4().hex[:8]}"
         custom_metadata = metadata or {}
 
-        chunks = split_document_text(clean_content, self._chunk_size, self._chunk_overlap, self._chunk_unit)
+        code_parts = split_code(content, str(custom_metadata.get('filename', title))) if custom_metadata.get('kind') == 'code' else None
+        chunks = [part[0] for part in code_parts] if code_parts else split_document_text(clean_content, self._chunk_size, self._chunk_overlap, self._chunk_unit)
         if not chunks:
             chunks = [clean_content]
 
@@ -128,6 +130,7 @@ class DocumentService(IDocumentService):
         metadatas = [
             {
                 **custom_metadata,
+                **({'line_start': code_parts[idx][1], 'line_end': code_parts[idx][2]} if code_parts else {}),
                 "document_id": doc_id,
                 "title": clean_title,
                 "chunk_index": idx,

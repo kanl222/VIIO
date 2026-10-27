@@ -23,6 +23,7 @@ from langgraph.runtime import Runtime
 from apiagent.prompts import DEFAULT_SYSTEM_PROMPT, GENERAL_SYSTEM_PROMPT, REWRITE_SYSTEM_PROMPT
 from apiagent.services.request_policy import calculate, request_mode
 from apiagent.services.answer_sources import clean_answer, readable_reference, sources_from_reference, turn_provenance
+from apiagent.services.dialogue_summary import compact_dialogue
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,14 @@ logger = logging.getLogger(__name__)
 class AgentRuntimeContext(TypedDict, total=False):
     reference_context: str
     access_scope: str
+    user_notes: str
 
 
 class AgentState(MessagesState):
     history_scope: str
     history_start: int
+    dialogue_summary: str
+    summary_upto: int
 
 
 def scope_key(user_context: dict | None) -> str:
@@ -69,6 +73,13 @@ def needs_automatic_search(question: str) -> bool:
     if re.match(r"^/(?:code|db)(?:\s|$)", question.strip(), re.I):
         return False
     return calculate(question) is None and request_mode(question) == "knowledge"
+
+
+def with_user_notes(messages, runtime):
+    notes = (runtime.context or {}).get('user_notes', '')
+    if notes:
+        messages = messages_with_reference(messages, 'Пользовательские заметки (утверждения пользователя, не проверенные сведения организации):\n' + notes)
+    return messages
 
 
 def messages_with_retrieved_context(messages: Sequence[BaseMessage], context_max_chars: int = 12000) -> list[BaseMessage]:
@@ -120,6 +131,8 @@ def build_agent_graph(
     checkpointer: BaseCheckpointSaver | None = None,
     system_prompt: str | None = None,
     context_max_chars: int = 12000,
+    summary_after: int = 0,
+    history_max_chars: int = 18000,
 ) -> CompiledStateGraph:
     """Сборка и компиляция StateGraph агента с поддержкой инструментов и сохранением состояния.
 
@@ -166,7 +179,8 @@ def build_agent_graph(
 
         async def agent_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
             history, boundary = history_for_turn(state, runtime)
-            messages = messages_with_retrieved_context(history, context_max_chars)
+            bounded, summary_update = await compact_dialogue(history, state, boundary, llm, summary_after, history_max_chars)
+            messages = with_user_notes(messages_with_retrieved_context(bounded, context_max_chars), runtime)
             question = next(str(m.content) for m in reversed(history) if isinstance(m, HumanMessage))
             if not any(isinstance(m, SystemMessage) for m in messages):
                 messages = [SystemMessage(content=prompt_for(question))] + messages
@@ -176,7 +190,7 @@ def build_agent_graph(
             if isinstance(response.content, str) and not response.tool_calls:
                 response = response.model_copy(update={"content": clean_answer(response.content, sources),
                                                        "response_metadata": {**response.response_metadata, "sources": sources, "active_specialist": active}})
-            return {**boundary, "messages": [response]}
+            return {**boundary, **summary_update, "messages": [response]}
 
         builder.add_node("agent", agent_node)
         builder.add_node("tools", ToolNode(active_tools))
@@ -197,7 +211,8 @@ def build_agent_graph(
         async def agent_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
             reference = (runtime.context or {}).get("reference_context")
             history, boundary = history_for_turn(state, runtime)
-            messages = messages_with_reference(history, reference)
+            bounded, summary_update = await compact_dialogue(history, state, boundary, llm, summary_after, history_max_chars)
+            messages = with_user_notes(messages_with_reference(bounded, reference), runtime)
             question = next(str(m.content) for m in reversed(history) if isinstance(m, HumanMessage))
             if not any(isinstance(m, SystemMessage) for m in messages):
                 messages = [SystemMessage(content=prompt_for(question))] + messages
@@ -214,7 +229,7 @@ def build_agent_graph(
                     "knowledge_reference_chars": len(reference),
                     "knowledge_document_ids": re.findall(r'doc_id="([^"]+)"', reference),
                 }})
-            return {**boundary, "messages": [response]}
+            return {**boundary, **summary_update, "messages": [response]}
 
         builder.add_node("agent", agent_node)
         builder.add_edge("agent", END)

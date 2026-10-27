@@ -26,6 +26,7 @@ def build_access_filter(user_context: dict[str, Any] | None) -> Any | None:
     if not user_context:
         # Для неаутентифицированных запросов возвращаются только публичные документы компании
         return models.Filter(
+            must_not=[models.FieldCondition(key="metadata.kind", match=models.MatchValue(value="code"))],
             must=[
                 models.FieldCondition(
                     key="metadata.is_public",
@@ -79,7 +80,8 @@ def build_access_filter(user_context: dict[str, Any] | None) -> Any | None:
             )
         )
 
-    return models.Filter(should=should_conditions)
+    excluded = [] if role in {"admin", "programmer"} else [models.FieldCondition(key="metadata.kind", match=models.MatchValue(value="code"))]
+    return models.Filter(should=should_conditions, must_not=excluded)
 
 
 def create_knowledge_search_tool(vector_store: IVectorStore, k: int = 5) -> BaseTool:
@@ -127,26 +129,32 @@ def create_knowledge_search_tool(vector_store: IVectorStore, k: int = 5) -> Base
             logger.error("Ошибка при выполнении поиска в базе знаний: %s", exc)
             return f"Ошибка при обращении к базе знаний: {exc}"
 
-        if not docs:
-            return "Ничего не найдено в базе знаний в рамках ваших прав доступа."
-
-        formatted_parts: list[str] = []
-        for idx, doc in enumerate(docs, 1):
-            title = "Без названия"
-            doc_id = "unknown"
-            if hasattr(doc, "metadata") and doc.metadata:
-                title = doc.metadata.get("title", "Без названия")
-                doc_id = doc.metadata.get("document_id", "unknown")
-            content = getattr(doc, "page_content", str(doc))
-
-            # Защита от prompt injection: экранирование закрывающего тега
-            safe_content = content.replace("</context>", "&lt;/context&gt;")
-            formatted_parts.append(
-                f'<context source="{escape(str(title), quote=True)}" doc_id="{escape(str(doc_id), quote=True)}" chunk="{idx}">\n'
-                f"{safe_content}\n"
-                f"</context>"
-            )
-
-        return "\n\n".join(formatted_parts)
+        return format_documents(docs)
 
     return search_knowledge_base
+
+
+def format_documents(docs):
+    if not docs:
+        return "Ничего не найдено в базе знаний в рамках ваших прав доступа."
+
+    formatted_parts: list[str] = []
+    for idx, doc in enumerate(docs, 1):
+        title = "Без названия"
+        doc_id = "unknown"
+        if hasattr(doc, "metadata") and doc.metadata:
+            title = doc.metadata.get("title", "Без названия")
+            doc_id = doc.metadata.get("document_id", "unknown")
+        content = getattr(doc, "page_content", str(doc))
+        if doc.metadata.get("kind") == "code":
+            content = f"Файл: {doc.metadata.get('filename', title)}, строки {doc.metadata.get('line_start', 1)}–{doc.metadata.get('line_end', 1)}\n" + content
+
+        # Защита от prompt injection: экранирование закрывающего тега
+        safe_content = content.replace("</context>", "&lt;/context&gt;")
+        formatted_parts.append(
+            f'<context source="{escape(str(title), quote=True)}" doc_id="{escape(str(doc_id), quote=True)}" chunk="{idx}">\n'
+            f"{safe_content}\n"
+            f"</context>"
+        )
+
+    return "\n\n".join(formatted_parts)

@@ -26,6 +26,10 @@ from apiagent.services.document_ingestion import DocumentIngestion
 from apiagent.services.database_agent import DatabaseAgentService
 from apiagent.services.document_catalog import DocumentCatalogService
 from apiagent.services.file_store import LocalFileStore
+from apiagent.services.knowledge_data import KnowledgeData
+from apiagent.services.enhanced_retrieval import EnhancedRetrieval
+from apiagent.services.personal_memory import PersonalFacts, MemoryAgent
+from apiagent.services.public_consultant import PublicConsultant
 from apiagent.tools.postgres_tool import create_postgres_readonly_tool
 from apiagent.services.coding_agent import (
     CODING_SYSTEM_PROMPT, DELEGATION_PROMPT, CodingAgentService,
@@ -92,6 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if bulk_q is not None:
                 await bulk_q.setup()
             documents = app.state.document_service
+            data = KnowledgeData(catalog_svc)
             if isinstance(documents, DocumentService):
                 import anyio.to_thread
                 metadata = await anyio.to_thread.run_sync(documents.existing_document_metadata)
@@ -101,6 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                             chunks_count=item["chunks_count"], owner_id=item.get("owner_id"),
                             is_public=item.get("is_public", False), allowed_roles=item.get("allowed_roles", []),
                             allowed_departments=item.get("allowed_departments", []))
+                    if item.get('search_text') and not await data.has_text(item['document_id']):
+                        await data.save_text(item['document_id'], item['search_text'], item.get('filename', ''), item.get('title', ''))
             ingestion = getattr(app.state, 'ingestion_service', None)
             if isinstance(ingestion, DocumentIngestion):
                 await ingestion.recover_versions()
@@ -158,11 +165,14 @@ def create_app(
     file_store: LocalFileStore | None = None
     catalog_service: DocumentCatalogService | None = None
     bulk_queue: PersistentBulkQueue | None = None
+    data = None
+    consultant = None
 
     if app_settings.documents_catalog_enabled:
         file_store = LocalFileStore(app_settings.documents_storage_path)
         # The catalog pool is opened independently of checkpointing.
         catalog_service = DocumentCatalogService(None)
+        data = KnowledgeData(catalog_service)
 
     if document_service is None or agent_service is None:
         logger.info(
@@ -192,6 +202,9 @@ def create_app(
             llm = create_chat_model(app_settings)
 
             search_tool = create_knowledge_search_tool(vector_store=vector_store)
+            enhanced = EnhancedRetrieval(vector_store, data) if data else None
+            if enhanced:
+                search_tool = enhanced.tool(search_tool, 5)
 
             # Изначально используем переданный чекпоинтер или MemorySaver.
             # Если база PostgreSQL доступна, AsyncPostgresSaver подключится в lifespan.
@@ -206,10 +219,12 @@ def create_app(
                     tools=[],
                     checkpointer=initial_checkpointer,
                     system_prompt=CODING_SYSTEM_PROMPT,
+                    summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
+                    history_max_chars=app_settings.conversation_history_max_chars,
                 )
                 coding_service = CodingAgentService(
                     coding_graph, app_settings.coding_allowed_roles,
-                    knowledge_search=create_knowledge_search_tool(vector_store=vector_store, k=2),
+                    knowledge_search=enhanced.tool(create_knowledge_search_tool(vector_store=vector_store, k=3), 3) if enhanced else create_knowledge_search_tool(vector_store=vector_store, k=2),
                     context_max_chars=app_settings.coding_context_max_chars,
                 )
                 active_tools.append(create_coding_delegation_tool(coding_service))
@@ -220,6 +235,8 @@ def create_app(
                 checkpointer=initial_checkpointer,
                 system_prompt=DEFAULT_SYSTEM_PROMPT + (DELEGATION_PROMPT if coding_service else ""),
                 context_max_chars=app_settings.rag_context_max_chars,
+                summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
+                history_max_chars=app_settings.conversation_history_max_chars,
             )
             agent_service = AgentService(graph=graph)
             if coding_service:
@@ -228,6 +245,12 @@ def create_app(
                 agent_service, llm, create_postgres_readonly_tool(app_settings),
                 enabled=app_settings.pgsql_enabled,
             )
+            if catalog_service:
+                agent_service = MemoryAgent(agent_service, PersonalFacts(catalog_service))
+            if app_settings.consultant_enabled:
+                if not data or not app_settings.consultant_api_key or len(app_settings.consultant_api_key) < 32 or app_settings.consultant_api_key == app_settings.internal_api_key:
+                    raise ValueError('Для внешнего консультанта нужны каталог и отдельный CONSULTANT_API_KEY длиной от 32 символов.')
+                consultant = PublicConsultant(data, create_chat_model(app_settings))
 
     ingestion = None
     if file_store is not None and catalog_service is not None:
@@ -259,6 +282,8 @@ def create_app(
         file_store=file_store,
         bulk_queue=bulk_queue,
         ingestion_service=ingestion,
+        knowledge_data=data,
+        consultant_service=consultant,
     )
     app.include_router(api_router)
 

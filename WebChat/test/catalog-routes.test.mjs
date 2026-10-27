@@ -385,3 +385,41 @@ test('New-version upload preserves target ID and trusted session owner', async (
     assert.equal(response.status, 202);
   } finally { await close(); }
 });
+
+
+test('External publication is restricted to admin and uses session publisher', async () => {
+  let calls = 0;
+  const doc = 'doc-0123456789abcdef0123456789abcdef';
+  const { request, close } = await setupTestApp(async (url, options) => {
+    calls++;
+    if (options.method === 'POST') {
+      assert.equal(new URL(String(url)).searchParams.get('publisher_id'), '11111111-1111-1111-1111-111111111111');
+      assert.deepEqual(JSON.parse(options.body), { title: 'Public help', content: 'Approved public text' });
+    }
+    return { status: 200, json: async () => ({ status: 'published' }) };
+  });
+  try {
+    for (const method of ['GET', 'POST', 'DELETE']) {
+      assert.equal((await request(`/api/admin/documents/publication/${doc}`, { method, headers: { cookie: 'session_id=emp-sess' } })).status, 403);
+    }
+    assert.equal(calls, 0);
+    assert.equal((await request(`/api/admin/documents/publication/${doc}?publisher_id=forged`, {
+      method: 'POST', headers: { cookie: 'session_id=admin-sess', 'Content-Type': 'application/json' },
+      body: { title: 'Public help', content: 'Approved public text', publisher_id: 'forged', user_context: { role: 'admin' } },
+    })).status, 200);
+    assert.equal(calls, 1);
+  } finally { await close(); }
+});
+
+test('Publication rejects empty public excerpts without forwarding', async () => {
+  let calls = 0;
+  const { request, close } = await setupTestApp(async () => { calls++; throw Error('must not forward'); });
+  try {
+    const response = await request('/api/admin/documents/publication/doc-12345678', {
+      method: 'POST', headers: { cookie: 'session_id=admin-sess', 'Content-Type': 'application/json' },
+      body: { title: 'Title', content: ' ' },
+    });
+    assert.equal(response.status, 400);
+    assert.equal(calls, 0);
+  } finally { await close(); }
+});

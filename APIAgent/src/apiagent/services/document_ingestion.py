@@ -12,6 +12,7 @@ import anyio.to_thread
 from apiagent.services.document_catalog import sha256_of_bytes
 from apiagent.services.pdf_extraction import PdfExtractionService
 from apiagent.services.bulk_queue import BulkUploadTask, PreparedReview, DocumentVersionConflict
+from apiagent.services.knowledge_data import KnowledgeData
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class DocumentIngestion:
         self.catalog = catalog
         self.store = store
         self.settings = settings
+        self.data = KnowledgeData(catalog)
 
     async def prepare_pdf(self, task):
         extracted = await PdfExtractionService(self.settings).extract(task.data)
@@ -36,11 +38,15 @@ class DocumentIngestion:
                 yield
 
     async def __call__(self, task, storage_key):
+        if task.kind == 'code':
+            task.is_public, task.allowed_roles, task.allowed_departments = False, ['programmer', 'admin'], []
         if task.version_parent_id:
             return await self._version(task, storage_key)
         digest = sha256_of_bytes(task.data)
         identity_fields = [task.owner_id, task.is_public, sorted(task.allowed_roles),
                            sorted(task.allowed_departments), digest]
+        if task.kind == 'code':
+            identity_fields.append('code')
         if task.reviewed_content is not None:
             identity_fields.append(sha256_of_bytes(task.reviewed_content.encode()))
         identity = json.dumps(identity_fields, ensure_ascii=False)
@@ -70,6 +76,9 @@ class DocumentIngestion:
             task.title = parent.title
             task.allowed_roles = parent.allowed_roles
             task.allowed_departments = parent.allowed_departments
+            if task.kind == 'code' or parent.document_kind == 'code':
+                task.kind = 'code'
+                task.is_public, task.allowed_roles, task.allowed_departments = False, ['programmer', 'admin'], []
             return await self._index(task, storage_key, identifier, sha256_of_bytes(task.data),
                                      parent=parent, version=existing.version if existing else max(item.version for item in versions) + 1)
 
@@ -93,7 +102,7 @@ class DocumentIngestion:
         try:
             result = await anyio.to_thread.run_sync(partial(
                 self.documents.index_document, task.title, content,
-                {**task.metadata, 'ingestion_ready': False, 'is_active': parent is None, 'version': version}, task.is_public, task.allowed_roles,
+                {**task.metadata, 'kind': task.kind, 'filename': task.filename, 'ingestion_ready': False, 'is_active': parent is None, 'version': version}, task.is_public, task.allowed_roles,
                 task.allowed_departments, task.owner_id, document_id=identifier,
             ))
             await self.catalog.create(doc_id=identifier, title=task.title, chunks_count=result.chunks_count,
@@ -101,7 +110,9 @@ class DocumentIngestion:
                 is_public=task.is_public, allowed_roles=task.allowed_roles,
                 allowed_departments=task.allowed_departments, storage_key=storage_key, status='processing',
                 family_id=(parent.family_id or parent.id) if parent else identifier,
-                version=version, parent_id=parent.id if parent else None, is_active=parent is None)
+                version=version, parent_id=parent.id if parent else None, is_active=parent is None, document_kind=task.kind,
+                original_filename=task.filename[:255])
+            await self.data.save_text(identifier, content, task.filename, task.title)
             await anyio.to_thread.run_sync(self.documents.publish_document, identifier)
             if parent:
                 activation_started = True

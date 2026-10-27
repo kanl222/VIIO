@@ -36,6 +36,8 @@ export interface CatalogDocument {
   version: number;
   family_id?: string;
   is_active: boolean;
+  document_kind?: string;
+  original_filename?: string;
   status: string;
   is_public: boolean;
   allowed_roles: string[];
@@ -122,3 +124,8 @@ export const approveUploadReview = (review: UploadReview) => apiFetch(`/api/admi
 });
 export const cancelBulk = (taskId: string) => apiFetch(`/api/admin/documents/bulk-cancel/${encodeURIComponent(taskId)}`, { method: 'POST' });
 export const documentVersions = (docId: string, signal?: AbortSignal) => apiFetch<{ items: CatalogDocument[] }>(`/api/admin/documents/versions/${encodeURIComponent(docId)}`, { signal });
+
+export interface Publication { title: string; content: string; published_at?: string }
+export const getPublication = (id: string, signal?: AbortSignal) => apiFetch<{ publication: Publication | null }>(`/api/admin/documents/publication/${encodeURIComponent(id)}`, { signal });
+export const publishDocument = (id: string, publication: Publication) => apiFetch(`/api/admin/documents/publication/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify(publication) });
+export const withdrawPublication = (id: string) => apiFetch(`/api/admin/documents/publication/${encodeURIComponent(id)}`, { method: 'DELETE' });

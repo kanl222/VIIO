@@ -55,6 +55,7 @@ class BulkUploadTask:
     metadata: dict[str, Any] = field(default_factory=dict)
     reviewed_content: str | None = None
     version_parent_id: str | None = None
+    kind: str = 'document'
 
 
 @dataclass

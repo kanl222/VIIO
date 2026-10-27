@@ -357,5 +357,29 @@ export function createAdminRouter(
   router.get('/documents/bulk-review/:id', uploadAction('review', 'GET'));
   router.post('/documents/bulk-review/:id', uploadAction('review', 'POST'));
   router.post('/documents/bulk-cancel/:id', uploadAction('cancel', 'POST'));
+  const publication: RequestHandler = async (req: AuthenticatedRequest, res) => {
+    const identifier = String(req.params.id);
+    if (!docId.test(identifier)) { res.status(400).json({ detail: 'Некорректный документ.' }); return; }
+    let body: string | undefined;
+    if (req.method === 'POST') {
+      const { title, content } = req.body || {};
+      if (typeof title !== 'string' || !title.trim() || title.length > 255 || typeof content !== 'string' || !content.trim() || content.length > 50000) {
+        res.status(400).json({ detail: 'Укажите заголовок и проверенный текст до 50 000 символов.' }); return;
+      }
+      body = JSON.stringify({ title, content });
+    }
+    try {
+      const query = req.method === 'POST' ? `?publisher_id=${encodeURIComponent(String(req.user!.id))}` : '';
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/publication/${identifier}${query}`, {
+        method: req.method, body,
+        headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token', 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
+      });
+      res.status(response.status >= 500 ? 502 : response.status).json(await response.json());
+    } catch { res.status(502).json({ detail: 'Сервис публикации недоступен.' }); }
+  };
+  router.get('/documents/publication/:id', publication);
+  router.post('/documents/publication/:id', publication);
+  router.delete('/documents/publication/:id', publication);
   return router;
 }

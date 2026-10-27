@@ -6,18 +6,20 @@ import logging
 import mimetypes
 import uuid
 import inspect
+from hmac import compare_digest
 from pathlib import Path
 from urllib.parse import quote
 from typing import Any
 import anyio.to_thread
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response as FastAPIResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from apiagent.config import Settings
 from apiagent.interfaces._protocols import IAgentService, IDocumentService
 from apiagent.services.pdf_extraction import PdfExtractionService, PdfExtractionError
 from apiagent.services.document_access import can_read_document
+from apiagent.services.code_documents import is_code_file
 from apiagent.services.document_catalog import DocumentCatalogService
 
 logger = logging.getLogger(__name__)
@@ -142,6 +144,16 @@ class ReviewApprovalRequest(BaseModel):
     review_token: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
+class PublicationRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1, max_length=50000)
+
+
+class PublicQuestion(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    message: str = Field(min_length=1, max_length=4000)
+
+
 def create_api_router(
     agent_service: IAgentService,
     document_service: IDocumentService,
@@ -150,6 +162,8 @@ def create_api_router(
     file_store: Any | None = None,
     bulk_queue: Any | None = None,
     ingestion_service: Any | None = None,
+    knowledge_data: Any | None = None,
+    consultant_service: Any | None = None,
 ) -> APIRouter:
     """Создание и конфигурирование FastAPI роутера с зависимостями.
 
@@ -393,7 +407,7 @@ def create_api_router(
         media_type = record.mime_type or "application/octet-stream"
         safe_title = record.title.replace('\r', '').replace('\n', '').replace('"', "'")[:100]
         ext = _ext_for_mime(media_type)
-        filename = f"{safe_title}{ext}"
+        filename = (record.original_filename or f"{safe_title}{ext}").replace('\\', '/').rsplit('/', 1)[-1].replace('\r', '').replace('\n', '')
 
         return FastAPIResponse(
             content=data,
@@ -451,7 +465,7 @@ def create_api_router(
 
         tasks_info = []
         for upload in files:
-            filename = upload.filename or "document"
+            filename = (upload.filename or "document").replace('\\', '/').rsplit('/', 1)[-1][:255]
             data = await upload.read(settings.bulk_max_file_bytes + 1)
             await upload.close()
 
@@ -466,6 +480,8 @@ def create_api_router(
 
             suffix = Path(filename).suffix.lower()
             mime = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown', '.markdown': 'text/markdown'}.get(suffix)
+            if is_code_file(filename):
+                mime = 'text/plain'
             if mime is None or not data:
                 tasks_info.append({"task_id": None, "filename": filename, "status": "error", "error": "Поддерживаются непустые PDF, TXT и Markdown."})
                 continue
@@ -483,6 +499,7 @@ def create_api_router(
                 allowed_roles=roles,
                 allowed_departments=depts,
                 version_parent_id=version_parent_id,
+                kind='code' if is_code_file(filename) else 'document',
             )
             try:
                 result = await resolved(bulk_queue.enqueue(task))
@@ -575,6 +592,50 @@ def create_api_router(
         versions = await catalog_service.versions(record.family_id or record.id)
         return {'items': [_catalog_record_to_dict(item) for item in versions]}
 
+    @router.get('/api/v1/documents/publication/{doc_id}', dependencies=[Depends(verify_internal_token)], tags=['Publication'])
+    async def get_publication(doc_id: str):
+        require_catalog()
+        if knowledge_data is None:
+            raise HTTPException(503, 'Публикация недоступна')
+        return {'publication': await knowledge_data.publication(doc_id)}
+
+    @router.post('/api/v1/documents/publication/{doc_id}', dependencies=[Depends(verify_internal_token)], tags=['Publication'])
+    async def publish_document(doc_id: str, request: PublicationRequest, publisher_id: str = Query(min_length=1, max_length=64)):
+        require_catalog()
+        if knowledge_data is None:
+            raise HTTPException(503, 'Публикация недоступна')
+        if not request.title.strip() or not request.content.strip() or '\x00' in request.content:
+            raise HTTPException(400, 'Проверьте заголовок и текст публикации')
+        try:
+            await knowledge_data.publish(doc_id, request.title.strip(), request.content.strip(), publisher_id)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        return {'status': 'published'}
+
+    @router.delete('/api/v1/documents/publication/{doc_id}', dependencies=[Depends(verify_internal_token)], tags=['Publication'])
+    async def withdraw_publication(doc_id: str):
+        require_catalog()
+        if knowledge_data is None:
+            raise HTTPException(503, 'Публикация недоступна')
+        await knowledge_data.withdraw(doc_id)
+        return {'status': 'withdrawn'}
+
+    @router.post('/api/v1/consultant/chat', tags=['Consultant'])
+    async def public_chat(request: PublicQuestion, x_consultant_key: str | None = Header(default=None, alias='X-Consultant-Key')):
+        if not settings.consultant_enabled or not settings.consultant_api_key or consultant_service is None:
+            raise HTTPException(503, 'Внешний консультант не настроен')
+        if not x_consultant_key or not compare_digest(x_consultant_key.encode(), settings.consultant_api_key.encode()):
+            raise HTTPException(401, 'Необходим ключ внешнего API')
+        if not request.message.strip():
+            raise HTTPException(400, 'Укажите вопрос')
+        try:
+            return await consultant_service.chat(request.message.strip())
+        except TimeoutError:
+            raise HTTPException(504, 'Консультант занят. Повторите запрос позже.') from None
+        except Exception:
+            logger.exception('Ошибка внешнего консультанта')
+            raise HTTPException(503, 'Консультант временно недоступен') from None
+
     return router
 
 
@@ -595,6 +656,8 @@ def _catalog_record_to_dict(record: Any) -> dict:
         "family_id": record.family_id,
         "is_active": record.is_active,
         "parent_id": record.parent_id,
+        "document_kind": record.document_kind,
+        "original_filename": record.original_filename,
         "status": record.status,
         "is_public": record.is_public,
         "allowed_roles": record.allowed_roles,
