@@ -37,10 +37,13 @@ class CodingAgentService(AgentService):
         # Entries disappear once the last holder/waiter releases its reference.
         self._locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
-    async def chat(self, message, thread_id=None, user_context=None, *, knowledge_query: str | None = None):
+    def ensure_access(self, user_context):
         if (not user_context or not user_context.get("user_id") or user_context.get("role") not in {"programmer", "admin"}
                 or user_context.get("role") not in self.allowed_roles):
             raise PermissionError("Модель coder доступна пользователям с ролью «Программист» или «Администратор», если роль разрешена настройками.")
+
+    async def chat(self, message, thread_id=None, user_context=None, *, knowledge_query: str | None = None):
+        self.ensure_access(user_context)
         thread_id = thread_id or str(uuid.uuid4())
         identity = json.dumps([thread_id, user_context["user_id"]], ensure_ascii=False)
         # Separate text-only history from the former file/tool agent's checkpoints.
@@ -138,6 +141,12 @@ class MultiAgentService:
     async def _chat(self, message, thread_id, user_context):
         parts = message.strip().split(maxsplit=1)
         explicit = bool(parts and parts[0].lower() == "/code")
+        if self.model_first and (explicit or (request_mode(message) == "knowledge" and is_coding_request(message))):
+            # Deny before the supervisor can synthesize code after a search result.
+            try:
+                self.coding.ensure_access(user_context)
+            except PermissionError as exc:
+                return str(exc), thread_id
         active = await self.routes.get(thread_id, user_context)
         continuation = bool(active == "coder" and FOLLOWUP.search(message)
                             and not NO_CODE.search(message) and request_mode(message) != "rewrite"

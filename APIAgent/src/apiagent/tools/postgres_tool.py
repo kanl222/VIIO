@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Literal
+from typing import Annotated, Literal
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
@@ -51,11 +51,14 @@ def create_postgres_readonly_tool(settings: Settings, client: PostgresMCPClient 
     async def postgresql_readonly(
         operation: Literal["schemas", "tables", "describe", "query", "explain"],
         config: RunnableConfig,
-        schema_name: str = "public",
-        table: str = "",
-        sql: str = "",
+        schema_name: Annotated[str, "Schema name only, e.g. analytics for analytics.orders. For tables and describe."] = "public",
+        table: Annotated[str, "Table name only, e.g. orders for analytics.orders. Required for describe, separate from schema_name."] = "",
+        sql: Annotated[str, "A single SELECT using actual qualified table and column names. Required for query and explain."] = "",
     ) -> str:
-        """Read PostgreSQL schemas/data or get EXPLAIN without ANALYZE. No writes or query execution for plans."""
+        """Read connected PostgreSQL. operation: schemas=list schemas; tables=list tables in schema_name;
+        describe=columns/indexes for schema_name.table; query=execute SELECT sql, including COUNT/SUM;
+        explain=plan sql without ANALYZE. No writes. Use query for actual counts, not describe.
+        """
         context = config.get("configurable", {}).get("user_context")
         if not can_access_database(context):
             return "Доступ к PostgreSQL разрешён только программистам и администраторам."

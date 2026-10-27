@@ -25,6 +25,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Temporary MCP did not become ready' }
     & docker exec viio_apiagent python /tmp/evaluate_all_tools.py $remoteConfig | Out-File -Encoding utf8 $reportPath
     if ($LASTEXITCODE -ne 0) { throw "Evaluation failed; see $Report" }
+    & docker cp (Join-Path $PSScriptRoot 'evaluate_postgres_controls.py') 'viio_apiagent:/tmp/evaluate_postgres_controls.py'
+    if ($LASTEXITCODE -ne 0) { throw 'Could not copy adapter controls' }
+    & docker exec viio_apiagent python /tmp/evaluate_postgres_controls.py $remoteConfig | Out-File -Encoding utf8 ($reportPath + '.controls.jsonl')
+    if ($LASTEXITCODE -ne 0) { throw 'Adapter controls failed' }
 } finally {
     & docker exec viio_apiagent python -c "from pathlib import Path; Path('$remoteConfig').unlink(missing_ok=True)"
     & docker @composeArgs down --volumes

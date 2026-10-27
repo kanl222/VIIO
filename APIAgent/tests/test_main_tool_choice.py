@@ -13,6 +13,7 @@ from apiagent.services.knowledge_data import excerpt
 from apiagent.tools.search_tool import create_knowledge_search_tool
 from test_required_retrieval import NoToolCallsModel
 from test_database_agent import tool_fixture
+from apiagent.services.coding_agent import CodingAgentService, MultiAgentService, create_coding_delegation_tool
 
 
 @pytest.mark.asyncio
@@ -111,3 +112,40 @@ def test_excerpt_keeps_list_method_instead_of_only_intro_and_single_lookup():
     selected, line = excerpt(text, 'Как получить список доступных отчётов?', limit=600)
     assert 'getTreeForUser()' in selected and len(selected) <= 600
     assert line > 1
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_allow_supervisor_to_bypass_coder():
+    store = MagicMock()
+    store.similarity_search.return_value = [Document(page_content='SSRS=1', metadata={'title':'Типы','document_id':'doc-types'})]
+    saver = MemorySaver()
+    coder = CodingAgentService(build_agent_graph(NoToolCallsModel(messages=iter([AIMessage(content='specialist code')])), [], saver, system_prompt='Только код'), ['programmer'], create_knowledge_search_tool(store))
+    supervisor = NoToolCallsModel(messages=iter([
+        AIMessage(content='', tool_calls=[{'name':'search_knowledge_base','args':{'query':'ИСЛО типы'},'id':'model-search'}]),
+        AIMessage(content='supervisor must not generate code'),
+    ]))
+    graph = build_agent_graph(supervisor, [create_knowledge_search_tool(store),create_coding_delegation_tool(coder)], saver, model_first_tools=True)
+    answer, _ = await MultiAgentService(AgentService(graph), coder, model_first=True).chat('Напиши Python-словарь типов ИСЛО', 'coding-after-search', {'user_id':'u','role':'programmer'})
+    assert answer == 'specialist code' and answer.active_specialist == 'coder'
+    state = await graph.aget_state({'configurable':{'thread_id':'coding-after-search'}})
+    calls = [call['name'] for message in state.values['messages'] for call in getattr(message,'tool_calls',[])]
+    assert calls == ['search_knowledge_base','coding_agent']
+
+
+@pytest.mark.asyncio
+async def test_employee_coding_request_is_denied_before_supervisor_can_search():
+    general = MagicMock()
+    coder = CodingAgentService(MagicMock(), ['programmer','admin'])
+    answer, _ = await MultiAgentService(general,coder,model_first=True).chat('Напиши Python-словарь для ИСЛО', 't', {'user_id':'u','role':'employee'})
+    assert 'доступна' in answer
+    general.chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_employee_can_still_ask_general_sql_theory():
+    general = MagicMock()
+    general.chat = AsyncMock(return_value=('SQL is a query language','t'))
+    coder = CodingAgentService(MagicMock(), ['programmer','admin'])
+    answer, _ = await MultiAgentService(general,coder,model_first=True).chat('Что такое SQL?', 't', {'user_id':'u','role':'employee'})
+    assert answer == 'SQL is a query language'
+    general.chat.assert_awaited_once()

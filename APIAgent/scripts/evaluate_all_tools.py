@@ -39,11 +39,15 @@ def emit(row):
 class Trace(BaseCallbackHandler):
     def __init__(self):
         self.calls = []
+        self.generations = []
 
     def on_llm_end(self, response, **kwargs):
         for generations in response.generations:
             for generation in generations:
-                for call in getattr(getattr(generation, 'message', None), 'tool_calls', []):
+                message = getattr(generation, 'message', None)
+                self.generations.append({'model': (response.llm_output or {}).get('model_name') or getattr(message,'response_metadata',{}).get('model_name'),
+                                         'output_chars': len(str(getattr(message,'content','')))})
+                for call in getattr(message, 'tool_calls', []):
                     self.calls.append({'name': call['name'], 'args': call['args'], 'origin': 'model'})
 
 
@@ -104,9 +108,15 @@ async def main(config_path):
         model.callbacks = [trace]
         return model
     async def backend_call(self, name, arguments):
-        result = await original_backend(self, name, arguments)
-        backend_calls.append({'operation': name, 'args': arguments, 'result': result[:3500]})
-        return result
+        event = {'operation': name, 'args': arguments}
+        backend_calls.append(event)
+        try:
+            result = await original_backend(self, name, arguments)
+            event.update(result=result[:3500], status='returned')
+            return result
+        except Exception as exc:
+            event.update(status='failed', error=type(exc).__name__)
+            raise
     apiagent.create_chat_model, apiagent.create_coding_model = chat_model, coder_model
     PostgresMCPClient.call = backend_call
     saver = MemorySaver()
@@ -130,6 +140,7 @@ async def main(config_path):
                                 headers={'X-Internal-Token': base.internal_api_key}) as client:
         async def ask(identifier, prompt, *, context=None, thread=None, validate=None, expected_operation=None):
             trace.calls.clear()
+            trace.generations.clear()
             backend_calls.clear()
             tid = owner + '-' + (thread or identifier)
             started = time.monotonic()
@@ -144,6 +155,7 @@ async def main(config_path):
                 latest = max((i for i, m in enumerate(messages) if m.type == 'human' and m.content == prompt), default=-1)
                 calls = [call for m in messages[latest+1:] for call in getattr(m,'tool_calls',[])] if latest >= 0 else []
                 row['model_calls'] = list(trace.calls)
+                row['model_generations'] = list(trace.generations)
                 row['application_calls'] = [{'name': call['name'], 'args': call['args']} for call in calls if call['id'].startswith(('knowledge-','fallback-'))]
                 row['backend_calls'] = list(backend_calls)
                 row['validation'] = validate(row) if validate else {'pass': response.status_code == 200, 'scope': 'transport only; manual quality review required'}
@@ -175,7 +187,7 @@ async def main(config_path):
                       validate=lambda row: literal_mapping(row['reply'], 'report_types', {'SSRS':1, 'ИСЛО':2}))
             await ask('coder_directions', 'Напиши Python-словарь direction_codes для параметра flag_sp отчётов SSRS: ключи ВЗН, ОНЛП и 1191, значения как в ИСЛО.',
                       validate=lambda row: literal_mapping(row['reply'], 'direction_codes', {'ВЗН':10,'ОНЛП':11,'1191':12}))
-            query_row = await ask('coder_sql', 'Напиши один SQL-запрос для каталога отчётов ИСЛО: таблица reports.get_report_parent_hierarchy содержит report_type и is_active. Нужно число активных отчётов каждого report_type, сортировка по report_type.',
+            query_row = await ask('coder_sql', 'Напиши один SQL-запрос PostgreSQL для каталога отчётов ИСЛО: таблица reports.get_report_parent_hierarchy содержит report_type и is_active типа boolean. Нужно число активных отчётов каждого report_type, сортировка по report_type.',
                                  validate=contains('SELECT','report_type','is_active'))
             blocks = re.findall(r'```(?:sql)?\s*\n([\s\S]*?)```', query_row.get('reply',''))
             if blocks and re.match(r'^\s*SELECT\b', blocks[0], re.I):

@@ -199,12 +199,12 @@ def build_agent_graph(
                 remaining = max(0, 3 - len(calls))
                 response = AIMessage(content=response.content, tool_calls=response.tool_calls[:remaining]) if remaining else AIMessage(
                     content="Не удалось завершить проверку за три обращения к инструментам. Уточните вопрос.")
-            if model_first_tools and not response.tool_calls and not calls:
-                # Small models occasionally answer without a required tool. One audited fallback.
+            if model_first_tools and not response.tool_calls:
+                # Search is not delegation: a coding task still needs the specialist.
                 names = {tool.name for tool in active_tools}
                 if mode == "knowledge" and "coding_agent" in names and is_coding_request(question):
-                    response = AIMessage(content="", tool_calls=[{"name": "coding_agent", "args": {"task": question}, "id": "fallback-code-" + uuid.uuid4().hex}])
-                elif has_search and needs_automatic_search(question):
+                    response = AIMessage(content="", tool_calls=[{"name": "coding_agent", "args": {"task": question}, "id": "fallback-code-" + uuid.uuid4().hex}]) if len(calls) < 3 else AIMessage(content="Не удалось передать задачу coder за три обращения к инструментам. Уточните задачу или используйте /code.")
+                elif not calls and has_search and needs_automatic_search(question):
                     response = AIMessage(content="", tool_calls=[{"name": "search_knowledge_base", "args": {"query": question}, "id": "knowledge-" + uuid.uuid4().hex}])
             sources, active = turn_provenance(history)
             if isinstance(response.content, str) and not response.tool_calls:
