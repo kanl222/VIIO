@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -48,6 +49,12 @@ def test_unconfigured_document_key_fails_closed():
 def test_production_rejects_missing_or_equal_keys():
     with pytest.raises(ValueError):create_app(Settings(_env_file=None,secure_runtime=True),agent_service=AsyncMock())
     with pytest.raises(ValueError):create_app(Settings(_env_file=None,secure_runtime=True,chat_api_key='k'*40,documents_read_key='k'*40),agent_service=AsyncMock())
+
+def test_legacy_consultant_env_cannot_require_a_consultant_model_or_secret(monkeypatch):
+    monkeypatch.setenv('CONSULTANT_ENABLED','true')
+    with patch('assistent.create_chat_model'),patch('assistent.create_coding_model'),patch('assistent.build_agent_graph'):
+        app=create_app(Settings(_env_file=None,secure_runtime=True,chat_api_key='c'*40,documents_read_key='r'*40))
+    assert '/api/v1/consultant/chat' not in app.openapi()['paths']
 
 def test_mid_generation_revocation_suppresses_answer(monkeypatch):
     epoch=AsyncMock(side_effect=['a'*32,'b'*32])
