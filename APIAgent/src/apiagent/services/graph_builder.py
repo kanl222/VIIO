@@ -195,10 +195,14 @@ def build_agent_graph(
             mode = request_mode(question) if task_modes else "knowledge"
             calls = [call for m in turn if isinstance(m, AIMessage) for call in m.tool_calls]
             response = await (llm if mode != "knowledge" or (model_first_tools and len(calls) >= 3) else llm_with_tools).ainvoke(messages)
+            if model_first_tools and response.tool_calls:
+                remaining = max(0, 3 - len(calls))
+                response = AIMessage(content=response.content, tool_calls=response.tool_calls[:remaining]) if remaining else AIMessage(
+                    content="Не удалось завершить проверку за три обращения к инструментам. Уточните вопрос.")
             if model_first_tools and not response.tool_calls and not calls:
                 # Small models occasionally answer without a required tool. One audited fallback.
                 names = {tool.name for tool in active_tools}
-                if "coding_agent" in names and is_coding_request(question):
+                if mode == "knowledge" and "coding_agent" in names and is_coding_request(question):
                     response = AIMessage(content="", tool_calls=[{"name": "coding_agent", "args": {"task": question}, "id": "fallback-code-" + uuid.uuid4().hex}])
                 elif has_search and needs_automatic_search(question):
                     response = AIMessage(content="", tool_calls=[{"name": "search_knowledge_base", "args": {"query": question}, "id": "knowledge-" + uuid.uuid4().hex}])

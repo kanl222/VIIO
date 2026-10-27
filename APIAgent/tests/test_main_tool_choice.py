@@ -53,6 +53,17 @@ async def test_tool_loop_stops_after_three_rounds():
     assert store.similarity_search.call_count == 3 and not answer.sources
 
 
+@pytest.mark.asyncio
+async def test_unbound_model_cannot_exceed_tool_budget():
+    store = MagicMock()
+    store.similarity_search.return_value = []
+    responses = [AIMessage(content='', tool_calls=[{'name': 'search_knowledge_base', 'args': {'query': 'ИСЛО'}, 'id': f'loop-{i}'}]) for i in range(4)]
+    model = NoToolCallsModel(messages=iter(responses))
+    answer, _ = await AgentService(build_agent_graph(model, [create_knowledge_search_tool(store)], model_first_tools=True)).chat('Что такое ИСЛО?')
+    assert store.similarity_search.call_count == 3
+    assert 'три обращения' in answer
+
+
 def test_only_cited_candidates_are_returned_and_missing_answers_have_no_sources():
     sources = [{'title': 'Статусы', 'document_id': 'one'}, {'title': 'Отчёты', 'document_id': 'two'}]
     assert cited_sources('active=7. Источник: Статусы', sources) == sources[:1]

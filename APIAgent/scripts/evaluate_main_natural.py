@@ -71,10 +71,13 @@ async def main():
                         cp = await saver.aget_tuple({"configurable": {"thread_id": tid}})
                         messages = cp.checkpoint["channel_values"].get("messages", []) if cp else []
                         last_human = max((i for i, message in enumerate(messages) if message.type == 'human'), default=-1)
+                        current_turn = last_human >= 0 and str(messages[last_human].content) == prompt
                         messages = messages[last_human + 1:]
+                        if label == 'main' and not current_turn:
+                            messages = []
                         calls = [{"name": call["name"], "origin": "application" if call["id"].startswith(("knowledge-", "fallback-")) else "model"}
                                  for message in messages for call in getattr(message, "tool_calls", [])]
-                        traces[label] = {"exists": bool(cp), "calls": calls,
+                        traces[label] = {"exists": bool(cp), "current_turn": current_turn, "calls": calls,
                                          "results": [message.name for message in messages if message.type == "tool"]}
                     item["trace"] = traces
                 except Exception as exc:
