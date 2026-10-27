@@ -350,3 +350,38 @@ test('Review and cancel preserve conflict responses from agent', async () => {
     assert.equal((await request(`/api/admin/documents/bulk-cancel/${task}`, { method: 'POST', headers: { cookie: 'session_id=admin-sess' } })).status, 409);
   } finally { await close(); }
 });
+
+
+test('Version history is admin-only and forwards the document identity', async () => {
+  let calls = 0;
+  const doc = 'doc-0123456789abcdef0123456789abcdef';
+  const { request, close } = await setupTestApp(async url => {
+    calls++;
+    assert.ok(String(url).endsWith('/api/v1/documents/versions/' + doc));
+    return { status: 200, json: async () => ({ items: [{ id: doc, version: 2, is_active: true }] }) };
+  });
+  try {
+    assert.equal((await request('/api/admin/documents/versions/' + doc, { headers: { cookie: 'session_id=emp-sess' } })).status, 403);
+    assert.equal(calls, 0);
+    const response = await request('/api/admin/documents/versions/' + doc, { headers: { cookie: 'session_id=admin-sess' } });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).items[0].is_active, true);
+  } finally { await close(); }
+});
+
+test('New-version upload preserves target ID and trusted session owner', async () => {
+  const doc = 'doc-0123456789abcdef0123456789abcdef';
+  const { request, close } = await setupTestApp(async (url, options) => {
+    const query = new URL(String(url)).searchParams;
+    assert.equal(query.get('version_parent_id'), doc);
+    assert.equal(query.get('owner_id'), '11111111-1111-1111-1111-111111111111');
+    assert.equal(options.method, 'POST');
+    return { ok: true, status: 202, json: async () => ({ tasks: [] }) };
+  });
+  try {
+    const response = await request(`/api/admin/documents/bulk?version_parent_id=${doc}&owner_id=forged`, {
+      method: 'POST', headers: { cookie: 'session_id=admin-sess', 'Content-Type': 'multipart/form-data; boundary=x' }, body: '--x--',
+    });
+    assert.equal(response.status, 202);
+  } finally { await close(); }
+});

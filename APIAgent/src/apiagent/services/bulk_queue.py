@@ -15,6 +15,10 @@ from typing import Any, Callable, Awaitable
 logger = logging.getLogger(__name__)
 
 
+class DocumentVersionConflict(ValueError):
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Задача очереди
 # ---------------------------------------------------------------------------
@@ -50,6 +54,7 @@ class BulkUploadTask:
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     reviewed_content: str | None = None
+    version_parent_id: str | None = None
 
 
 @dataclass

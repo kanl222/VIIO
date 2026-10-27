@@ -172,5 +172,8 @@ class DocumentService(IDocumentService):
     def publish_document(self, identifier):
         self._vector_store.publish_document(identifier)
 
+    def set_document_active(self, identifier, active):
+        self._vector_store.set_document_active(identifier, active)
+
     def existing_document_metadata(self):
         return self._vector_store.document_metadata()

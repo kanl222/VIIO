@@ -116,6 +116,8 @@ async def main(mode):
         elif mode == 'cleanup':
             state = json.loads(STATE.read_text())
             ids = [task['task_id'] for task in state['tasks'] if task['task_id']]
+            if state.get('version_task'):
+                ids.append(state['version_task'])
             dsn = make_conninfo(host=settings.postgres_host, port=settings.postgres_port, dbname=settings.postgres_db,
                 user=settings.postgres_user, password=settings.postgres_password)
             store = LocalFileStore(settings.documents_storage_path)
@@ -132,6 +134,48 @@ async def main(mode):
                 await conn.execute('DELETE FROM document_upload_jobs WHERE id=ANY(%s)', (ids,))
             vector.close()
             print(json.dumps({'stage': 'cleanup', 'fixture_jobs_removed': len(rows)}))
+        elif mode == 'version':
+            state = json.loads(STATE.read_text())
+            original_task = next(task for task in state['tasks'] if task['filename'].endswith('.txt'))
+            response = await client.get('/api/v1/documents/bulk-status', params={'task_ids': original_task['task_id']})
+            response.raise_for_status()
+            state['version_parent'] = response.json()['tasks'][0]['document_id']
+            response = await client.post('/api/v1/documents/bulk-upload',
+                params={'version_parent_id': state['version_parent'], 'is_public': True, 'allowed_roles': 'employee'},
+                files=[('files', ('replacement.txt', b'Updated version fixture.', 'text/plain'))])
+            response.raise_for_status()
+            state['version_task'] = response.json()['tasks'][0]['task_id']
+            STATE.write_text(json.dumps(state))
+            async with asyncio.timeout(180):
+                while True:
+                    response = await client.get('/api/v1/documents/bulk-status', params={'task_ids': state['version_task']})
+                    response.raise_for_status()
+                    task = response.json()['tasks'][0]
+                    if task['status'] in {'ready', 'error'}:
+                        break
+                    await asyncio.sleep(1)
+            assert task['status'] == 'ready', task
+            print(json.dumps({'stage': 'version_created', 'version': 2}))
+        elif mode == 'verify-version':
+            state = json.loads(STATE.read_text())
+            response = await client.get('/api/v1/documents/versions/' + state['version_parent'])
+            response.raise_for_status()
+            versions = response.json()['items']
+            assert [item['version'] for item in versions] == [2, 1]
+            assert [item['is_active'] for item in versions] == [True, False]
+            assert all(not item['is_public'] and item['allowed_roles'] == ['admin'] for item in versions)
+            for item, expected in zip(versions, [b'Updated version fixture.', 'Тестовый документ загрузки VIIO.'.encode()]):
+                original = await client.get('/api/v1/documents/download/' + item['id'], params={'user_role': 'admin'})
+                assert original.status_code == 200 and original.content == expected
+            from apiagent.models import create_embeddings
+            from apiagent.utils.vector_store import QdrantVectorStoreAdapter
+            with QdrantClient(url=settings.qdrant_url) as vector:
+                adapter = QdrantVectorStoreAdapter(vector, create_embeddings(settings), settings.qdrant_collection_name)
+                matches = adapter.similarity_search('version fixture', k=10, filter=models.Filter(must=[
+                    models.FieldCondition(key='metadata.document_id', match=models.MatchAny(any=[item['id'] for item in versions]))]))
+                assert matches and {doc.metadata['document_id'] for doc in matches} == {versions[0]['id']}
+            print(json.dumps({'stage': 'versions_verified_after_restart', 'history': 2,
+                              'originals': 'passed', 'access_inherited': 'passed', 'search_current_only': 'passed'}))
 
 
 if __name__ == '__main__':

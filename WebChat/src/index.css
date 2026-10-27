@@ -319,3 +319,7 @@ h1, h2, h3 { color: var(--ink); text-wrap: balance; }
 .upload-review { display: flex; flex-direction: column; gap: 16px; border-top: 1px solid var(--line); padding-top: 24px; min-width: 0; }
 .upload-review h3 { overflow-wrap: anywhere; margin: 0; }
 .upload-review p { margin: 0; line-height: 1.5; color: var(--muted); }
+
+.document-versions { list-style: none; padding: 0; margin: 0; }
+.document-versions li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.document-versions small { display: block; margin-top: 4px; color: var(--muted); }

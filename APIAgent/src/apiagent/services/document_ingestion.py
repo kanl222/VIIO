@@ -11,7 +11,7 @@ import anyio.to_thread
 
 from apiagent.services.document_catalog import sha256_of_bytes
 from apiagent.services.pdf_extraction import PdfExtractionService
-from apiagent.services.bulk_queue import BulkUploadTask, PreparedReview
+from apiagent.services.bulk_queue import BulkUploadTask, PreparedReview, DocumentVersionConflict
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,8 @@ class DocumentIngestion:
                 yield
 
     async def __call__(self, task, storage_key):
+        if task.version_parent_id:
+            return await self._version(task, storage_key)
         digest = sha256_of_bytes(task.data)
         identity_fields = [task.owner_id, task.is_public, sorted(task.allowed_roles),
                            sorted(task.allowed_departments), digest]
@@ -45,11 +47,39 @@ class DocumentIngestion:
         identifier = 'doc-' + uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
         async with self._document_lock(identifier):
             existing = await self.catalog.get(identifier)
-            if existing and existing.status in {'ready', 'indexed'} and existing.storage_key:
+            if existing and existing.status in {'ready', 'indexed', 'superseded'} and existing.storage_key:
                 return existing.id, existing.chunks_count
             return await self._index(task, storage_key, identifier, digest)
 
-    async def _index(self, task, storage_key, identifier, digest):
+    async def _version(self, task, storage_key):
+        parent = await self.catalog.get(task.version_parent_id)
+        if parent is None:
+            raise DocumentVersionConflict('Документ не найден. Выберите его в каталоге заново.')
+        family = parent.family_id or parent.id
+        identifier = 'doc-' + uuid.uuid5(uuid.NAMESPACE_URL, family + ':' + task.task_id).hex
+        async with self._document_lock(family):
+            existing = await self.catalog.get(identifier)
+            if existing and existing.status in {'ready', 'superseded'}:
+                return existing.id, existing.chunks_count
+            parent = await self.catalog.get(task.version_parent_id)
+            if parent is None or not parent.is_active or parent.status not in {'ready', 'indexed'}:
+                raise DocumentVersionConflict('Актуальная версия изменилась. Выберите документ в каталоге заново.')
+            versions = await self.catalog.versions(family)
+            # Versions inherit access and ownership even if a queued payload is altered.
+            task.owner_id, task.is_public = parent.owner_id, parent.is_public
+            task.title = parent.title
+            task.allowed_roles = parent.allowed_roles
+            task.allowed_departments = parent.allowed_departments
+            return await self._index(task, storage_key, identifier, sha256_of_bytes(task.data),
+                                     parent=parent, version=existing.version if existing else max(item.version for item in versions) + 1)
+
+    async def recover_versions(self):
+        for family in await self.catalog.pending_version_families():
+            async with self._document_lock(family):
+                for record in await self.catalog.versions(family):
+                    await anyio.to_thread.run_sync(self.documents.set_document_active, record.id, record.is_active)
+
+    async def _index(self, task, storage_key, identifier, digest, *, parent=None, version=1):
         if task.mime_type == 'application/pdf':
             if task.reviewed_content is None:
                 raise ValueError('PDF требует проверки текста перед индексацией')
@@ -59,23 +89,45 @@ class DocumentIngestion:
         if not content.strip() or '\x00' in content or len(content) > self.settings.pdf_max_chars:
             raise ValueError('Пустой, двоичный или слишком большой текст')
         await anyio.to_thread.run_sync(self.documents.delete_document, identifier)
+        activation_started = False
         try:
             result = await anyio.to_thread.run_sync(partial(
                 self.documents.index_document, task.title, content,
-                {**task.metadata, 'ingestion_ready': False}, task.is_public, task.allowed_roles,
+                {**task.metadata, 'ingestion_ready': False, 'is_active': parent is None, 'version': version}, task.is_public, task.allowed_roles,
                 task.allowed_departments, task.owner_id, document_id=identifier,
             ))
             await self.catalog.create(doc_id=identifier, title=task.title, chunks_count=result.chunks_count,
                 mime_type=task.mime_type, file_size=len(task.data), sha256=digest, owner_id=task.owner_id,
                 is_public=task.is_public, allowed_roles=task.allowed_roles,
-                allowed_departments=task.allowed_departments, storage_key=storage_key, status='processing')
+                allowed_departments=task.allowed_departments, storage_key=storage_key, status='processing',
+                family_id=(parent.family_id or parent.id) if parent else identifier,
+                version=version, parent_id=parent.id if parent else None, is_active=parent is None)
             await anyio.to_thread.run_sync(self.documents.publish_document, identifier)
-            await self.catalog.update_status(identifier, 'ready')
+            if parent:
+                activation_started = True
+                await anyio.to_thread.run_sync(self.documents.set_document_active, parent.id, False)
+                await anyio.to_thread.run_sync(self.documents.set_document_active, identifier, True)
+                await self.catalog.activate_version(identifier, parent.id)
+            else:
+                await self.catalog.update_status(identifier, 'ready')
             return identifier, result.chunks_count
-        except BaseException:
+        except BaseException as error:
+            if parent and activation_started:
+                try:
+                    current = await self.catalog.get(identifier)
+                except Exception:
+                    # Commit outcome is unknown. Startup recovery consults PostgreSQL
+                    # before touching either version's search visibility.
+                    logger.exception('Не удалось проверить активацию версии %s', identifier)
+                    raise error
+                if current and current.is_active and current.status == 'ready':
+                    return identifier, current.chunks_count
             # The same document ID and point IDs are used on retries.
             try:
                 await anyio.to_thread.run_sync(self.documents.delete_document, identifier)
+                if parent:
+                    await anyio.to_thread.run_sync(self.documents.set_document_active, parent.id, True)
+                    await self.catalog.delete(identifier)
             except Exception:
                 logger.exception('Не удалось убрать незавершённый индекс %s', identifier)
             raise

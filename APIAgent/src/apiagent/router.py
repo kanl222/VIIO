@@ -418,6 +418,7 @@ def create_api_router(
         allowed_roles: str = Query(default="employee"),
         allowed_departments: str = Query(default="general"),
         owner_id: str | None = Query(default=None),
+        version_parent_id: str | None = Query(default=None),
     ) -> dict:
         """Принять несколько файлов и поставить их в очередь индексации.
 
@@ -436,6 +437,17 @@ def create_api_router(
 
         roles = [r.strip() for r in allowed_roles.split(",") if r.strip()]
         depts = [d.strip() for d in allowed_departments.split(",") if d.strip()]
+        if version_parent_id:
+            require_catalog()
+            if len(files) != 1:
+                raise HTTPException(400, 'Для новой версии выберите один файл')
+            parent = await catalog_service.get(version_parent_id)
+            if parent is None:
+                raise HTTPException(404, 'Документ не найден')
+            if not parent.is_active or parent.status not in {'ready', 'indexed'}:
+                raise HTTPException(409, 'Актуальная версия изменилась. Обновите каталог.')
+            roles, depts = parent.allowed_roles, parent.allowed_departments
+            owner_id, is_public = parent.owner_id, parent.is_public
 
         tasks_info = []
         for upload in files:
@@ -470,6 +482,7 @@ def create_api_router(
                 mime_type=mime,
                 allowed_roles=roles,
                 allowed_departments=depts,
+                version_parent_id=version_parent_id,
             )
             try:
                 result = await resolved(bulk_queue.enqueue(task))
@@ -553,6 +566,15 @@ def create_api_router(
             raise HTTPException(409, 'Отменить можно только задание в очереди или на проверке')
         return {'task_id': task_id, 'status': 'cancelled'}
 
+    @router.get('/api/v1/documents/versions/{doc_id}', dependencies=[Depends(verify_internal_token)], tags=['Documents'])
+    async def document_versions(doc_id: str):
+        require_catalog()
+        record = await catalog_service.get(doc_id)
+        if record is None:
+            raise HTTPException(404, 'Документ не найден')
+        versions = await catalog_service.versions(record.family_id or record.id)
+        return {'items': [_catalog_record_to_dict(item) for item in versions]}
+
     return router
 
 
@@ -570,6 +592,8 @@ def _catalog_record_to_dict(record: Any) -> dict:
         "sha256": record.sha256,
         "owner_id": record.owner_id,
         "version": record.version,
+        "family_id": record.family_id,
+        "is_active": record.is_active,
         "parent_id": record.parent_id,
         "status": record.status,
         "is_public": record.is_public,

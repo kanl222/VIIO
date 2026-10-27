@@ -123,7 +123,8 @@ class QdrantVectorStoreAdapter(IVectorStore):
         try:
             if k <= 0:
                 return []
-            ready = models.Filter(must_not=[models.FieldCondition(key='metadata.ingestion_ready', match=models.MatchValue(value=False))])
+            ready = models.Filter(must_not=[models.FieldCondition(key=key, match=models.MatchValue(value=False))
+                for key in ('metadata.ingestion_ready', 'metadata.is_active')])
             filter = models.Filter(must=[filter, ready]) if filter is not None else ready
             semantic = self._store.similarity_search(query=query, k=k, filter=filter)
             titles = self._find_acronym_titles(query, k, filter)
@@ -194,6 +195,11 @@ class QdrantVectorStoreAdapter(IVectorStore):
 
     def publish_document(self, identifier: str) -> None:
         self._client.set_payload(self._collection_name, payload={'ingestion_ready': True},
+            points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
+            key='metadata', wait=True)
+
+    def set_document_active(self, identifier, active):
+        self._client.set_payload(self._collection_name, payload={'is_active': active},
             points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
             key='metadata', wait=True)
 

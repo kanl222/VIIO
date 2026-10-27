@@ -101,6 +101,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                             chunks_count=item["chunks_count"], owner_id=item.get("owner_id"),
                             is_public=item.get("is_public", False), allowed_roles=item.get("allowed_roles", []),
                             allowed_departments=item.get("allowed_departments", []))
+            ingestion = getattr(app.state, 'ingestion_service', None)
+            if isinstance(ingestion, DocumentIngestion):
+                await ingestion.recover_versions()
             if bulk_q is not None:
                 bulk_q.start()
         except Exception:
@@ -244,6 +247,7 @@ def create_app(
     app.state.enable_postgres_checkpointer = enable_postgres
     app.state.pool = None
     app.state.document_service = document_service
+    app.state.ingestion_service = ingestion
     app.state.catalog_service = catalog_service
     app.state.bulk_queue = bulk_queue
 

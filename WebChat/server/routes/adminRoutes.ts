@@ -252,6 +252,13 @@ export function createAdminRouter(
       allowed_departments: allowedDepts,
       owner_id: req.user!.id,
     });
+    if (req.query.version_parent_id !== undefined) {
+      if (typeof req.query.version_parent_id !== 'string' || !docId.test(req.query.version_parent_id)) {
+        res.status(400).json({ detail: 'Некорректный документ для новой версии.' });
+        return;
+      }
+      query.set('version_parent_id', req.query.version_parent_id);
+    }
 
     try {
       const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-upload?${query.toString()}`, {
@@ -308,6 +315,18 @@ export function createAdminRouter(
       res.status(response.status >= 500 ? 502 : response.status).json(data);
     } catch { res.status(502).json({ detail: 'Сервис базы знаний недоступен.' }); }
   });
+  router.get('/documents/versions/:id', async (req, res) => {
+    const identifier = String(req.params.id);
+    if (!docId.test(identifier)) { res.status(400).json({ detail: 'Некорректный документ.' }); return; }
+    try {
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/versions/${identifier}`, {
+        headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        signal: AbortSignal.timeout(10000),
+      });
+      res.status(response.status >= 500 ? 502 : response.status).json(await response.json());
+    } catch { res.status(502).json({ detail: 'Не удалось получить историю версий.' }); }
+  });
+
   const uploadAction = (action: 'review' | 'cancel', method: 'GET' | 'POST'): RequestHandler => async (req: AuthenticatedRequest, res) => {
     const taskId = String(req.params.id);
     if (!/^[0-9a-f]{32}$/.test(taskId)) {

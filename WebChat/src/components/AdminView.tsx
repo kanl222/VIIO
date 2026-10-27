@@ -138,6 +138,49 @@ function UsersPanel({ currentUser, onAccessChanged }: { currentUser: User; onAcc
   </>;
 }
 
+function DocumentVersionsPanel({ docId, onClose, onUpload, onDownload }: {
+  docId: string; onClose: () => void;
+  onUpload: (file: File, current: CatalogDocument) => Promise<void>;
+  onDownload: (doc: CatalogDocument) => void;
+}) {
+  const [items, setItems] = useState<CatalogDocument[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError('');
+    adminApi.documentVersions(docId, controller.signal).then(result => setItems(result.items))
+      .catch(err => { if (!controller.signal.aborted) setError(errorText(err)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [docId]);
+  const current = items.find(item => item.is_active);
+  const upload = async (file?: File) => {
+    if (!file || !current) return;
+    setUploading(true); setError('');
+    try { await onUpload(file, current); }
+    catch (err) { setError(errorText(err)); }
+    finally { setUploading(false); }
+  };
+  return <section className="document-form" aria-labelledby="document-versions-heading" aria-busy={loading || uploading}>
+    <div className="section-heading"><h2 id="document-versions-heading">Версии документа</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Закрыть историю версий"><X size={18} /></button></div>
+    {error && <Notice>{error}</Notice>}
+    {loading ? <p role="status">Загружаем историю…</p> : <>
+      <p>Поиск использует актуальную версию. Предыдущие оригиналы доступны для скачивания.</p>
+      <ul className="document-versions">
+        {items.map(item => <li key={item.id}><div><strong>Версия {item.version}{item.is_active ? ' — актуальная' : ''}</strong><small>{date(item.created_at)} · {item.title}</small></div>
+          {item.has_original && <button className="text-button" type="button" onClick={() => onDownload(item)}><Download size={14} aria-hidden="true" /> Скачать</button>}
+        </li>)}
+      </ul>
+      {current && <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Загрузить новую версию</strong><small>Один PDF, TXT или Markdown до 10 МБ. Права доступа сохранятся.</small></span>
+        <input type="file" accept=".pdf,.txt,.md,.markdown" disabled={uploading} aria-label="Файл новой версии документа" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} />
+      </label>}
+      {uploading && <p role="status">Сохраняем файл новой версии…</p>}
+    </>}
+  </section>;
+}
+
 function KnowledgePanel() {
   const [tab, setTab] = useState<'catalog' | 'upload' | 'bulk'>('catalog');
 
@@ -168,6 +211,7 @@ function KnowledgePanel() {
   const [bulkError, setBulkError] = useState('');
   const [bulkTasks, setBulkTasks] = useState<BulkUploadTaskResult[]>([]);
   const bulkInputRef = useRef<HTMLInputElement>(null);
+  const [versionsFor, setVersionsFor] = useState<string | null>(null);
   const [uploadReview, setUploadReview] = useState<adminApi.UploadReview | null>(null);
   const [bulkAction, setBulkAction] = useState<string | null>(null);
   const reviewEditor = useRef<HTMLTextAreaElement>(null);
@@ -346,6 +390,18 @@ function KnowledgePanel() {
     }
   };
 
+  const uploadVersion = async (file: File, current: CatalogDocument) => {
+    if (!/\.(pdf|txt|md|markdown)$/i.test(file.name) || file.size > 10 * 1024 * 1024) throw new Error('Выберите PDF, TXT или Markdown до 10 МБ.');
+    const result = await adminApi.bulkUpload([file], { is_public: current.is_public,
+      allowed_roles: current.allowed_roles, allowed_departments: current.allowed_departments, version_parent_id: current.id });
+    const task = result.tasks[0];
+    if (!task?.task_id) throw new Error(task?.error || 'Не удалось сохранить новую версию.');
+    setBulkTasks(previous => [task, ...previous]);
+    setVersionsFor(null); setTab('bulk'); setBulkUploading(true);
+    const pending = bulkTasks.flatMap(item => item.task_id && (item.status === 'queued' || item.status === 'processing') ? [item.task_id] : []);
+    monitorBulk([...pending, task.task_id]);
+  };
+
   const handleBulkFileSelect = (selected: FileList | null) => {
     if (!selected) return;
     const newFiles: File[] = [];
@@ -404,7 +460,7 @@ function KnowledgePanel() {
                         <strong>{doc.title}</strong>
                         <small style={{ display: 'block', color: 'var(--muted)', fontSize: 11 }}>{doc.id}</small>
                       </td>
-                      <td><span className="role-badge">v{doc.version}</span></td>
+                      <td><button className="text-button" type="button" onClick={() => setVersionsFor(doc.id)} aria-label={`Версии документа ${doc.title}`}>v{doc.version} · История</button></td>
                       <td>{doc.chunks_count} чанков</td>
                       <td>
                         <span className="department-text">
@@ -446,6 +502,9 @@ function KnowledgePanel() {
         )}
       </>
     )}
+
+    {tab === 'catalog' && versionsFor && <DocumentVersionsPanel key={`${versionsFor}-${catalogRevision}`} docId={versionsFor}
+      onClose={() => setVersionsFor(null)} onUpload={uploadVersion} onDownload={handleDownload} />}
 
     {tab === 'upload' && (
       <div className="knowledge-layout">

@@ -75,6 +75,8 @@ class DocumentRecord:
     chunks_count: int
     created_at: datetime
     updated_at: datetime
+    family_id: str | None = None
+    is_active: bool = True
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "DocumentRecord":
@@ -95,6 +97,8 @@ class DocumentRecord:
             chunks_count=row["chunks_count"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            family_id=row.get('family_id', row['id']),
+            is_active=row.get('is_active', True),
         )
 
 
@@ -146,7 +150,14 @@ class DocumentCatalogService:
         """Создать таблицу, если она не существует."""
         async with self._pool.connection() as conn:
             conn.row_factory = dict_row
+            await conn.execute('SELECT pg_advisory_xact_lock(hashtext(current_schema()), 78232)')
             await conn.execute(CATALOG_DDL)
+            await conn.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS family_id varchar(64)')
+            await conn.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true')
+            await conn.execute('UPDATE documents SET family_id=id WHERE family_id IS NULL')
+            await conn.execute('ALTER TABLE documents ALTER COLUMN family_id SET NOT NULL')
+            await conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS documents_family_version ON documents(family_id,version)')
+            await conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS documents_one_active ON documents(family_id) WHERE is_active')
         logger.info("Каталог документов: схема инициализирована")
 
     # ------------------------------------------------------------------
@@ -168,6 +179,10 @@ class DocumentCatalogService:
         allowed_departments: list[str] | None = None,
         storage_key: str | None = None,
         status: str = "indexed",
+        family_id: str | None = None,
+        version: int = 1,
+        parent_id: str | None = None,
+        is_active: bool = True,
     ) -> DocumentRecord:
         """Создать новую запись в каталоге."""
         roles = allowed_roles if allowed_roles is not None else ["employee"]
@@ -181,8 +196,8 @@ class DocumentCatalogService:
                 INSERT INTO documents
                     (id, title, mime_type, file_size, sha256, owner_id,
                      is_public, allowed_roles, allowed_departments,
-                     storage_key, chunks_count, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     storage_key, chunks_count, status,family_id,version,parent_id,is_active)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(id) DO UPDATE SET storage_key=EXCLUDED.storage_key,
                     status=EXCLUDED.status,chunks_count=EXCLUDED.chunks_count,updated_at=now()
                 RETURNING *
@@ -191,6 +206,7 @@ class DocumentCatalogService:
                     doc_id, title, mime_type, file_size, sha256, owner_id,
                     is_public, roles, depts,
                     storage_key, chunks_count, status,
+                    family_id or doc_id, version, parent_id, is_active,
                 ),
             )
             row = await cur.fetchone()  # type: ignore[assignment]
@@ -221,61 +237,6 @@ class DocumentCatalogService:
                 "UPDATE documents SET chunks_count=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
                 (chunks_count, doc_id),
             )
-
-    async def new_version(
-        self,
-        parent_id: str,
-        *,
-        doc_id: str,
-        title: str,
-        chunks_count: int,
-        mime_type: str = "text/plain",
-        file_size: int | None = None,
-        sha256: str | None = None,
-        owner_id: str | None = None,
-        is_public: bool = False,
-        allowed_roles: list[str] | None = None,
-        allowed_departments: list[str] | None = None,
-        storage_key: str | None = None,
-    ) -> DocumentRecord:
-        """Создать новую версию документа, не удаляя предыдущую."""
-        async with self._pool.connection() as conn:
-            conn.row_factory = dict_row
-            parent = await (
-                await conn.execute(
-                    "SELECT version FROM documents WHERE id=%s", (parent_id,)
-                )
-            ).fetchone()
-            if parent is None:
-                raise ValueError(f"Родительский документ {parent_id!r} не найден")
-            next_version = parent["version"] + 1
-
-        roles = allowed_roles if allowed_roles is not None else ["employee"]
-        depts = allowed_departments if allowed_departments is not None else ["general"]
-
-        async with self._pool.connection() as conn:
-            conn.row_factory = dict_row
-            cur = await conn.execute(
-                """
-                INSERT INTO documents
-                    (id, title, mime_type, file_size, sha256, owner_id,
-                     version, parent_id,
-                     is_public, allowed_roles, allowed_departments,
-                     storage_key, chunks_count)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING *
-                """,
-                (
-                    doc_id, title, mime_type, file_size, sha256, owner_id,
-                    next_version, parent_id,
-                    is_public, roles, depts,
-                    storage_key, chunks_count,
-                ),
-            )
-            row = await cur.fetchone()  # type: ignore[assignment]
-
-        logger.info("Каталог: создана версия %d документа %s", next_version, parent_id)
-        return DocumentRecord.from_row(row)
 
     async def delete(self, doc_id: str) -> bool:
         """Удалить документ. Возвращает True, если запись существовала."""
@@ -333,7 +294,7 @@ class DocumentCatalogService:
         page_size = max(1, min(100, page_size))
         offset = (page - 1) * page_size
 
-        conditions: list[str] = []
+        conditions: list[str] = ['is_active = TRUE']
         params: list[Any] = []
         idx = 1
 
@@ -376,9 +337,30 @@ class DocumentCatalogService:
     async def count(self) -> int:
         """Общее число записей в каталоге (документы, не чанки)."""
         async with self._pool.connection() as conn:
-            cur = await conn.execute("SELECT COUNT(*)::int AS cnt FROM documents")
+            cur = await conn.execute("SELECT COUNT(*)::int AS cnt FROM documents WHERE is_active")
             row = await cur.fetchone()
         return row["cnt"] if isinstance(row, dict) else row[0] if row else 0
+
+    async def versions(self, family_id):
+        async with self.pool.connection() as conn:
+            conn.row_factory = dict_row
+            rows = await (await conn.execute('SELECT * FROM documents WHERE family_id=%s ORDER BY version DESC', (family_id,))).fetchall()
+            return [DocumentRecord.from_row(row) for row in rows]
+
+    async def activate_version(self, identifier, parent_id):
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute("UPDATE documents SET is_active=false,status='superseded',updated_at=now() WHERE id=%s AND is_active RETURNING id", (parent_id,))
+            if not await cursor.fetchone():
+                raise ValueError('Актуальная версия изменилась. Выберите документ заново.')
+            activated = await conn.execute("UPDATE documents SET is_active=true,status='ready',updated_at=now() WHERE id=%s AND family_id=(SELECT family_id FROM documents WHERE id=%s) AND NOT is_active RETURNING id", (identifier, parent_id))
+            if not await activated.fetchone():
+                raise ValueError('Подготовленная версия не найдена')
+
+    async def pending_version_families(self):
+        async with self.pool.connection() as conn:
+            conn.row_factory = dict_row
+            rows = await (await conn.execute("SELECT DISTINCT family_id FROM documents WHERE version>1 AND status='processing'")).fetchall()
+            return [row['family_id'] for row in rows]
 
 
 # ---------------------------------------------------------------------------

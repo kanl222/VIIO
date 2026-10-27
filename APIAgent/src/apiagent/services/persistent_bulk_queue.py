@@ -6,7 +6,7 @@ from dataclasses import asdict
 from functools import partial
 import anyio.to_thread
 
-from apiagent.services.bulk_queue import BulkUploadTask, BulkUploadResult, PreparedReview
+from apiagent.services.bulk_queue import BulkUploadTask, BulkUploadResult, PreparedReview, DocumentVersionConflict
 from apiagent.services.upload_jobs import UploadJobs
 
 logger = logging.getLogger(__name__)
@@ -103,9 +103,10 @@ class PersistentBulkQueue:
             await asyncio.gather(heartbeat, process, return_exceptions=True)
             await self.jobs.release(row['id'], row['claim_token'])
             raise
-        except Exception:
+        except Exception as error:
             logger.exception('Ошибка обработки загрузки %s', row['id'])
-            await self.jobs.finish(row['id'], row['claim_token'], status='error', error='Обработка не завершена. Повторите загрузку или обратитесь к администратору.')
+            message = str(error) if isinstance(error, DocumentVersionConflict) else 'Обработка не завершена. Повторите загрузку или обратитесь к администратору.'
+            await self.jobs.finish(row['id'], row['claim_token'], status='error', error=message)
         finally:
             heartbeat.cancel()
             process.cancel()

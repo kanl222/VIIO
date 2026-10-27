@@ -34,6 +34,8 @@ export interface CatalogDocument {
   sha256?: string | null;
   owner_id?: string | null;
   version: number;
+  family_id?: string;
+  is_active: boolean;
   status: string;
   is_public: boolean;
   allowed_roles: string[];
@@ -77,7 +79,7 @@ export interface BulkUploadTaskResult {
 
 export const bulkUpload = async (
   files: File[],
-  options: { is_public: boolean; allowed_roles: string[]; allowed_departments: string[] }
+  options: { is_public: boolean; allowed_roles: string[]; allowed_departments: string[]; version_parent_id?: string }
 ): Promise<{ tasks: BulkUploadTaskResult[] }> => {
   const formData = new FormData();
   for (const file of files) {
@@ -88,6 +90,7 @@ export const bulkUpload = async (
     allowed_roles: options.allowed_roles.join(','),
     allowed_departments: options.allowed_departments.join(','),
   });
+  if (options.version_parent_id) query.set('version_parent_id', options.version_parent_id);
 
   const response = await fetch(`/api/admin/documents/bulk?${query.toString()}`, {
     method: 'POST',
@@ -118,3 +121,4 @@ export const approveUploadReview = (review: UploadReview) => apiFetch(`/api/admi
   method: 'POST', body: JSON.stringify({ content: review.content, review_token: review.token }),
 });
 export const cancelBulk = (taskId: string) => apiFetch(`/api/admin/documents/bulk-cancel/${encodeURIComponent(taskId)}`, { method: 'POST' });
+export const documentVersions = (docId: string, signal?: AbortSignal) => apiFetch<{ items: CatalogDocument[] }>(`/api/admin/documents/versions/${encodeURIComponent(docId)}`, { signal });

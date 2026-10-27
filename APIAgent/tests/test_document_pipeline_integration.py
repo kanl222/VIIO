@@ -280,3 +280,118 @@ async def test_existing_upload_schema_migrates_without_losing_jobs(pipeline):
     await queue.setup()
     assert (await queue.get_statuses([task.task_id]))[0].status == 'queued'
     assert await queue.cancel(task.task_id)
+
+
+async def test_new_version_is_searchable_and_original_stays_downloadable(pipeline):
+    client, queue, catalog, adapter, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Guide', content='Old version original',
+        owner_id='u1', allowed_roles=['admin'], allowed_departments=[]))
+    queue.start()
+    response = await client.post('/api/v1/documents/bulk-upload',
+        params={'version_parent_id': root.document_id, 'is_public': True, 'allowed_roles': 'employee', 'owner_id': 'forged'},
+        files=[('files', ('new-guide.txt', b'Current version original', 'text/plain'))])
+    assert response.status_code == 202
+    result = await terminal(queue, response.json()['tasks'][0]['task_id'])
+    assert result.status == 'ready', result.error
+    record = await catalog.get(result.document_id)
+    assert record.version == 2 and record.parent_id == root.document_id and record.is_active
+    assert record.title == 'Guide' and record.owner_id == 'u1' and not record.is_public
+    assert record.allowed_roles == ['admin']
+    assert await catalog.count() == 1
+    assert (await catalog.list_documents()).items[0].id == record.id
+    assert {doc.metadata['document_id'] for doc in adapter.similarity_search('version', k=10)} == {record.id}
+    history = (await client.get('/api/v1/documents/versions/' + root.document_id)).json()['items']
+    assert [item['version'] for item in history] == [2, 1]
+    assert [item['is_active'] for item in history] == [True, False]
+    for identifier, expected in [(root.document_id, b'Old version original'), (record.id, b'Current version original')]:
+        download = await client.get('/api/v1/documents/download/' + identifier, params={'user_role': 'admin'})
+        assert download.content == expected
+        denied = await client.get('/api/v1/documents/download/' + identifier, params={'user_role': 'employee'})
+        assert denied.status_code == 403
+    stale = await client.post('/api/v1/documents/bulk-upload', params={'version_parent_id': root.document_id},
+        files=[('files', ('stale.txt', b'stale', 'text/plain'))])
+    assert stale.status_code == 409
+    # Re-uploading an archived file must never overwrite or reactivate it.
+    await ingestion.index_text(DocumentCreateRequest(title='Guide', content='Old version original',
+        owner_id='u1', allowed_roles=['admin'], allowed_departments=[]))
+    assert {doc.metadata['document_id'] for doc in adapter.similarity_search('version', k=10)} == {record.id}
+
+
+async def test_concurrent_version_upload_rejects_stale_parent(pipeline):
+    client, queue, catalog, adapter, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Concurrent', content='Initial concurrent version'))
+    ids = []
+    for content in (b'Second concurrent version', b'Third concurrent version'):
+        response = await client.post('/api/v1/documents/bulk-upload', params={'version_parent_id': root.document_id},
+            files=[('files', ('version.txt', content, 'text/plain'))])
+        ids.append(response.json()['tasks'][0]['task_id'])
+    queue.start()
+    results = await asyncio.gather(*(terminal(queue, identifier) for identifier in ids))
+    assert sorted(result.status for result in results) == ['error', 'ready']
+    assert 'версия изменилась' in next(result.error for result in results if result.status == 'error')
+    versions = await catalog.versions(root.document_id)
+    assert [record.version for record in versions] == [2, 1]
+    assert sum(record.is_active for record in versions) == 1
+
+
+async def test_version_failure_rolls_back_and_retry_does_not_duplicate_history(pipeline):
+    _, _, catalog, adapter, ingestion, store = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Rollback', content='Keep previous content'))
+    task = BulkUploadTask(uuid.uuid4().hex, 'replacement.txt', b'Replacement content', 'Replacement', None, False,
+        'text/plain', [], [], version_parent_id=root.document_id)
+    key = store.save(task.data, suffix='.txt')
+    activate = catalog.activate_version
+    async def failure(*args):
+        raise RuntimeError('activation failure')
+    catalog.activate_version = failure
+    with pytest.raises(RuntimeError, match='activation failure'):
+        await ingestion(task, key)
+    assert (await catalog.get(root.document_id)).is_active
+    assert {doc.page_content for doc in adapter.similarity_search('content', k=10)} == {'Keep previous content'}
+    catalog.activate_version = activate
+    first = await ingestion(task, key)
+    second = await ingestion(task, key)
+    assert first == second
+    assert [record.version for record in await catalog.versions(root.document_id)] == [2, 1]
+
+
+async def test_recovery_restores_catalog_authority_for_partial_activation(pipeline):
+    _, _, catalog, adapter, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Recover', content='Active content'))
+    staged = 'doc-' + uuid.uuid4().hex
+    ingestion.documents.index_document('Recover', 'Uncommitted content', {'is_active': True, 'ingestion_ready': True}, document_id=staged)
+    await catalog.create(doc_id=staged, title='Recover', chunks_count=1, family_id=root.document_id,
+        parent_id=root.document_id, version=2, is_active=False, status='processing')
+    adapter.set_document_active(root.document_id, False)
+    await ingestion.recover_versions()
+    assert {doc.page_content for doc in adapter.similarity_search('content', k=10)} == {'Active content'}
+
+
+async def test_pdf_version_keeps_old_search_until_approval(pipeline):
+    from test_pdf_extraction import pdf_bytes
+    client, queue, catalog, adapter, ingestion, store = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='PDF version', content='Previous approved text'))
+    original = pdf_bytes('New PDF extracted text')
+    response = await client.post('/api/v1/documents/bulk-upload', params={'version_parent_id': root.document_id},
+        files=[('files', ('replacement.pdf', original, 'application/pdf'))])
+    identifier = response.json()['tasks'][0]['task_id']
+    queue.start()
+    assert (await terminal(queue, identifier, ('needs_review', 'error'))).status == 'needs_review'
+    assert {doc.page_content for doc in adapter.similarity_search('text', k=10)} == {'Previous approved text'}
+    review = (await client.get('/api/v1/documents/bulk-review/' + identifier)).json()
+    approval = await client.post('/api/v1/documents/bulk-review/' + identifier, params={'reviewer_id': 'admin'},
+        json={'content': 'New approved PDF text', 'review_token': review['token']})
+    assert approval.status_code == 200
+    result = await terminal(queue, identifier)
+    assert result.status == 'ready', result.error
+    assert {doc.page_content for doc in adapter.similarity_search('text', k=10)} == {'New approved PDF text'}
+    record = await catalog.get(result.document_id)
+    assert record.version == 2 and store.load(record.storage_key) == original
+
+
+async def test_invalid_activation_does_not_remove_current_version(pipeline):
+    _, _, catalog, _, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Atomic', content='Current atomic text'))
+    with pytest.raises(ValueError, match='Подготовленная версия'):
+        await catalog.activate_version('doc-missing', root.document_id)
+    assert (await catalog.get(root.document_id)).is_active
