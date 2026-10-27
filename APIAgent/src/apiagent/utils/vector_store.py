@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from typing import Any
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -101,6 +102,9 @@ class QdrantVectorStoreAdapter(IVectorStore):
             Exception: При ошибке сетевого взаимодействия с сервером Qdrant.
         """
         self._ensure_collection()
+        if metadatas and all('document_id' in meta and 'chunk_index' in meta for meta in metadatas):
+            ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"{meta['document_id']}:{meta['chunk_index']}")) for meta in metadatas]
+            return self._store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
         return self._store.add_texts(texts=texts, metadatas=metadatas)
 
     def similarity_search(
@@ -119,6 +123,8 @@ class QdrantVectorStoreAdapter(IVectorStore):
         try:
             if k <= 0:
                 return []
+            ready = models.Filter(must_not=[models.FieldCondition(key='metadata.ingestion_ready', match=models.MatchValue(value=False))])
+            filter = models.Filter(must=[filter, ready]) if filter is not None else ready
             semantic = self._store.similarity_search(query=query, k=k, filter=filter)
             titles = self._find_acronym_titles(query, k, filter)
             if not titles:
@@ -179,6 +185,33 @@ class QdrantVectorStoreAdapter(IVectorStore):
                 seen.add(identity)
                 first.append(doc)
         return (first + remaining)[:k]
+
+    def delete_document(self, identifier: str) -> None:
+        if self._client.collection_exists(self._collection_name):
+            self._client.delete(self._collection_name, models.FilterSelector(filter=models.Filter(must=[
+                models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier)),
+            ])), wait=True)
+
+    def publish_document(self, identifier: str) -> None:
+        self._client.set_payload(self._collection_name, payload={'ingestion_ready': True},
+            points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
+            key='metadata', wait=True)
+
+    def document_metadata(self):
+        if not self._client.collection_exists(self._collection_name):
+            return []
+        found = {}
+        offset = None
+        while True:
+            points, offset = self._client.scroll(self._collection_name, offset=offset, limit=100, with_vectors=False)
+            for point in points:
+                meta = (point.payload or {}).get('metadata', {})
+                identifier = meta.get('document_id')
+                if identifier and meta.get('ingestion_ready') is not False:
+                    record = found.setdefault(identifier, {**meta, 'chunks_count': 0})
+                    record['chunks_count'] += 1
+            if offset is None:
+                return list(found.values())
 
     def count(self) -> int:
         """Получение общего числа точек в коллекции.

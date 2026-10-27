@@ -61,6 +61,35 @@ class Settings(BaseSettings):
     pgsql_max_rows: int = Field(default=100, ge=1, le=500)
     pgsql_max_chars: int = Field(default=12000, ge=500, le=50000)
     pgsql_timeout_seconds: int = Field(default=40, ge=5, le=90)
+    # Настройки каталога документов и файлового хранилища
+    documents_storage_path: str = Field(
+        default="data/documents",
+        description="Путь к директории хранилища оригиналов документов (Docker-том).",
+    )
+    documents_catalog_enabled: bool = Field(
+        default=True,
+        description="Вести каталог документов в PostgreSQL (рекомендуется).",
+    )
+    # Массовая загрузка
+    bulk_max_files: int = Field(
+        default=50,
+        ge=1,
+        le=200,
+        description="Максимальное число файлов в одной пакетной загрузке.",
+    )
+    bulk_max_file_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1024,
+        le=50 * 1024 * 1024,
+        description="Максимальный размер одного файла при массовой загрузке (байт).",
+    )
+    bulk_max_workers: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description="Максимальное число параллельных фоновых воркеров очереди.",
+    )
+
     pdf_engine: Literal["auto", "pypdf", "docling"] = "auto"
     pdf_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
     pdf_max_pages: int = Field(default=50, ge=1, le=200)

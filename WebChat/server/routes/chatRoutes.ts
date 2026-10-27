@@ -1,6 +1,7 @@
 import { Router, type Response } from 'express';
 import type pg from 'pg';
 import { getPool } from '../db.js';
+import { answerSources } from '../answerSources.js';
 import {
   authMiddleware as defaultAuthMiddleware,
   createAuthMiddleware,
@@ -124,8 +125,10 @@ export function createChatRouter(
         return;
       }
 
-      const data = await agentResponse.json() as { reply?: string; thread_id?: string };
+      const data = await agentResponse.json() as { reply?: string; thread_id?: string; sources?: unknown };
       const replyText = typeof data.reply === 'string' ? data.reply : '';
+      const sources = databaseRequest ? [] : answerSources(data.sources);
+      const sourceAttachments = sources.map(source => ({ type: 'knowledge_source', name: source.title, data: { document_id: source.document_id } }));
       const replyThreadId = data.thread_id || conversation.agent_thread_id;
 
       // 4. Сохраняем ответ ассистента в БД
@@ -133,7 +136,7 @@ export function createChatRouter(
         `INSERT INTO messages (conversation_id, sender, text, attachments)
          VALUES ($1, $2, $3, $4)
          RETURNING id, created_at`,
-        [conversation_id, 'assistant', databaseRequest ? '[Ответ PostgreSQL показан без сохранения. Повторите /db запрос при необходимости.]' : replyText, '[]']
+        [conversation_id, 'assistant', databaseRequest ? '[Ответ PostgreSQL показан без сохранения. Повторите /db запрос при необходимости.]' : replyText, JSON.stringify(sourceAttachments)]
       );
 
       // 5. Обновляем время активности диалога
@@ -146,10 +149,52 @@ export function createChatRouter(
         reply: replyText,
         thread_id: replyThreadId,
         message_id: assistantMsgResult.rows[0].id,
+        sources,
       });
     } catch (err: any) {
       console.error('[Chat] Error processing chat message:', err.message);
       res.status(500).json({ detail: 'Внутренняя ошибка сервера при обработке сообщения.' });
+    }
+  });
+
+  const docIdPattern = /^doc-(?:[0-9a-f]{8}|[0-9a-f]{32})$/;
+
+  // GET /api/chat/download/:id - скачать оригинал разрешённого документа
+  router.get('/download/:id', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const docId = String(req.params.id);
+    if (!docIdPattern.test(docId)) {
+      res.status(400).json({ detail: 'Некорректный идентификатор документа.' });
+      return;
+    }
+    const userRole = req.user?.role || 'employee';
+      const downloadContext = new URLSearchParams({ user_role: userRole, user_id: String(req.user?.id || ''), departments: (req.user?.departments || []).join(',') });
+    const agentBaseUrl = agentUrlProvider().replace(/\/+$/, '');
+    const downloadUrl = `${agentBaseUrl}/api/v1/documents/download/${encodeURIComponent(docId)}?${downloadContext}`;
+    const internalApiKey = process.env.INTERNAL_API_KEY || 'viio-internal-secret-token';
+
+    try {
+      const response = await fetchFn(downloadUrl, {
+        headers: {
+          'X-Internal-Token': internalApiKey,
+        },
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { detail?: string };
+        res.status(response.status).json({ detail: errorData.detail || 'Не удалось скачать файл.' });
+        return;
+      }
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const disposition = response.headers.get('content-disposition');
+      res.setHeader('Content-Type', contentType);
+      if (disposition) res.setHeader('Content-Disposition', disposition);
+
+      const arrayBuffer = await response.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    } catch {
+      res.status(502).json({ detail: 'Сервис базы знаний недоступен.' });
     }
   });
 

@@ -21,7 +21,11 @@ from apiagent.interfaces._protocols import IAgentService, IDocumentService
 from apiagent.models import create_chat_model, create_coding_model, create_embeddings
 from apiagent.router import create_api_router
 from apiagent.services.agent_service import AgentService
+from apiagent.services.persistent_bulk_queue import PersistentBulkQueue
+from apiagent.services.document_ingestion import DocumentIngestion
 from apiagent.services.database_agent import DatabaseAgentService
+from apiagent.services.document_catalog import DocumentCatalogService
+from apiagent.services.file_store import LocalFileStore
 from apiagent.tools.postgres_tool import create_postgres_readonly_tool
 from apiagent.services.coding_agent import (
     CODING_SYSTEM_PROMPT, DELEGATION_PROMPT, CodingAgentService,
@@ -65,11 +69,56 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as exc:
             logger.warning(
                 "Не удалось подключиться к PostgreSQL (%s) для AsyncPostgresSaver, используется MemorySaver: %s",
-                conn_string,
-                exc,
+                settings.postgres_host,
+                type(exc).__name__,
             )
 
+    catalog_svc = getattr(app.state, "catalog_service", None)
+    bulk_q = getattr(app.state, "bulk_queue", None)
+    catalog_pool = None
+    if catalog_svc is not None:
+        settings = app.state.settings
+        try:
+            from psycopg.conninfo import make_conninfo
+            from psycopg.rows import dict_row
+            catalog_pool = AsyncConnectionPool(conninfo=make_conninfo(
+                host=settings.postgres_host, port=settings.postgres_port, dbname=settings.postgres_db,
+                user=settings.postgres_user, password=settings.postgres_password),
+                min_size=1, max_size=settings.bulk_max_workers + 4,
+                kwargs={"row_factory": dict_row}, open=False)
+            await catalog_pool.open(wait=True, timeout=5)
+            catalog_svc.set_pool(catalog_pool)
+            await catalog_svc.setup()
+            if bulk_q is not None:
+                await bulk_q.setup()
+            documents = app.state.document_service
+            if isinstance(documents, DocumentService):
+                import anyio.to_thread
+                metadata = await anyio.to_thread.run_sync(documents.existing_document_metadata)
+                for item in metadata:
+                    if await catalog_svc.get(item["document_id"]) is None:
+                        await catalog_svc.create(doc_id=item["document_id"], title=item.get("title", "Без названия"),
+                            chunks_count=item["chunks_count"], owner_id=item.get("owner_id"),
+                            is_public=item.get("is_public", False), allowed_roles=item.get("allowed_roles", []),
+                            allowed_departments=item.get("allowed_departments", []))
+            if bulk_q is not None:
+                bulk_q.start()
+        except Exception:
+            logger.exception("Каталог документов недоступен; загрузка отключена")
+            catalog_svc.set_pool(None)
+            if catalog_pool is not None:
+                await catalog_pool.close()
+                catalog_pool = None
+
     yield
+
+    # Остановка воркеров
+    if bulk_q is not None:
+        await bulk_q.stop()
+
+    # Закрытие пулов
+    if catalog_pool is not None:
+        await catalog_pool.close()
 
     pool_to_close: AsyncConnectionPool | None = getattr(app.state, "pool", None) or pool
     if pool_to_close is not None:
@@ -99,6 +148,18 @@ def create_app(
     """
     app_settings = settings or Settings()
     enable_postgres = checkpointer is None
+
+    # ------------------------------------------------------------------
+    # Файловое хранилище и каталог
+    # ------------------------------------------------------------------
+    file_store: LocalFileStore | None = None
+    catalog_service: DocumentCatalogService | None = None
+    bulk_queue: PersistentBulkQueue | None = None
+
+    if app_settings.documents_catalog_enabled:
+        file_store = LocalFileStore(app_settings.documents_storage_path)
+        # The catalog pool is opened independently of checkpointing.
+        catalog_service = DocumentCatalogService(None)
 
     if document_service is None or agent_service is None:
         logger.info(
@@ -165,6 +226,12 @@ def create_app(
                 enabled=app_settings.pgsql_enabled,
             )
 
+    ingestion = None
+    if file_store is not None and catalog_service is not None:
+        ingestion = DocumentIngestion(document_service, catalog_service, file_store, app_settings)
+        bulk_queue = PersistentBulkQueue(ingestion, catalog_service, file_store,
+                                         max_workers=app_settings.bulk_max_workers)
+
     app = FastAPI(
         title="APIAgent",
         description="LangGraph RAG Agent REST API с Qdrant и поддержкой LM Studio / Ollama",
@@ -176,11 +243,18 @@ def create_app(
     app.state.agent_service = agent_service
     app.state.enable_postgres_checkpointer = enable_postgres
     app.state.pool = None
+    app.state.document_service = document_service
+    app.state.catalog_service = catalog_service
+    app.state.bulk_queue = bulk_queue
 
     api_router = create_api_router(
         agent_service=agent_service,
         document_service=document_service,
         settings=app_settings,
+        catalog_service=catalog_service,
+        file_store=file_store,
+        bulk_queue=bulk_queue,
+        ingestion_service=ingestion,
     )
     app.include_router(api_router)
 

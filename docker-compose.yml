@@ -94,6 +94,11 @@ services:
       - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
       - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
       - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
+      - DOCUMENTS_STORAGE_PATH=/data/documents
+      - DOCUMENTS_CATALOG_ENABLED=${DOCUMENTS_CATALOG_ENABLED:-true}
+      - BULK_MAX_FILES=${BULK_MAX_FILES:-50}
+      - BULK_MAX_FILE_BYTES=${BULK_MAX_FILE_BYTES:-10485760}
+      - BULK_MAX_WORKERS=${BULK_MAX_WORKERS:-2}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -113,6 +118,8 @@ services:
         aliases:
           - apiagent
           - api
+    volumes:
+      - documents_storage:/data/documents
 
   webchat:
     build:
@@ -201,3 +208,4 @@ volumes:
   qdrant_storage:
   postgres_data:
   docling_models:
+  documents_storage:

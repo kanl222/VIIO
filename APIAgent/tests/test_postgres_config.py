@@ -9,6 +9,36 @@ from apiagent import create_app, lifespan
 from apiagent.config import Settings
 
 
+@pytest.mark.asyncio
+async def test_catalog_starts_when_checkpoint_pool_already_exists():
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.state.settings = Settings()
+    app.state.agent_service = MagicMock()
+    app.state.document_service = MagicMock()
+    app.state.enable_postgres_checkpointer = True
+    app.state.pool = None
+    catalog = MagicMock()
+    catalog.setup = AsyncMock()
+    app.state.catalog_service = catalog
+    queue = MagicMock()
+    queue.setup = AsyncMock()
+    queue.stop = AsyncMock()
+    app.state.bulk_queue = queue
+    checkpoint_pool = MagicMock(close=AsyncMock())
+    catalog_pool = MagicMock(open=AsyncMock(), close=AsyncMock())
+    with patch('apiagent.init_async_postgres_saver', AsyncMock(return_value=(MemorySaver(), checkpoint_pool))), \
+         patch('apiagent.AsyncConnectionPool', return_value=catalog_pool):
+        async with lifespan(app):
+            catalog.set_pool.assert_called_once_with(catalog_pool)
+            catalog.setup.assert_awaited_once()
+            queue.setup.assert_awaited_once()
+            queue.start.assert_called_once()
+        queue.stop.assert_awaited_once()
+        catalog_pool.close.assert_awaited_once()
+        checkpoint_pool.close.assert_awaited_once()
+
+
 def test_postgres_default_settings() -> None:
     """Проверка значений конфигурации PostgreSQL по умолчанию."""
     settings = Settings()
@@ -107,6 +137,8 @@ async def test_lifespan_uses_async_postgres_saver_when_available() -> None:
     app.state.agent_service = mock_agent_svc
     app.state.enable_postgres_checkpointer = True
     app.state.pool = None
+    app.state.catalog_service = None
+    app.state.bulk_queue = None
 
     with patch("apiagent.init_async_postgres_saver", new_callable=AsyncMock) as mock_init:
         mock_init.return_value = (mock_saver, mock_pool)
@@ -131,6 +163,8 @@ async def test_lifespan_fallback_when_postgres_fails() -> None:
     app.state.agent_service = mock_agent_svc
     app.state.enable_postgres_checkpointer = True
     app.state.pool = None
+    app.state.catalog_service = None
+    app.state.bulk_queue = None
 
     with patch("apiagent.init_async_postgres_saver", new_callable=AsyncMock) as mock_init:
         mock_init.side_effect = RuntimeError("Connection refused")

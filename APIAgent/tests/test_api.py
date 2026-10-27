@@ -62,7 +62,7 @@ class MockDocumentService(IDocumentService):
 @pytest.fixture
 def client() -> TestClient:
     """Фикстура тестового клиента FastAPI с мок-сервисами."""
-    settings = Settings(lmstudio_model="test-model", llm_provider="lmstudio")
+    settings = Settings(lmstudio_model="test-model", llm_provider="lmstudio", documents_catalog_enabled=False)
     agent_svc = MockAgentService()
     doc_svc = MockDocumentService()
     app = create_app(
@@ -133,7 +133,7 @@ def test_chat_endpoint_service_error_handling() -> None:
     agent_svc.should_fail = True
     doc_svc = MockDocumentService()
     app = create_app(
-        settings=Settings(),
+        settings=Settings(documents_catalog_enabled=False),
         agent_service=agent_svc,
         document_service=doc_svc,
     )
@@ -158,7 +158,7 @@ def test_create_document_uses_run_sync(monkeypatch) -> None:
 
     doc_svc = MockDocumentService()
     app = create_app(
-        settings=Settings(),
+        settings=Settings(documents_catalog_enabled=False),
         agent_service=MockAgentService(),
         document_service=doc_svc,
     )

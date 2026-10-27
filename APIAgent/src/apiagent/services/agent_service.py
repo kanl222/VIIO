@@ -9,6 +9,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from apiagent.interfaces._protocols import IAgentService
+from apiagent.services.answer_sources import AgentReply, clean_answer
+from apiagent.services.graph_builder import scope_key
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +86,7 @@ class AgentService(IAgentService):
             result = await self._graph.ainvoke(
                 {"messages": [("user", clean_message)]},
                 config=config,
-                **({"context": {"reference_context": reference_context}} if reference_context else {}),
+                context={"access_scope": scope_key(user_context), **({"reference_context": reference_context} if reference_context else {})},
             )
         except Exception as exc:
             exc_msg = str(exc) or repr(exc) or type(exc).__name__
@@ -113,4 +115,6 @@ class AgentService(IAgentService):
         else:
             reply = str(raw_content)
 
-        return reply, effective_thread_id
+        sources = getattr(last_message, "response_metadata", {}).get("sources", [])
+        active = getattr(last_message, "response_metadata", {}).get("active_specialist")
+        return AgentReply(clean_answer(reply, sources), sources, active), effective_thread_id

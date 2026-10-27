@@ -34,6 +34,7 @@ export interface ChatResponse {
   reply: string;
   thread_id: string;
   message_id: string;
+  sources?: { title: string; document_id: string }[];
 }
 
 export interface ApiError {

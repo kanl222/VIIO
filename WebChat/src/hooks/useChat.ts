@@ -95,6 +95,7 @@ export function useChat(
           conversation_id: targetId,
           sender: 'assistant',
           text: response.reply,
+          attachments: (response.sources || []).map(source => ({ type: 'knowledge_source', name: source.title, data: { document_id: source.document_id } })),
           created_at: new Date().toISOString(),
         };
 

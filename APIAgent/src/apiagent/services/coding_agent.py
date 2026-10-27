@@ -9,13 +9,17 @@ import json
 import logging
 import re
 import uuid
+from html import unescape
 from weakref import WeakValueDictionary
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from apiagent.prompts import CODING_SYSTEM_PROMPT, DELEGATION_PROMPT
 from apiagent.services.agent_service import AgentService
+from apiagent.services.conversation_route import ConversationRoute
+from apiagent.services.request_policy import DOMAIN, FOLLOWUP, NO_CODE, calculate, request_mode
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +40,13 @@ CODING_INTENT = re.compile(
 
 
 def is_coding_request(message: str) -> bool:
-    if re.search(r"код\s+(?:писать\s+)?не\s+(?:нуж|надо)|не\s+(?:пиши|писать)\s+код|без\s+(?:написания\s+)?кода", message, re.I):
-        if needs_knowledge(message):
-            return False
+    if NO_CODE.search(message):
+        return False
     return bool(CODING_INTENT.search(message))
 
 
 def needs_knowledge(message: str) -> bool:
-    return bool(re.search(r"баз[аеуы]\s+знани|документ|регламент|наш(?:ей|ем)\s+(?:систем|проект)|ис\s*ло|ssrs|availablereports|\bviio\b", message, re.I))
+    return bool(DOMAIN.search(message))
 
 
 class CodingAgentService(AgentService):
@@ -85,8 +88,8 @@ class CodingAgentService(AgentService):
                 query = str(earlier) + "\nУточнение: " + message
         reference = None
         if query:
-            title_match = re.search(r'документ[а-я]*\s*[«"]([^»"]+)[»"]', query, re.I)
-            requested_title = title_match.group(1).strip() if title_match else None
+            title_match = re.search(r'документ[а-я]*\s*(?:«([^»]+)»|"([^"]+)")', query, re.I)
+            requested_title = (title_match.group(1) or title_match.group(2)).strip() if title_match else None
             if self.knowledge_search is None:
                 return "Поиск в базе знаний недоступен. Передайте необходимые сведения для написания кода.", coding_thread
             try:
@@ -101,7 +104,7 @@ class CodingAgentService(AgentService):
             if requested_title:
                 blocks = re.finditer(r'<context source="(.*?)" doc_id="[^"]*"[^>]*>[\s\S]*?</context>', reference)
                 normalize = lambda text: " ".join(text.casefold().replace("ё", "е").split())
-                exact = [block.group(0) for block in blocks if normalize(block.group(1)) == normalize(requested_title)]
+                exact = [block.group(0) for block in blocks if normalize(unescape(block.group(1))) == normalize(requested_title)]
                 if not exact:
                     return f"Документ «{requested_title}» не найден среди доступных результатов. Уточните название или передайте нужный фрагмент для написания кода.", coding_thread
                 reference = "\n\n".join(exact)
@@ -113,17 +116,17 @@ class CodingAgentService(AgentService):
 
 
 def create_coding_delegation_tool(specialist: CodingAgentService) -> BaseTool:
-    @tool("coding_agent")
-    async def coding_agent(task: str, config: RunnableConfig, knowledge_query: str | None = None) -> str:
+    @tool("coding_agent", response_format="content_and_artifact")
+    async def coding_agent(task: str, config: RunnableConfig, knowledge_query: str | None = None) -> tuple[str, dict]:
         """Delegate ALL coding, SQL, API, SOAP, debugging, tests and code optimization tasks to the coding specialist."""
         context = config.get("configurable", {})
         try:
             reply, _ = await specialist.chat(task, context.get("thread_id"), context.get("user_context"), knowledge_query=knowledge_query)
-            return reply
+            return str(reply), {"sources": getattr(reply, "sources", []), "active_specialist": "coder"}
         except PermissionError as exc:
-            return str(exc)
+            return str(exc), {}
         except TimeoutError:
-            return "Модель coder достигла лимита 90 секунд. Попробуйте сократить задачу."
+            return "Модель coder достигла лимита 90 секунд. Попробуйте сократить задачу.", {}
     return coding_agent
 
 
@@ -133,6 +136,9 @@ class MultiAgentService:
     def __init__(self, general: AgentService, coding: CodingAgentService) -> None:
         self.general = general
         self.coding = coding
+        saver = general.checkpointer if isinstance(general.checkpointer, BaseCheckpointSaver) else None
+        self.routes = ConversationRoute(saver)
+        self._locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
     @property
     def checkpointer(self):
@@ -141,18 +147,35 @@ class MultiAgentService:
     def set_checkpointer(self, checkpointer):
         self.general.set_checkpointer(checkpointer)
         self.coding.set_checkpointer(checkpointer)
+        self.routes.graph.checkpointer = checkpointer
 
     async def chat(self, message, thread_id=None, user_context=None):
+        thread_id = thread_id.strip() if thread_id and thread_id.strip() else str(uuid.uuid4())
+        key = self.routes.config(thread_id, user_context)["configurable"]["thread_id"]
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            return await self._chat(message, thread_id, user_context)
+
+    async def _chat(self, message, thread_id, user_context):
         parts = message.strip().split(maxsplit=1)
         explicit = bool(parts and parts[0].lower() == "/code")
-        if explicit or is_coding_request(message):
+        active = await self.routes.get(thread_id, user_context)
+        continuation = bool(active == "coder" and FOLLOWUP.search(message)
+                            and not NO_CODE.search(message) and request_mode(message) != "rewrite"
+                            and not needs_knowledge(message) and calculate(message) is None
+                            and not re.search(r"отч[её]т|письм|сообщени|продаж|отпуск|отдел", message, re.I))
+        if explicit or is_coding_request(message) or continuation:
             if explicit and len(parts) == 1:
                 raise ValueError("После /code укажите задачу для агента кода.")
             thread_id = thread_id or str(uuid.uuid4())
             try:
-                return await self.coding.chat(parts[1] if explicit else message, thread_id, user_context)
+                result = await self.coding.chat(parts[1] if explicit else message, thread_id, user_context)
+                await self.routes.set("coder", thread_id, user_context)
+                return result
             except PermissionError as exc:
                 return str(exc), thread_id
             except TimeoutError:
                 return "Модель coder достигла лимита 90 секунд. Попробуйте сократить задачу.", thread_id
-        return await self.general.chat(message, thread_id, user_context)
+        result = await self.general.chat(message, thread_id, user_context)
+        await self.routes.set(getattr(result[0], "active_specialist", None) or "general", thread_id, user_context)
+        return result

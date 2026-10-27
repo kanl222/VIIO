@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
+import uuid
+import inspect
+from pathlib import Path
+from urllib.parse import quote
 from typing import Any
 import anyio.to_thread
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response as FastAPIResponse
 from pydantic import BaseModel, Field
 
 from apiagent.config import Settings
 from apiagent.interfaces._protocols import IAgentService, IDocumentService
 from apiagent.services.pdf_extraction import PdfExtractionService, PdfExtractionError
+from apiagent.services.document_access import can_read_document
+from apiagent.services.document_catalog import DocumentCatalogService
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +117,13 @@ class ChatRequest(BaseModel):
     )
 
 
+class ChatSource(BaseModel):
+    """Server provenance only; no model-generated download URL or vector score."""
+
+    title: str
+    document_id: str
+
+
 class ChatResponse(BaseModel):
     """Схема ответа AI-агента.
 
@@ -119,12 +134,22 @@ class ChatResponse(BaseModel):
 
     reply: str = Field(description="Финальный ответ агента.")
     thread_id: str = Field(description="Идентификатор текущей сессии диалога.")
+    sources: list[ChatSource] = Field(default_factory=list, description="Материалы, предоставленные для текущего ответа; не доказательство каждого утверждения.")
+
+
+class ReviewApprovalRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=500000)
+    review_token: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
 def create_api_router(
     agent_service: IAgentService,
     document_service: IDocumentService,
     settings: Settings,
+    catalog_service: Any | None = None,
+    file_store: Any | None = None,
+    bulk_queue: Any | None = None,
+    ingestion_service: Any | None = None,
 ) -> APIRouter:
     """Создание и конфигурирование FastAPI роутера с зависимостями.
 
@@ -132,12 +157,22 @@ def create_api_router(
         agent_service: Сервис диалогового агента LangGraph (IAgentService).
         document_service: Сервис управления документами (IDocumentService).
         settings: Параметры конфигурации приложения (Settings).
+        catalog_service: Опциональный DocumentCatalogService (каталог PostgreSQL).
+        file_store: Опциональный IFileStore (хранилище оригиналов).
+        bulk_queue: Опциональный BulkQueue (очередь пакетной загрузки).
 
     Returns:
         Сконфигурированный экземпляр APIRouter.
     """
     router = APIRouter()
     pdf_service = PdfExtractionService(settings)
+
+    def require_catalog():
+        if catalog_service is None or isinstance(catalog_service, DocumentCatalogService) and not catalog_service.available:
+            raise HTTPException(503, "Каталог документов недоступен.")
+
+    async def resolved(value):
+        return await value if inspect.isawaitable(value) else value
 
     def verify_internal_token(
         x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
@@ -214,22 +249,23 @@ def create_api_router(
             )
 
         try:
-            result = await anyio.to_thread.run_sync(
-                document_service.index_document,
-                request.title,
-                request.content,
-                request.metadata,
-                request.is_public,
-                request.allowed_roles,
-                request.allowed_departments,
-                request.owner_id,
-            )
+            if ingestion_service is not None:
+                require_catalog()
+                result = await ingestion_service.index_text(request)
+            else:
+                result = await anyio.to_thread.run_sync(
+                    document_service.index_document, request.title, request.content,
+                    request.metadata, request.is_public, request.allowed_roles,
+                    request.allowed_departments, request.owner_id,
+                )
             return DocumentCreateResponse(
                 document_id=result.document_id,
                 title=result.title,
                 chunks_count=result.chunks_count,
                 status=result.status,
             )
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -239,7 +275,7 @@ def create_api_router(
             logger.error("Ошибка при индексации документа: %s", exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Ошибка при сохранении документа: {exc}",
+                detail="Не удалось сохранить документ. Повторите попытку позже.",
             ) from exc
 
     @router.post(
@@ -264,7 +300,7 @@ def create_api_router(
                 thread_id=request.thread_id,
                 user_context=request.user_context.model_dump() if request.user_context else None,
             )
-            return ChatResponse(reply=reply, thread_id=thread_id)
+            return ChatResponse(reply=str(reply), thread_id=thread_id, sources=getattr(reply, "sources", []))
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -278,4 +314,283 @@ def create_api_router(
                 detail=f"Ошибка взаимодействия с агентом: {exc_msg}",
             ) from exc
 
+    # ------------------------------------------------------------------
+    # Каталог документов
+    # ------------------------------------------------------------------
+
+    @router.get(
+        "/api/v1/documents/catalog",
+        tags=["Documents"],
+        summary="Список документов каталога",
+        dependencies=[Depends(verify_internal_token)],
+    )
+    async def list_catalog(
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+        status_filter: str | None = Query(default=None, alias="status"),
+        owner_id: str | None = Query(default=None),
+    ) -> dict:
+        """Постраничный список документов в каталоге PostgreSQL."""
+        require_catalog()
+        result = await catalog_service.list_documents(
+            page=page, page_size=page_size,
+            status=status_filter, owner_id=owner_id,
+        )
+        return {
+            "items": [_catalog_record_to_dict(r) for r in result.items],
+            "total": result.total,
+            "page": result.page,
+            "page_size": result.page_size,
+        }
+
+    @router.get(
+        "/api/v1/documents/catalog/{doc_id}",
+        tags=["Documents"],
+        summary="Карточка документа",
+        dependencies=[Depends(verify_internal_token)],
+    )
+    async def get_catalog_item(doc_id: str) -> dict:
+        """Метаданные одного документа из каталога."""
+        require_catalog()
+        record = await catalog_service.get(doc_id)
+        if record is None:
+            raise HTTPException(404, f"Документ {doc_id!r} не найден в каталоге.")
+        return _catalog_record_to_dict(record)
+
+    @router.get(
+        "/api/v1/documents/download/{doc_id}",
+        tags=["Documents"],
+        summary="Скачать оригинал документа",
+        dependencies=[Depends(verify_internal_token)],
+    )
+    async def download_document(doc_id: str, user_role: str = Query(default="employee"),
+                                user_id: str | None = Query(default=None), departments: str = Query(default="")) -> FastAPIResponse:
+        """Авторизованная выдача оригинала файла (байт-в-байт).
+
+        Проверяет права доступа по роли и возвращает файл с корректным Content-Type.
+        Для получения файла WebChat передаёт роль пользователя в query-параметре.
+        """
+        require_catalog()
+        if file_store is None:
+            raise HTTPException(503, "Хранилище оригиналов не инициализировано.")
+
+        record = await catalog_service.get(doc_id)
+        if record is None:
+            raise HTTPException(404, "Документ не найден.")
+
+        # Проверка доступа: публичный ИЛИ роль совпадает ИЛИ admin
+        if not can_read_document(record, {"role": user_role, "user_id": user_id, "departments": [d for d in departments.split(',') if d]}):
+            raise HTTPException(403, "Доступ к документу запрещён.")
+
+        if not record.storage_key:
+            raise HTTPException(404, "Оригинал файла не сохранён. Документ был добавлен без загрузки файла.")
+
+        try:
+            data = await anyio.to_thread.run_sync(file_store.load, record.storage_key)
+        except FileNotFoundError:
+            raise HTTPException(404, "Файл не найден в хранилище.")
+
+        media_type = record.mime_type or "application/octet-stream"
+        safe_title = record.title.replace('\r', '').replace('\n', '').replace('"', "'")[:100]
+        ext = _ext_for_mime(media_type)
+        filename = f"{safe_title}{ext}"
+
+        return FastAPIResponse(
+            content=data,
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename=\"document{ext}\"; filename*=UTF-8''{quote(filename, safe='')}", "X-Content-Type-Options": "nosniff"},
+        )
+
+    # ------------------------------------------------------------------
+    # Массовая загрузка
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/api/v1/documents/bulk-upload",
+        tags=["Documents"],
+        summary="Пакетная загрузка документов",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(verify_internal_token)],
+    )
+    async def bulk_upload(
+        files: list[UploadFile] = File(...),
+        is_public: bool = Query(default=False),
+        allowed_roles: str = Query(default="employee"),
+        allowed_departments: str = Query(default="general"),
+        owner_id: str | None = Query(default=None),
+    ) -> dict:
+        """Принять несколько файлов и поставить их в очередь индексации.
+
+        Возвращает список task_id для отслеживания прогресса.
+        """
+        if bulk_queue is None:
+            raise HTTPException(503, "Очередь пакетной загрузки не инициализирована.")
+        if ingestion_service is not None:
+            require_catalog()
+
+        max_files = settings.bulk_max_files
+        if len(files) > max_files:
+            raise HTTPException(400, f"Максимум {max_files} файлов за один запрос.")
+
+        from apiagent.services.bulk_queue import BulkUploadTask
+
+        roles = [r.strip() for r in allowed_roles.split(",") if r.strip()]
+        depts = [d.strip() for d in allowed_departments.split(",") if d.strip()]
+
+        tasks_info = []
+        for upload in files:
+            filename = upload.filename or "document"
+            data = await upload.read(settings.bulk_max_file_bytes + 1)
+            await upload.close()
+
+            if len(data) > settings.bulk_max_file_bytes:
+                tasks_info.append({
+                    "task_id": None,
+                    "filename": filename,
+                    "status": "error",
+                    "error": f"Файл превышает лимит {settings.bulk_max_file_bytes // 1024 // 1024} МБ.",
+                })
+                continue
+
+            suffix = Path(filename).suffix.lower()
+            mime = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown', '.markdown': 'text/markdown'}.get(suffix)
+            if mime is None or not data:
+                tasks_info.append({"task_id": None, "filename": filename, "status": "error", "error": "Поддерживаются непустые PDF, TXT и Markdown."})
+                continue
+            task_id = uuid.uuid4().hex
+            title = filename.rsplit(".", 1)[0][:255] if "." in filename else filename[:255]
+
+            task = BulkUploadTask(
+                task_id=task_id,
+                filename=filename,
+                data=data,
+                title=title,
+                owner_id=owner_id,
+                is_public=is_public,
+                mime_type=mime,
+                allowed_roles=roles,
+                allowed_departments=depts,
+            )
+            try:
+                result = await resolved(bulk_queue.enqueue(task))
+                tasks_info.append({
+                    "task_id": result.task_id,
+                    "filename": result.filename,
+                    "status": result.status,
+                })
+            except Exception as exc:
+                tasks_info.append({
+                    "task_id": task_id,
+                    "filename": filename,
+                    "status": "error",
+                    "error": "Не удалось сохранить задание. Повторите загрузку позже.",
+                })
+
+        return {"tasks": tasks_info}
+
+    @router.get(
+        "/api/v1/documents/bulk-status",
+        tags=["Documents"],
+        summary="Статусы задач пакетной загрузки",
+        dependencies=[Depends(verify_internal_token)],
+    )
+    async def bulk_status(task_ids: str = Query(default="", description="task_id через запятую; пусто — последние 100 заданий")) -> dict:
+        """Текущие статусы задач очереди."""
+        if bulk_queue is None:
+            raise HTTPException(503, "Очередь пакетной загрузки не инициализирована.")
+        ids = [t.strip() for t in task_ids.split(",") if t.strip()]
+        results = await resolved(bulk_queue.get_statuses(ids))
+        return {
+            "tasks": [
+                {
+                    "task_id": r.task_id,
+                    "filename": r.filename,
+                    "status": r.status,
+                    "document_id": r.document_id,
+                    "chunks_count": r.chunks_count,
+                    "error": r.error,
+                }
+                for r in results
+            ]
+        }
+
+    @router.post('/api/v1/documents/bulk-retry/{task_id}', dependencies=[Depends(verify_internal_token)], tags=['Documents'])
+    async def retry_bulk(task_id: str):
+        if bulk_queue is None:
+            raise HTTPException(503, 'Очередь недоступна')
+        if not await bulk_queue.retry(task_id):
+            raise HTTPException(409, 'Повторить можно только завершившееся ошибкой задание')
+        return {'status': 'queued', 'task_id': task_id}
+
+    @router.get('/api/v1/documents/bulk-review/{task_id}', dependencies=[Depends(verify_internal_token)], tags=['Documents'])
+    async def get_bulk_review(task_id: str):
+        require_catalog()
+        if bulk_queue is None:
+            raise HTTPException(503, 'Очередь недоступна')
+        result = await bulk_queue.get_review(task_id)
+        if result is None:
+            raise HTTPException(409, 'Задание не ожидает проверки текста')
+        return {'task_id': task_id, 'filename': result['filename'], **result['review']}
+
+    @router.post('/api/v1/documents/bulk-review/{task_id}', dependencies=[Depends(verify_internal_token)], tags=['Documents'])
+    async def approve_bulk_review(task_id: str, request: ReviewApprovalRequest, reviewer_id: str = Query(min_length=1, max_length=64)):
+        require_catalog()
+        if bulk_queue is None:
+            raise HTTPException(503, 'Очередь недоступна')
+        content = request.content.strip()
+        if not content or '\x00' in content or len(content) > settings.pdf_max_chars:
+            raise HTTPException(400, 'Текст пуст, содержит недопустимые символы или превышает лимит')
+        if not await bulk_queue.approve(task_id, request.review_token, content, reviewer_id):
+            raise HTTPException(409, 'Проверка уже завершена, отменена или открыта устаревшая версия')
+        return {'task_id': task_id, 'status': 'queued'}
+
+    @router.post('/api/v1/documents/bulk-cancel/{task_id}', dependencies=[Depends(verify_internal_token)], tags=['Documents'])
+    async def cancel_bulk(task_id: str):
+        require_catalog()
+        if bulk_queue is None:
+            raise HTTPException(503, 'Очередь недоступна')
+        if not await bulk_queue.cancel(task_id):
+            raise HTTPException(409, 'Отменить можно только задание в очереди или на проверке')
+        return {'task_id': task_id, 'status': 'cancelled'}
+
     return router
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
+
+def _catalog_record_to_dict(record: Any) -> dict:
+    """Сериализовать DocumentRecord в dict для JSON-ответа."""
+    return {
+        "id": record.id,
+        "title": record.title,
+        "mime_type": record.mime_type,
+        "file_size": record.file_size,
+        "sha256": record.sha256,
+        "owner_id": record.owner_id,
+        "version": record.version,
+        "parent_id": record.parent_id,
+        "status": record.status,
+        "is_public": record.is_public,
+        "allowed_roles": record.allowed_roles,
+        "allowed_departments": record.allowed_departments,
+        "has_original": record.storage_key is not None,
+        "chunks_count": record.chunks_count,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+    }
+
+
+def _ext_for_mime(mime: str) -> str:
+    """Получить расширение файла по MIME-типу."""
+    ext = {
+        "application/pdf": ".pdf",
+        "text/plain": ".txt",
+        "text/markdown": ".md",
+    }.get(mime)
+    if ext:
+        return ext
+    import mimetypes
+    guessed = mimetypes.guess_extension(mime)
+    return guessed or ""

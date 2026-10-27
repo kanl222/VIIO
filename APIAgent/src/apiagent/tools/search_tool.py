@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from html import escape
 from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
@@ -141,7 +142,7 @@ def create_knowledge_search_tool(vector_store: IVectorStore, k: int = 5) -> Base
             # Защита от prompt injection: экранирование закрывающего тега
             safe_content = content.replace("</context>", "&lt;/context&gt;")
             formatted_parts.append(
-                f'<context source="{title}" doc_id="{doc_id}" chunk="{idx}">\n'
+                f'<context source="{escape(str(title), quote=True)}" doc_id="{escape(str(doc_id), quote=True)}" chunk="{idx}">\n'
                 f"{safe_content}\n"
                 f"</context>"
             )

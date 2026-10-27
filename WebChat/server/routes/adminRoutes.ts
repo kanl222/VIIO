@@ -5,6 +5,7 @@ import { createAuthMiddleware, type AuthenticatedRequest } from '../auth.js';
 
 const roles = new Set(['employee', 'manager', 'programmer', 'admin']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const docId = /^doc-(?:[0-9a-f]{8}|[0-9a-f]{32})$/;
 const userColumns = 'id, username, role, departments, created_at';
 
 function stringList(value: unknown): value is string[] {
@@ -181,5 +182,161 @@ export function createAdminRouter(
       res.status(502).json({ detail: 'Сервис базы знаний недоступен или не успел ответить. Перед повторной отправкой проверьте состояние сервиса.' });
     }
   });
+
+  router.get('/documents/catalog', async (req, res) => {
+    const page = Math.max(1, Math.min(10000, Number(req.query.page) || 1));
+    const pageSize = Math.max(1, Math.min(100, Number(req.query.page_size) || 20));
+    const status = typeof req.query.status === 'string' ? req.query.status : '';
+    const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (status) query.set('status', status);
+
+    try {
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/catalog?${query.toString()}`, {
+        headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) {
+        res.status(response.status >= 500 ? 502 : response.status).json({ detail: 'Не удалось загрузить каталог документов.' });
+        return;
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch {
+      res.status(502).json({ detail: 'Сервис базы знаний недоступен.' });
+    }
+  });
+
+  router.get('/documents/download/:id', async (req: AuthenticatedRequest, res) => {
+    const docIdParam = String(req.params.id);
+    if (!docId.test(docIdParam)) {
+      res.status(400).json({ detail: 'Некорректный идентификатор документа.' });
+      return;
+    }
+    try {
+      const userRole = req.user?.role || 'employee';
+      const downloadContext = new URLSearchParams({ user_role: userRole, user_id: String(req.user?.id || ''), departments: (req.user?.departments || []).join(',') });
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/download/${encodeURIComponent(docIdParam)}?${downloadContext}`, {
+        headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { detail?: string };
+        res.status(response.status).json({ detail: errorData.detail || 'Не удалось скачать файл.' });
+        return;
+      }
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const disposition = response.headers.get('content-disposition');
+      res.setHeader('Content-Type', contentType);
+      if (disposition) res.setHeader('Content-Disposition', disposition);
+
+      const arrayBuffer = await response.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    } catch {
+      res.status(502).json({ detail: 'Сервис базы знаний недоступен.' });
+    }
+  });
+
+  router.post('/documents/bulk', raw({ type: 'multipart/form-data', limit: '50mb' }), async (req: AuthenticatedRequest, res) => {
+    const contentType = req.headers['content-type'];
+    if (!contentType || !contentType.startsWith('multipart/form-data')) {
+      res.status(400).json({ detail: 'Ожидается multipart/form-data.' });
+      return;
+    }
+    const isPublic = req.query.is_public === 'true';
+    const allowedRoles = typeof req.query.allowed_roles === 'string' ? req.query.allowed_roles : 'employee';
+    const allowedDepts = typeof req.query.allowed_departments === 'string' ? req.query.allowed_departments : 'general';
+
+    const query = new URLSearchParams({
+      is_public: String(isPublic),
+      allowed_roles: allowedRoles,
+      allowed_departments: allowedDepts,
+      owner_id: req.user!.id,
+    });
+
+    try {
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-upload?${query.toString()}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': contentType,
+          'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token',
+        },
+        body: new Uint8Array(req.body),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({})) as { detail?: string };
+        res.status(response.status >= 500 ? 502 : response.status).json({ detail: errData.detail || 'Не удалось загрузить пакет файлов.' });
+        return;
+      }
+      const data = await response.json();
+      res.status(202).json(data);
+    } catch {
+      res.status(502).json({ detail: 'Сервис базы знаний недоступен.' });
+    }
+  });
+
+  router.get('/documents/bulk-status', async (req, res) => {
+    const taskIds = typeof req.query.task_ids === 'string' ? req.query.task_ids : '';
+    try {
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-status?task_ids=${encodeURIComponent(taskIds)}`, {
+        headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) {
+        res.status(response.status >= 500 ? 502 : response.status).json({ detail: 'Не удалось получить статусы.' });
+        return;
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch {
+      res.status(502).json({ detail: 'Сервис базы знаний недоступен.' });
+    }
+  });
+  router.post('/documents/bulk-retry/:id', async (req, res) => {
+    const taskId = String(req.params.id);
+    if (!/^[0-9a-f]{32}$/.test(taskId)) {
+      res.status(400).json({ detail: 'Некорректное задание.' });
+      return;
+    }
+    try {
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-retry/${taskId}`, {
+        method: 'POST',
+        headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        signal: AbortSignal.timeout(10000),
+      });
+      const data = await response.json();
+      res.status(response.status >= 500 ? 502 : response.status).json(data);
+    } catch { res.status(502).json({ detail: 'Сервис базы знаний недоступен.' }); }
+  });
+  const uploadAction = (action: 'review' | 'cancel', method: 'GET' | 'POST'): RequestHandler => async (req: AuthenticatedRequest, res) => {
+    const taskId = String(req.params.id);
+    if (!/^[0-9a-f]{32}$/.test(taskId)) {
+      res.status(400).json({ detail: 'Некорректное задание.' });
+      return;
+    }
+    let body: string | undefined;
+    if (action === 'review' && method === 'POST') {
+      const { content, review_token } = req.body || {};
+      if (typeof content !== 'string' || !content.trim() || content.length > 500000 ||
+          typeof review_token !== 'string' || !/^[0-9a-f]{32}$/.test(review_token)) {
+        res.status(400).json({ detail: 'Проверьте текст и повторно откройте задание.' });
+        return;
+      }
+      body = JSON.stringify({ content, review_token });
+    }
+    try {
+      const query = action === 'review' && method === 'POST'
+        ? `?reviewer_id=${encodeURIComponent(String(req.user!.id))}` : '';
+      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-${action}/${taskId}${query}`, {
+        method, body,
+        headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token', 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
+      });
+      res.status(response.status >= 500 ? 502 : response.status).json(await response.json());
+    } catch { res.status(502).json({ detail: 'Сервис базы знаний недоступен.' }); }
+  };
+  router.get('/documents/bulk-review/:id', uploadAction('review', 'GET'));
+  router.post('/documents/bulk-review/:id', uploadAction('review', 'POST'));
+  router.post('/documents/bulk-cancel/:id', uploadAction('cancel', 'POST'));
   return router;
 }

@@ -708,6 +708,11 @@ test('HTTP API: Chat endpoint invokes APIAgent and saves messages', async () => 
       json: async () => ({
         reply: `Здравствуйте! Вы написали: ${parsed.message}`,
         thread_id: parsed.thread_id,
+        sources: [
+          { title: 'Инструкция SSRS', document_id: 'doc-ssrs', url: 'javascript:alert(1)', chunk_index: 7 },
+          { title: 'Инструкция SSRS', document_id: 'doc-ssrs' },
+          { title: null, document_id: 'bad' },
+        ],
       }),
     };
   };
@@ -747,6 +752,7 @@ test('HTTP API: Chat endpoint invokes APIAgent and saves messages', async () => 
     assert.equal(chatData.reply, 'Здравствуйте! Вы написали: Привет, Агент!');
     assert.equal(chatData.thread_id, conversation.agent_thread_id);
     assert.ok(chatData.message_id);
+    assert.deepEqual(chatData.sources, [{ title: 'Инструкция SSRS', document_id: 'doc-ssrs' }]);
 
     // 4. Проверяем историю сообщений диалога
     const convDetailsRes = await request(`/api/conversations/${conversation.id}`, {
@@ -758,6 +764,9 @@ test('HTTP API: Chat endpoint invokes APIAgent and saves messages', async () => 
     assert.equal(convDetails.messages[0].text, 'Привет, Агент!');
     assert.equal(convDetails.messages[1].sender, 'assistant');
     assert.equal(convDetails.messages[1].text, 'Здравствуйте! Вы написали: Привет, Агент!');
+    assert.deepEqual(convDetails.messages[1].attachments, [
+      { type: 'knowledge_source', name: 'Инструкция SSRS', data: { document_id: 'doc-ssrs' } },
+    ]);
   } finally {
     await close();
   }

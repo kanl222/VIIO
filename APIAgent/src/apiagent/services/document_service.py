@@ -42,6 +42,7 @@ class DocumentService(IDocumentService):
 
     Выполняет валидацию входящих текстовых данных, нарезку текста на чанки
     с использованием RecursiveCharacterTextSplitter и сохранение в векторное хранилище.
+    Регистрацию в каталоге выполняет асинхронный сервис загрузки.
 
     Attributes:
         _vector_store: Векторное хранилище, реализующее протокол IVectorStore.
@@ -78,6 +79,11 @@ class DocumentService(IDocumentService):
         allowed_roles: list[str] | None = None,
         allowed_departments: list[str] | None = None,
         owner_id: str | None = None,
+        *,
+        document_id: str | None = None,
+        mime_type: str = "text/plain",
+        sha256: str | None = None,
+        storage_key: str | None = None,
     ) -> DocumentMetadata:
         """Валидация, разбиение на фрагменты и индексация документа с атрибутами доступа.
 
@@ -89,6 +95,11 @@ class DocumentService(IDocumentService):
             allowed_roles: Список разрешенных ролей (например, ["admin", "employee"]).
             allowed_departments: Список разрешенных подразделений (например, ["it", "sales"]).
             owner_id: Идентификатор владельца документа.
+            document_id: Использовать указанный id вместо генерации нового
+                (для пакетной загрузки, где id выделяется заранее).
+            mime_type: MIME-тип документа (передаётся в каталог).
+            sha256: SHA-256 хеш оригинала (передаётся в каталог).
+            storage_key: Ключ файла в хранилище оригиналов (передаётся в каталог).
 
         Returns:
             Объект DocumentMetadata со сведениями о сохраненном документе.
@@ -104,7 +115,7 @@ class DocumentService(IDocumentService):
         if not clean_content:
             raise ValueError("Содержимое документа не может быть пустым")
 
-        document_id = f"doc-{uuid.uuid4().hex[:8]}"
+        doc_id = document_id or f"doc-{uuid.uuid4().hex[:8]}"
         custom_metadata = metadata or {}
 
         chunks = split_document_text(clean_content, self._chunk_size, self._chunk_overlap, self._chunk_unit)
@@ -117,7 +128,7 @@ class DocumentService(IDocumentService):
         metadatas = [
             {
                 **custom_metadata,
-                "document_id": document_id,
+                "document_id": doc_id,
                 "title": clean_title,
                 "chunk_index": idx,
                 "chunk_unit": self._chunk_unit,
@@ -134,14 +145,14 @@ class DocumentService(IDocumentService):
         logger.info(
             "Индексация документа '%s' (id: %s): создано %d чанков",
             clean_title,
-            document_id,
+            doc_id,
             len(chunks),
         )
 
         self._vector_store.add_texts(texts=chunks, metadatas=metadatas)
 
         return DocumentMetadata(
-            document_id=document_id,
+            document_id=doc_id,
             title=clean_title,
             chunks_count=len(chunks),
             status="indexed",
@@ -154,3 +165,12 @@ class DocumentService(IDocumentService):
             Число фрагментов в хранилище.
         """
         return self._vector_store.count()
+
+    def delete_document(self, identifier):
+        self._vector_store.delete_document(identifier)
+
+    def publish_document(self, identifier):
+        self._vector_store.publish_document(identifier)
+
+    def existing_document_metadata(self):
+        return self._vector_store.document_metadata()

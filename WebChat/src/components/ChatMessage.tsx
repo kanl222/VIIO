@@ -193,6 +193,7 @@ function formatTime(iso: string): string {
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const isUser = message.sender === 'user';
   const isSystem = message.sender === 'system';
+  const sources = !isUser ? (message.attachments || []).filter(item => item.type === 'knowledge_source' && item.name) : [];
 
   if (isSystem) {
     return (
@@ -234,6 +235,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               renderMarkdown(message.text)
             )}
           </div>
+
+          {sources.length > 0 && (
+            <div className="mt-2 text-xs text-gray-600 dark:text-zinc-400" aria-label="Предоставленные материалы">
+              <p className="font-medium">Предоставленные материалы</p>
+              <ul className="mt-1 space-y-1 list-disc pl-4">
+                {sources.map((source, index) => <li className="break-words" key={index}>{source.name}</li>)}
+              </ul>
+            </div>
+          )}
 
           {/* Timestamp */}
           {message.created_at && (
