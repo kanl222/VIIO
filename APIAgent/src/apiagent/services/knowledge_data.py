@@ -31,6 +31,13 @@ CREATE INDEX IF NOT EXISTS document_publications_search ON document_publications
 
 
 def query_terms(query):
+    # Code names and paths are more specific than surrounding words such as
+    # "для чего он нужен". Do not let those words flood lexical candidates
+    # with unrelated manuals before the exact identifier reaches the merger.
+    identifiers = [word.lower() for word in re.findall(r'[A-Za-z_][A-Za-z0-9_.]*', query)
+                   if '_' in word or '.' in word.rstrip('.') or re.search(r'[a-z][A-Z]', word)]
+    if identifiers:
+        return list(dict.fromkeys(word.rstrip('.') for word in identifiers))[:20]
     stop = {'что', 'как', 'для', 'это', 'про', 'или', 'нужно', 'the', 'and', 'with', 'какие', 'такое'}
     return list(dict.fromkeys(word.lower() for word in re.findall(r'[\w]{3,}', query)
                              if word.lower() not in stop))[:20]

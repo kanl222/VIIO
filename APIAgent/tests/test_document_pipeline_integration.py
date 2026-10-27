@@ -174,6 +174,25 @@ async def test_failed_public_index_update_keeps_previous_approved_snapshot(pipel
     assert 'Uncommitted revision' not in str(await data.public_search('Guide'))
 
 
+async def test_named_code_lookup_survives_large_public_manuals(pipeline):
+    from apiagent.services.enhanced_retrieval import EnhancedRetrieval
+    _, _, _, adapter, ingestion, _ = pipeline
+    for i in range(18):
+        result = await ingestion.index_text(DocumentCreateRequest(title=f'Инструкция {i}',
+            content='Для чего он нужен: отчёт нужен для работы. ' * 30,
+            is_public=True, allowed_roles=[], allowed_departments=[]))
+        await ingestion.data.publish(result.document_id, f'Инструкция {i}',
+            'Для чего он нужен: отчёт нужен для работы. ' * 30, 'admin')
+    target = await ingestion.index_text(DocumentCreateRequest(title='Ключевые файлы модуля',
+        content='AvailableReports получает дерево доступных отчётов через getReportUser.',
+        is_public=False, allowed_roles=['programmer'], allowed_departments=[]))
+    query = 'что такое AvailableReports и для чего он нужен'
+    lexical = await ingestion.data.lexical(query, {'role': 'programmer'})
+    assert [doc.metadata['document_id'] for doc in lexical] == [target.document_id]
+    merged = await EnhancedRetrieval(adapter, ingestion.data).search(query, {'role': 'programmer'}, 5)
+    assert merged[0].metadata['document_id'] == target.document_id
+
+
 async def test_upload_survives_new_worker_and_download_checks_full_acl(pipeline):
     client, queue, catalog, adapter, ingestion, store = pipeline
     original = 'Правило отдела кадров: отпуск согласуется заранее.'.encode()
