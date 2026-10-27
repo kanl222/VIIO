@@ -169,11 +169,14 @@ async def main(mode):
                 assert original.status_code == 200 and original.content == expected
             from apiagent.models import create_embeddings
             from apiagent.utils.vector_store import QdrantVectorStoreAdapter
-            with QdrantClient(url=settings.qdrant_url) as vector:
+            vector = QdrantClient(url=settings.qdrant_url)
+            try:
                 adapter = QdrantVectorStoreAdapter(vector, create_embeddings(settings), settings.qdrant_collection_name)
                 matches = adapter.similarity_search('version fixture', k=10, filter=models.Filter(must=[
                     models.FieldCondition(key='metadata.document_id', match=models.MatchAny(any=[item['id'] for item in versions]))]))
                 assert matches and {doc.metadata['document_id'] for doc in matches} == {versions[0]['id']}
+            finally:
+                vector.close()
             print(json.dumps({'stage': 'versions_verified_after_restart', 'history': 2,
                               'originals': 'passed', 'access_inherited': 'passed', 'search_current_only': 'passed'}))
 
