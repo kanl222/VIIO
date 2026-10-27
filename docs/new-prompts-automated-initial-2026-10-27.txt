@@ -1,0 +1,15 @@
+........................................................................ [ 30%]
+........................................................................ [ 61%]
+.......................F................................................ [ 92%]
+..................                                                       [100%]
+=================================== FAILURES ===================================
+_______ test_rewrite_does_not_receive_knowledge_or_citation_instructions _______
+
+>   ???
+E   assert 'Сохраняйте смысл' in "[SystemMessage(content='Вы — редактор текста. Выполните ровно то преобразование, которое просит пользователь.\\n\\nОБ...одня, ты опять задерживаешь.', additional_kwargs={}, response_metadata={}, id='2221163f-0b5b-444e-aee0-7ae2337ae8a0')]"
+E    +  where "[SystemMessage(content='Вы — редактор текста. Выполните ровно то преобразование, которое просит пользователь.\\n\\nОБ...одня, ты опять задерживаешь.', additional_kwargs={}, response_metadata={}, id='2221163f-0b5b-444e-aee0-7ae2337ae8a0')]" = str([SystemMessage(content='Вы — редактор текста. Выполните ровно то преобразование, которое просит пользователь.\n\nОБЯЗА...годня, ты опять задерживаешь.', additional_kwargs={}, response_metadata={}, id='2221163f-0b5b-444e-aee0-7ae2337ae8a0')])
+
+D:\Source\VIIO\APIAgent\tests\test_release_a_regressions.py:60: AssertionError
+=========================== short test summary info ============================
+FAILED Consultant/test_release_a_regressions.py::test_rewrite_does_not_receive_knowledge_or_citation_instructions
+1 failed, 233 passed in 14.47s

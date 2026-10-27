@@ -3,7 +3,8 @@
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage
+from apiagent.prompts import REWRITE_SYSTEM_PROMPT
 from langchain_core.documents import Document
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -57,8 +58,8 @@ async def test_rewrite_does_not_receive_knowledge_or_citation_instructions():
     # This model deliberately has no bind_tools: text transformations need none.
     service = AgentService(build_agent_graph(model, [], MemorySaver()))
     await service.chat("Перепиши вежливо одним предложением: пришли отчёт сегодня, ты опять задерживаешь.", "rewrite", PROGRAMMER)
-    assert "Сохраняйте смысл" in str(model.seen[-1])
-    assert "Поиск по доступным документам выполняется" not in str(model.seen[-1])
+    assert [message.content for message in model.seen[-1] if isinstance(message, SystemMessage)] == [REWRITE_SYSTEM_PROMPT]
+    assert '<knowledge_reference>' not in str(model.seen[-1])
 
 
 @pytest.mark.parametrize("expression,expected", [
