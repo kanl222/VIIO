@@ -79,7 +79,7 @@ def docx_blocks(container):
                         continue
                     seen.add(cell._tc)
                     cells.append(' / '.join(docx_blocks(cell)).strip())
-                yield ' | '.join(cells)
+                yield ' | '.join(cells) if any(cell.strip() for cell in cells) else ''
         else:
             parts = []
             for item in block.iter_inner_content():
@@ -150,7 +150,7 @@ def odt_table(table, max_chars):
         characters += row_size * repeated_rows
         if emitted > 10000 or characters > max_chars:
             raise OfficeExtractionError('Слишком длинная таблица. Разделите документ.')
-        yield from [' | '.join(cells)] * repeated_rows
+        yield from [(' | '.join(cells) if any(cell.strip() for cell in cells) else '')] * repeated_rows
 
 
 class OfficeExtractionService:

@@ -40,10 +40,12 @@ async def test_rejects_corrupt_packages_and_empty_text(suffix):
         with pytest.raises(OfficeExtractionError):await extractor.extract(value,'file'+suffix)
     if suffix=='.docx':
         from docx import Document
-        doc=Document();target=BytesIO();doc.save(target)
+        doc=Document();doc.add_table(rows=1,cols=2);target=BytesIO();doc.save(target)
     else:
         from odf.opendocument import OpenDocumentText
-        doc=OpenDocumentText();target=BytesIO();doc.save(target)
+        from odf.table import Table,TableRow,TableCell
+        doc=OpenDocumentText();grid=Table();row=TableRow();row.addElement(TableCell());row.addElement(TableCell());grid.addElement(row);doc.text.addElement(grid)
+        target=BytesIO();doc.save(target)
     with pytest.raises(OfficeExtractionError,match='нет извлекаемого текста'):
         await extractor.extract(target.getvalue(),'file'+suffix)
 
