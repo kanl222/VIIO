@@ -1,6 +1,7 @@
 .git
 .gitignore
 .venv
+.legacy-local/
 __pycache__
 *.pyc
 *.pyo
