@@ -23,11 +23,10 @@ def run_app(settings: Settings | None = None) -> None:
     app_settings = settings or Settings()
 
     logger.info(
-        "Запуск assistent сервера на http://%s:%d (модель: %s, Qdrant: %s)",
+        "Запуск assistent сервера на http://%s:%d (модель: %s)",
         app_settings.api_host,
         app_settings.api_port,
         app_settings.ollama_model,
-        app_settings.qdrant_url,
     )
 
     uvicorn.run(

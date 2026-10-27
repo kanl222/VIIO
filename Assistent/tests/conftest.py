@@ -1,7 +1,5 @@
-"""Cross-service contract tests use the standalone consultant source checkout."""
 import sys
 from pathlib import Path
-
-source = Path(__file__).resolve().parents[2] / 'Consultant' / 'src'
-if source.is_dir():
-    sys.path.insert(0, str(source))
+root=Path(__file__).resolve().parents[2]
+for folder in ('Assistent/src','Documents/src','Documents/tests','Consultant/src'):
+    sys.path.insert(0,str(root/folder))

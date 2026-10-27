@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.services.agent_service import AgentService
 from assistent.services.graph_builder import build_agent_graph, messages_with_retrieved_context
-from assistent.tools.search_tool import create_knowledge_search_tool
+from viio_documents.tools.search_tool import create_knowledge_search_tool
 
 
 class NoToolCallsModel(GenericFakeChatModel):

@@ -1,3 +1,7 @@
+// Explicit test-only credentials; production has no built-in service token.
+process.env.CHAT_API_KEY = 'c'.repeat(40);
+process.env.DOCUMENTS_READ_KEY = 'r'.repeat(40);
+process.env.DOCUMENTS_ADMIN_KEY = 'a'.repeat(40);
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';

@@ -1,0 +1,1 @@
+from viio_documents.models.embeddings import create_embeddings

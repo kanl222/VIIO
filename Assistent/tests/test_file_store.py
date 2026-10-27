@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 import pytest
-from assistent.services.file_store import LocalFileStore, IFileStore
+from viio_documents.services.file_store import LocalFileStore, IFileStore
 
 
 def test_file_store_implements_interface(tmp_path: Path) -> None:

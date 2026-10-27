@@ -6,7 +6,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.services.agent_service import AgentService
 from assistent.services.graph_builder import build_agent_graph
-from assistent.tools.search_tool import create_knowledge_search_tool
+from viio_documents.tools.search_tool import create_knowledge_search_tool
 
 class ToolFakeChatModel(GenericFakeChatModel):
     def bind_tools(self, tools, **kwargs):

@@ -114,6 +114,12 @@ export function createApp(options?: AppOptions): express.Express {
 export const app = createApp();
 
 export async function startServer(port = parseInt(process.env.PORT || '3000', 10), host = process.env.HOST || '0.0.0.0') {
+  if (process.env.NODE_ENV === 'production') {
+    const keys = ['CHAT_API_KEY', 'DOCUMENTS_READ_KEY', 'DOCUMENTS_ADMIN_KEY'].map(name => process.env[name]);
+    if (keys.some(value => !value || value.length < 32) || new Set(keys).size !== keys.length) {
+      throw new Error('Configure distinct production service keys with at least 32 characters.');
+    }
+  }
   const firstAdmin = readBootstrapAdminConfig();
   // Пытаемся инициализировать БД, но не блокируем запуск сервера при ее временной недоступности
   const dbReady = await initDb();

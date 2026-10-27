@@ -9,8 +9,8 @@ from assistent.services.agent_service import AgentService
 from assistent.services.answer_sources import cited_sources
 from assistent.services.database_agent import DatabaseAgentService, is_database_request
 from assistent.services.graph_builder import build_agent_graph
-from assistent.services.knowledge_data import excerpt
-from assistent.tools.search_tool import create_knowledge_search_tool
+from viio_documents.services.knowledge_data import excerpt
+from viio_documents.tools.search_tool import create_knowledge_search_tool
 from test_required_retrieval import NoToolCallsModel
 from test_database_agent import tool_fixture
 from assistent.services.coding_agent import CodingAgentService, MultiAgentService, create_coding_delegation_tool

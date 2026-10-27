@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from assistent.services.agent_service import AgentService
 from assistent.services.coding_agent import CodingAgentService, MultiAgentService, is_coding_request
 from assistent.services.graph_builder import build_agent_graph
-from assistent.tools.search_tool import create_knowledge_search_tool
+from viio_documents.tools.search_tool import create_knowledge_search_tool
 from test_coding_agent import CapturingModel, PROGRAMMER
 from test_required_retrieval import NoToolCallsModel
 from assistent.services.request_policy import calculate
@@ -172,7 +172,7 @@ def test_api_sources_are_structured_and_reply_remains_compatible():
             return AgentReply("Ответ", [{"title": "Инструкция", "document_id": "doc-source", "url": "javascript:bad", "chunk_index": "7"}]), "thread"
 
     app = create_app(settings=Settings(_env_file=None, internal_api_key="release-test"), agent_service=Service(),
-                     document_service=MockDocumentService(), checkpointer=MemorySaver())
+                     checkpointer=MemorySaver())
     result = TestClient(app).post("/api/v1/chat", headers={"X-Internal-Token": "release-test"}, json={"message": "Вопрос"})
     assert result.status_code == 200
     assert result.json() == {"reply": "Ответ", "thread_id": "thread", "sources": [{"title": "Инструкция", "document_id": "doc-source"}]}

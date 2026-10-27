@@ -6,7 +6,11 @@ from fastapi.testclient import TestClient
 
 from assistent import create_app
 from assistent.config import Settings
-from assistent.interfaces._protocols import DocumentMetadata, IAgentService, IDocumentService
+from viio_documents.config import Settings as DocumentSettings
+from viio_documents.router import create_api_router as document_router
+from fastapi import FastAPI
+from assistent.interfaces._protocols import IAgentService
+from viio_documents.interfaces._protocols import DocumentMetadata,IDocumentService
 
 
 class MockAgentService(IAgentService):
@@ -62,15 +66,21 @@ class MockDocumentService(IDocumentService):
 @pytest.fixture
 def client() -> TestClient:
     """Фикстура тестового клиента FastAPI с мок-сервисами."""
-    settings = Settings(lmstudio_model="test-model", llm_provider="lmstudio", documents_catalog_enabled=False)
+    settings = Settings(lmstudio_model="test-model", llm_provider="lmstudio", documents_catalog_enabled=False, internal_api_key="unit-api-key")
     agent_svc = MockAgentService()
     doc_svc = MockDocumentService()
     app = create_app(
         settings=settings,
         agent_service=agent_svc,
-        document_service=doc_svc,
     )
-    return TestClient(app)
+    return TestClient(app,headers={"X-Internal-Token":"unit-api-key"})
+
+
+@pytest.fixture
+def doc_client():
+    app=FastAPI()
+    app.include_router(document_router(None,MockDocumentService(),DocumentSettings(_env_file=None,internal_api_key='unit-api-key')))
+    return TestClient(app,headers={'X-Internal-Token':'unit-api-key'})
 
 
 def test_health_endpoint(client: TestClient) -> None:
@@ -79,19 +89,18 @@ def test_health_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["model"] == "test-model"
-    assert data["provider"] == "lmstudio"
-    assert data["documents_count"] == 5
+    assert data["service"] == "assistent"
+    assert "documents_count" not in data
 
 
-def test_create_document_endpoint_success(client: TestClient) -> None:
+def test_create_document_endpoint_success(doc_client: TestClient) -> None:
     """Проверка успешного добавления документа POST /api/v1/documents."""
     payload = {
         "title": "Регламент возврата",
         "content": "Полный текст регламента",
         "metadata": {"source": "wiki", "author": "support"},
     }
-    response = client.post("/api/v1/documents", json=payload)
+    response = doc_client.post("/api/v1/documents", json=payload)
     assert response.status_code == 201
     data = response.json()
     assert data["document_id"] == "doc-test-1"
@@ -100,10 +109,10 @@ def test_create_document_endpoint_success(client: TestClient) -> None:
     assert data["status"] == "indexed"
 
 
-def test_create_document_validation_failure(client: TestClient) -> None:
+def test_create_document_validation_failure(doc_client: TestClient) -> None:
     """Проверка валидации при отправке пустого документа."""
     payload = {"title": "   ", "content": "Текст"}
-    response = client.post("/api/v1/documents", json=payload)
+    response = doc_client.post("/api/v1/documents", json=payload)
     assert response.status_code in (400, 422)
 
 
@@ -133,11 +142,10 @@ def test_chat_endpoint_service_error_handling() -> None:
     agent_svc.should_fail = True
     doc_svc = MockDocumentService()
     app = create_app(
-        settings=Settings(documents_catalog_enabled=False),
+        settings=Settings(documents_catalog_enabled=False, internal_api_key="unit-api-key"),
         agent_service=agent_svc,
-        document_service=doc_svc,
     )
-    custom_client = TestClient(app)
+    custom_client = TestClient(app,headers={"X-Internal-Token":"unit-api-key"})
 
     response = custom_client.post("/api/v1/chat", json={"message": "Привет"})
     assert response.status_code in (500, 503)
@@ -157,12 +165,9 @@ def test_create_document_uses_run_sync(monkeypatch) -> None:
     monkeypatch.setattr(anyio.to_thread, "run_sync", fake_run_sync)
 
     doc_svc = MockDocumentService()
-    app = create_app(
-        settings=Settings(documents_catalog_enabled=False),
-        agent_service=MockAgentService(),
-        document_service=doc_svc,
-    )
-    test_client = TestClient(app)
+    app=FastAPI()
+    app.include_router(document_router(None,doc_svc,DocumentSettings(_env_file=None,internal_api_key='unit-api-key')))
+    test_client=TestClient(app,headers={'X-Internal-Token':'unit-api-key'})
     response = test_client.post(
         "/api/v1/documents", json={"title": "Тест", "content": "Контент"}
     )

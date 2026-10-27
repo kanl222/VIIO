@@ -12,31 +12,20 @@ from assistent.config import Settings
 @pytest.mark.asyncio
 async def test_catalog_starts_when_checkpoint_pool_already_exists():
     from fastapi import FastAPI
-    app = FastAPI()
-    app.state.settings = Settings()
-    app.state.agent_service = MagicMock()
-    app.state.document_service = MagicMock()
-    app.state.enable_postgres_checkpointer = True
-    app.state.pool = None
-    catalog = MagicMock()
-    catalog.setup = AsyncMock()
-    app.state.catalog_service = catalog
-    queue = MagicMock()
-    queue.setup = AsyncMock()
-    queue.stop = AsyncMock()
-    app.state.bulk_queue = queue
-    checkpoint_pool = MagicMock(close=AsyncMock())
-    catalog_pool = MagicMock(open=AsyncMock(), close=AsyncMock())
-    with patch('assistent.init_async_postgres_saver', AsyncMock(return_value=(MemorySaver(), checkpoint_pool))), \
-         patch('assistent.AsyncConnectionPool', return_value=catalog_pool):
-        async with lifespan(app):
-            catalog.set_pool.assert_called_once_with(catalog_pool)
-            catalog.setup.assert_awaited_once()
-            queue.setup.assert_awaited_once()
-            queue.start.assert_called_once()
-        queue.stop.assert_awaited_once()
-        catalog_pool.close.assert_awaited_once()
-        checkpoint_pool.close.assert_awaited_once()
+    from types import SimpleNamespace
+    app=FastAPI()
+    app.state.settings=Settings(database_migrations_enabled=False)
+    app.state.agent_service=MagicMock()
+    app.state.enable_postgres_checkpointer=False
+    app.state.pool=None
+    app.state.catalog_service=SimpleNamespace(pool=None)
+    facts=MagicMock()
+    manager=MagicMock()
+    manager.__aenter__=AsyncMock(return_value=facts)
+    manager.__aexit__=AsyncMock(return_value=None)
+    with patch('assistent.AsyncConnectionPool',return_value=manager):
+        async with lifespan(app):assert app.state.catalog_service.pool is facts
+    assert app.state.catalog_service.pool is None
 
 
 def test_postgres_default_settings() -> None:
@@ -71,11 +60,8 @@ def test_create_app_initializes_with_memory_saver_and_sets_lifespan() -> None:
     """Проверка начальной инициализации приложения с MemorySaver и флагом enable_postgres."""
     settings = Settings(postgres_host="test-db")
 
-    with patch("assistent.QdrantClient"), \
-         patch("assistent.create_embeddings"), \
-         patch("assistent.create_chat_model"), \
+    with patch("assistent.create_chat_model"), \
          patch("assistent.create_coding_model"), \
-         patch("assistent.QdrantVectorStoreAdapter"), \
          patch("assistent.build_agent_graph") as mock_build_graph:
 
         mock_graph = MagicMock()
@@ -96,11 +82,8 @@ def test_create_app_preserves_explicit_checkpointer() -> None:
     settings = Settings()
     custom_checkpointer = MemorySaver()
 
-    with patch("assistent.QdrantClient"), \
-         patch("assistent.create_embeddings"), \
-         patch("assistent.create_chat_model"), \
+    with patch("assistent.create_chat_model"), \
          patch("assistent.create_coding_model"), \
-         patch("assistent.QdrantVectorStoreAdapter"), \
          patch("assistent.build_agent_graph") as mock_build_graph:
 
         mock_graph = MagicMock()
@@ -144,7 +127,8 @@ async def test_lifespan_uses_async_postgres_saver_when_available() -> None:
         mock_init.return_value = (mock_saver, mock_pool)
 
         async with lifespan(app):
-            mock_init.assert_awaited_once_with(expected_conn_string)
+            mock_init.assert_awaited_once()
+            assert mock_init.call_args.kwargs == {"run_migrations": True}
             mock_agent_svc.set_checkpointer.assert_called_once_with(mock_saver)
             assert app.state.pool is mock_pool
 
@@ -169,8 +153,6 @@ async def test_lifespan_fallback_when_postgres_fails() -> None:
     with patch("assistent.init_async_postgres_saver", new_callable=AsyncMock) as mock_init:
         mock_init.side_effect = RuntimeError("Connection refused")
 
-        async with lifespan(app):
-            mock_init.assert_awaited_once()
-            # set_checkpointer не должен вызываться при ошибке (остается MemorySaver)
-            mock_agent_svc.set_checkpointer.assert_not_called()
-            assert app.state.pool is None
+        with pytest.raises(RuntimeError,match='Connection refused'):
+            async with lifespan(app):pass
+        mock_agent_svc.set_checkpointer.assert_not_called()

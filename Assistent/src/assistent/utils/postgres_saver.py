@@ -17,6 +17,7 @@ async def init_async_postgres_saver(
     min_size: int = 1,
     max_size: int = 20,
     timeout: float = 5.0,
+    run_migrations: bool = True,
 ) -> tuple[AsyncPostgresSaver, AsyncConnectionPool]:
     """Создание пула соединений AsyncConnectionPool и инициализация AsyncPostgresSaver.
 
@@ -47,7 +48,8 @@ async def init_async_postgres_saver(
     )
     await pool.open(wait=True, timeout=timeout)
     saver = AsyncPostgresSaver(conn=pool)
-    await saver.setup()
+    if run_migrations:
+        await saver.setup()
     return saver, pool
 
 

@@ -3,8 +3,8 @@ import pytest
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from assistent.services.dialogue_summary import compact_dialogue
 from assistent.services.personal_memory import MemoryAgent
-from assistent.services.code_documents import split_code
-from assistent.services.enhanced_retrieval import rank_documents
+from viio_documents.services.code_documents import split_code
+from viio_documents.services.enhanced_retrieval import rank_documents
 from langchain_core.documents import Document
 
 

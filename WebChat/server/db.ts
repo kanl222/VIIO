@@ -105,7 +105,7 @@ export async function initDb(customPool?: pg.Pool): Promise<boolean> {
   try {
     const client = await p.connect();
     try {
-      await client.query(DDL_SCHEMA);
+      await client.query(process.env.DATABASE_MIGRATIONS_ENABLED === 'false' ? 'SELECT 1' : DDL_SCHEMA);
       isDbReady = true;
       console.log('[DB] PostgreSQL user_db tables initialized successfully.');
       return true;

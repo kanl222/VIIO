@@ -26,7 +26,7 @@ def create_remote_search_tool(settings, k=5):
         try:
             async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
                 response = await client.post(settings.documents_url.rstrip('/') + '/api/v1/knowledge/search',
-                    headers={'X-Internal-Token': settings.internal_api_key or ''},
+                    headers={'X-Internal-Token': settings.documents_read_key or (settings.internal_api_key if not settings.secure_runtime else '') or ''},
                     json={'query': query, 'k': k, 'user_context': context or None})
                 response.raise_for_status()
                 text = response.json()['context']
@@ -38,28 +38,14 @@ def create_remote_search_tool(settings, k=5):
     return search_knowledge_base
 
 
-async def forward_documents(request: Request, base_url, settings):
-    """Stream authorized compatibility requests without buffering uploaded files."""
-    require_internal(request, settings)
-    client = httpx.AsyncClient(timeout=180, trust_env=False, follow_redirects=False)
-    url = httpx.URL(base_url.rstrip('/') + request.url.path, query=request.url.query.encode())
-    headers = {'X-Internal-Token': settings.internal_api_key, 'Accept-Encoding': 'identity'}
-    if request.headers.get('content-type'):
-        headers['Content-Type'] = request.headers['content-type']
+async def access_revision(settings):
     try:
-        upstream = await client.send(client.build_request(request.method, url,
-            content=request.stream(), headers=headers), stream=True)
-    except httpx.HTTPError:
-        await client.aclose()
-        raise HTTPException(503, 'Сервис документов временно недоступен') from None
-
-    async def stream():
-        try:
-            async for chunk in upstream.aiter_bytes():
-                yield chunk
-        finally:
-            await upstream.aclose()
-            await client.aclose()
-    safe_headers = {key: value for key, value in upstream.headers.items()
-                    if key.lower() in {'content-type', 'content-disposition', 'cache-control'}}
-    return StreamingResponse(stream(), status_code=upstream.status_code, headers=safe_headers)
+        async with httpx.AsyncClient(timeout=10,trust_env=False) as client:
+            response=await client.get(settings.documents_url.rstrip('/')+'/api/v1/knowledge/access-revision',
+                headers={'X-Internal-Token':settings.documents_read_key or ''})
+            response.raise_for_status()
+            revision=response.json()['revision']
+            if not isinstance(revision,str) or len(revision)!=32:raise ValueError('Invalid revision')
+            return revision
+    except (httpx.HTTPError,KeyError,ValueError):
+        raise HTTPException(503,'Не удалось проверить актуальность доступа к знаниям') from None

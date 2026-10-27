@@ -9,4 +9,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py start.py ./
 ENV PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES="" HF_HOME=/models/huggingface TORCH_HOME=/models/torch DOCLING_ARTIFACTS_PATH=/models/artifacts
 EXPOSE 8080
+USER 65532:65532
 CMD ["python", "start.py"]

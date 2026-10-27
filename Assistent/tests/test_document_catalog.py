@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 import pytest
-from assistent.services.document_catalog import (
+from viio_documents.services.document_catalog import (
     DocumentCatalogService,
     DocumentRecord,
     sha256_of_bytes,

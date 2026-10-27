@@ -3,214 +3,260 @@ services:
     image: postgres:16-alpine
     container_name: viio_postgres
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-postgres}
+    - POSTGRES_USER=${POSTGRES_USER:-postgres}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Configure a deployment password}
+    - POSTGRES_DB=${POSTGRES_DB:-postgres}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    - 127.0.0.1:${POSTGRES_PORT:-5432}:5432
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d
+    - postgres_data:/var/lib/postgresql/data
+    - ./init-db:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER:-postgres}
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
     restart: unless-stopped
     networks:
-      - viio_net
-
+    - viio_net
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.20.0
     container_name: viio_qdrant
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    - 127.0.0.1:${QDRANT_PORT:-6333}:6333
+    - 127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334
     volumes:
-      - qdrant_storage:/qdrant/storage
+    - qdrant_storage:/qdrant/storage
     healthcheck:
-      # The official image has Bash but no wget/curl. Check HTTP readiness directly.
       test:
-        - CMD
-        - bash
-        - -ec
-        - 'exec 3<>/dev/tcp/127.0.0.1/6333; printf "GET /readyz HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r protocol status rest <&3; test "$$status" = 200'
+      - CMD
+      - bash
+      - -ec
+      - 'exec 3<>/dev/tcp/127.0.0.1/6333; printf "GET /readyz HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r protocol status rest <&3; test "$$status" = 200'
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
     restart: unless-stopped
     networks:
-      - viio_net
-
+    - viio_net
+    environment:
+    - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:?Configure QDRANT_API_KEY in .env}
+    - QDRANT__SERVICE__READ_ONLY_API_KEY=${QDRANT_READ_KEY:?Configure QDRANT_READ_KEY in .env}
   document-worker:
     image: viio-documents:latest
     cpus: ${DOCUMENT_WORKER_CPUS:-1}
     mem_limit: ${DOCUMENT_WORKER_MEMORY:-2g}
     build:
-      context: .
-      dockerfile: Documents/Dockerfile
+      context: ./Documents
+      dockerfile: Dockerfile
     container_name: viio_document_worker
     environment:
-      - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
-      - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
-      - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
-      - LMSTUDIO_EMBEDDING_MODEL=${LMSTUDIO_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
-      - QDRANT_URL=http://qdrant:6333
-      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-knowledge_base}
-      - QDRANT_PUBLIC_COLLECTION_NAME=${QDRANT_PUBLIC_COLLECTION_NAME:-knowledge_public}
-      - RAG_CHUNK_UNIT=${RAG_CHUNK_UNIT:-characters}
-      - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
-      - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-50}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=agent_db
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-viio-internal-secret-token}
-      - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
-      - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
-      - PDF_ENGINE=${PDF_ENGINE:-auto}
-      - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
-      - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
-      - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
-      - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
-      - DOCUMENTS_STORAGE_PATH=/data/documents
-      - DOCUMENTS_CATALOG_ENABLED=${DOCUMENTS_CATALOG_ENABLED:-true}
-      - BULK_MAX_FILES=${BULK_MAX_FILES:-50}
-      - BULK_MAX_FILE_BYTES=${BULK_MAX_FILE_BYTES:-10485760}
-      - BULK_MAX_WORKERS=${BULK_MAX_WORKERS:-1}
-      - SERVICE_ROLE=document-worker
+    - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
+    - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+    - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
+    - LMSTUDIO_EMBEDDING_MODEL=${LMSTUDIO_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
+    - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    - QDRANT_URL=http://qdrant:6333
+    - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-knowledge_base}
+    - QDRANT_PUBLIC_COLLECTION_NAME=${QDRANT_PUBLIC_COLLECTION_NAME:-knowledge_public}
+    - RAG_CHUNK_UNIT=${RAG_CHUNK_UNIT:-characters}
+    - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
+    - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-50}
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PORT=5432
+    - POSTGRES_DB=agent_db
+    - POSTGRES_USER=viio_worker
+    - POSTGRES_PASSWORD=${WORKER_DB_PASSWORD:?Configure WORKER_DB_PASSWORD in .env}
+    - PDF_ENGINE=${PDF_ENGINE:-auto}
+    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+    - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
+    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+    - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
+    - DOCUMENTS_STORAGE_PATH=/data/documents
+    - DOCUMENTS_CATALOG_ENABLED=${DOCUMENTS_CATALOG_ENABLED:-true}
+    - BULK_MAX_FILES=${BULK_MAX_FILES:-50}
+    - BULK_MAX_FILE_BYTES=${BULK_MAX_FILE_BYTES:-10485760}
+    - BULK_MAX_WORKERS=${BULK_MAX_WORKERS:-1}
+    - SERVICE_ROLE=document-worker
+    - SECURE_RUNTIME=true
+    - DATABASE_MIGRATIONS_ENABLED=false
+    - DOCUMENT_WORKER_KEY=${DOCUMENT_WORKER_KEY:?Configure DOCUMENT_WORKER_KEY in .env}
+    - QDRANT_API_KEY=${QDRANT_API_KEY:?Configure QDRANT_API_KEY in .env}
+    - DOCLING_API_KEY=${DOCLING_API_KEY:?Configure DOCLING_API_KEY in .env}
+    - DOCUMENT_WORKER_KEY_PREVIOUS=${DOCUMENT_WORKER_KEY_PREVIOUS:-}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
       interval: 10s
       timeout: 5s
       retries: 8
       start_period: 20s
     restart: unless-stopped
     volumes:
-      - documents_storage:/data/documents
+    - documents_storage:/data/documents
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-    networks: [viio_net]
-
+    networks:
+    - viio_net
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    tmpfs:
+    - /tmp:size=256m
+    pids_limit: 256
+    user: 65532:65532
   documents:
     image: viio-documents:latest
     container_name: viio_documents
     ports:
-      - "${DOCUMENTS_PORT:-8002}:8000"
+    - 127.0.0.1:${DOCUMENTS_PORT:-8002}:8000
     environment:
-      - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
-      - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
-      - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
-      - LMSTUDIO_EMBEDDING_MODEL=${LMSTUDIO_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
-      - QDRANT_URL=http://qdrant:6333
-      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-knowledge_base}
-      - QDRANT_PUBLIC_COLLECTION_NAME=${QDRANT_PUBLIC_COLLECTION_NAME:-knowledge_public}
-      - RAG_CHUNK_UNIT=${RAG_CHUNK_UNIT:-characters}
-      - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
-      - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-50}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=agent_db
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-viio-internal-secret-token}
-      - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
-      - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
-      - PDF_ENGINE=${PDF_ENGINE:-auto}
-      - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
-      - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
-      - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
-      - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
-      - DOCUMENTS_STORAGE_PATH=/data/documents
-      - DOCUMENTS_CATALOG_ENABLED=${DOCUMENTS_CATALOG_ENABLED:-true}
-      - BULK_MAX_FILES=${BULK_MAX_FILES:-50}
-      - BULK_MAX_FILE_BYTES=${BULK_MAX_FILE_BYTES:-10485760}
-      - BULK_MAX_WORKERS=${BULK_MAX_WORKERS:-1}
-      - SERVICE_ROLE=documents
-      - DOCUMENT_WORKER_URL=http://document-worker:8000
+    - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
+    - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+    - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
+    - LMSTUDIO_EMBEDDING_MODEL=${LMSTUDIO_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
+    - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    - QDRANT_URL=http://qdrant:6333
+    - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-knowledge_base}
+    - QDRANT_PUBLIC_COLLECTION_NAME=${QDRANT_PUBLIC_COLLECTION_NAME:-knowledge_public}
+    - RAG_CHUNK_UNIT=${RAG_CHUNK_UNIT:-characters}
+    - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
+    - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-50}
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PORT=5432
+    - POSTGRES_DB=agent_db
+    - POSTGRES_USER=viio_documents
+    - POSTGRES_PASSWORD=${DOCUMENTS_DB_PASSWORD:?Configure DOCUMENTS_DB_PASSWORD in .env}
+    - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
+    - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
+    - PDF_ENGINE=${PDF_ENGINE:-auto}
+    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+    - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
+    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+    - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
+    - DOCUMENTS_STORAGE_PATH=/data/documents
+    - DOCUMENTS_CATALOG_ENABLED=${DOCUMENTS_CATALOG_ENABLED:-true}
+    - BULK_MAX_FILES=${BULK_MAX_FILES:-50}
+    - BULK_MAX_FILE_BYTES=${BULK_MAX_FILE_BYTES:-10485760}
+    - BULK_MAX_WORKERS=${BULK_MAX_WORKERS:-1}
+    - SERVICE_ROLE=documents
+    - DOCUMENT_WORKER_URL=http://document-worker:8000
+    - SECURE_RUNTIME=true
+    - DATABASE_MIGRATIONS_ENABLED=false
+    - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
+    - DOCUMENTS_ADMIN_KEY=${DOCUMENTS_ADMIN_KEY:?Configure DOCUMENTS_ADMIN_KEY in .env}
+    - DOCUMENT_WORKER_KEY=${DOCUMENT_WORKER_KEY:?Configure DOCUMENT_WORKER_KEY in .env}
+    - QDRANT_API_KEY=${QDRANT_READ_KEY:?Configure QDRANT_READ_KEY in .env}
+    - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
+    - DOCUMENTS_ADMIN_KEY_PREVIOUS=${DOCUMENTS_ADMIN_KEY_PREVIOUS:-}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
       interval: 10s
       timeout: 5s
       retries: 8
       start_period: 20s
     restart: unless-stopped
     volumes:
-      - documents_storage:/data/documents
+    - documents_storage:/data/documents
     depends_on:
       document-worker:
         condition: service_healthy
-    networks: [viio_net, consultant_net]
-
+    networks:
+    - viio_net
+    - consultant_net
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    tmpfs:
+    - /tmp:size=256m
+    pids_limit: 256
+    user: 65532:65532
   assistent:
     build:
       context: ./Assistent
       dockerfile: Dockerfile
     container_name: viio_assistent
     ports:
-      - "${ASSISTENT_PORT:-${API_PORT:-8000}}:8000"
+    - 127.0.0.1:${ASSISTENT_PORT:-${API_PORT:-8000}}:8000
     environment:
-      - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
-      - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
-      - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
-      - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-qwen/qwen3-4b-2507}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
-      - RAG_CONTEXT_MAX_CHARS=${RAG_CONTEXT_MAX_CHARS:-12000}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=agent_db
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-viio-internal-secret-token}
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
-      - CODING_AGENT_ENABLED=${CODING_AGENT_ENABLED:-true}
-      - CODING_MODEL=${CODING_MODEL:-}
-      - CODING_ALLOWED_ROLES=${CODING_ALLOWED_ROLES:-["programmer","admin"]}
-      - CODING_CONTEXT_MAX_CHARS=${CODING_CONTEXT_MAX_CHARS:-6000}
-      - CONVERSATION_SUMMARY_ENABLED=${CONVERSATION_SUMMARY_ENABLED:-true}
-      - CONVERSATION_SUMMARY_AFTER=${CONVERSATION_SUMMARY_AFTER:-24}
-      - CONVERSATION_HISTORY_MAX_CHARS=${CONVERSATION_HISTORY_MAX_CHARS:-18000}
-      - CONSULTANT_ENABLED=${CONSULTANT_ENABLED:-false}
-      - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
-      - CONSULTANT_URL=http://consultant:8000
-      - CHAT_TEMPERATURE=${CHAT_TEMPERATURE:-0.0}
-      - CHAT_TOP_P=${CHAT_TOP_P:-1.0}
-      - CHAT_MAX_TOKENS=${CHAT_MAX_TOKENS:-2048}
-      - CODING_TEMPERATURE=${CODING_TEMPERATURE:-0.0}
-      - CODING_TOP_P=${CODING_TOP_P:-1.0}
-      - CODING_MAX_TOKENS=${CODING_MAX_TOKENS:-4096}
-      - PGSQL_ENABLED=${PGSQL_ENABLED:-false}
-      - PGSQL_MCP_URL=${PGSQL_MCP_URL:-http://postgres-tool:8000/sse}
-      - PGSQL_MAX_ROWS=${PGSQL_MAX_ROWS:-100}
-      - PGSQL_MAX_CHARS=${PGSQL_MAX_CHARS:-12000}
-      - PGSQL_TIMEOUT_SECONDS=${PGSQL_TIMEOUT_SECONDS:-40}
-      - SERVICE_ROLE=assistent
-      - DOCUMENTS_URL=http://documents:8000
+    - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
+    - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+    - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
+    - LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-qwen/qwen3-4b-2507}
+    - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
+    - RAG_CONTEXT_MAX_CHARS=${RAG_CONTEXT_MAX_CHARS:-12000}
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PORT=5432
+    - POSTGRES_DB=agent_db
+    - POSTGRES_USER=viio_assistent
+    - POSTGRES_PASSWORD=${ASSISTENT_DB_PASSWORD:?Configure ASSISTENT_DB_PASSWORD in .env}
+    - API_HOST=0.0.0.0
+    - API_PORT=8000
+    - CODING_AGENT_ENABLED=${CODING_AGENT_ENABLED:-true}
+    - CODING_MODEL=${CODING_MODEL:-}
+    - CODING_ALLOWED_ROLES=${CODING_ALLOWED_ROLES:-["programmer","admin"]}
+    - CODING_CONTEXT_MAX_CHARS=${CODING_CONTEXT_MAX_CHARS:-6000}
+    - CONVERSATION_SUMMARY_ENABLED=${CONVERSATION_SUMMARY_ENABLED:-true}
+    - CONVERSATION_SUMMARY_AFTER=${CONVERSATION_SUMMARY_AFTER:-24}
+    - CONVERSATION_HISTORY_MAX_CHARS=${CONVERSATION_HISTORY_MAX_CHARS:-18000}
+    - CONSULTANT_ENABLED=${CONSULTANT_ENABLED:-false}
+    - CONSULTANT_URL=http://consultant:8000
+    - CHAT_TEMPERATURE=${CHAT_TEMPERATURE:-0.0}
+    - CHAT_TOP_P=${CHAT_TOP_P:-1.0}
+    - CHAT_MAX_TOKENS=${CHAT_MAX_TOKENS:-2048}
+    - CODING_TEMPERATURE=${CODING_TEMPERATURE:-0.0}
+    - CODING_TOP_P=${CODING_TOP_P:-1.0}
+    - CODING_MAX_TOKENS=${CODING_MAX_TOKENS:-4096}
+    - PGSQL_ENABLED=${PGSQL_ENABLED:-false}
+    - PGSQL_MCP_URL=${PGSQL_MCP_URL:-http://postgres-tool:8000/sse}
+    - PGSQL_MAX_ROWS=${PGSQL_MAX_ROWS:-100}
+    - PGSQL_MAX_CHARS=${PGSQL_MAX_CHARS:-12000}
+    - PGSQL_TIMEOUT_SECONDS=${PGSQL_TIMEOUT_SECONDS:-40}
+    - SERVICE_ROLE=assistent
+    - DOCUMENTS_URL=http://documents:8000
+    - SECURE_RUNTIME=true
+    - DATABASE_MIGRATIONS_ENABLED=false
+    - CHAT_API_KEY=${CHAT_API_KEY:?Configure CHAT_API_KEY in .env}
+    - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
+    - CHAT_API_KEY_PREVIOUS=${CHAT_API_KEY_PREVIOUS:-}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     depends_on:
       documents:
         condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
       interval: 10s
       timeout: 5s
       retries: 5
@@ -218,139 +264,179 @@ services:
     restart: unless-stopped
     networks:
       viio_net:
-        aliases: [api]
-      consultant_net: {}
-
+        aliases:
+        - api
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    tmpfs:
+    - /tmp:size=256m
+    pids_limit: 256
+    user: 65532:65532
   consultant:
     build:
       context: ./Consultant
       dockerfile: Dockerfile
     container_name: viio_consultant
     ports:
-      - "${CONSULTANT_PORT:-8001}:8000"
+    - ${CONSULTANT_PORT:-8001}:8000
     environment:
-      - CONSULTANT_ENABLED=${CONSULTANT_ENABLED:-false}
-      - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
-      - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
-      - CONSULTANT_SOURCE_URL=http://documents:8000
-      - CONSULTANT_PROVIDER=${CONSULTANT_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
-      - CONSULTANT_MODEL=${CONSULTANT_MODEL:-}
-      - CONSULTANT_LMSTUDIO_BASE_URL=${CONSULTANT_LMSTUDIO_BASE_URL:-${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}}
-      - CONSULTANT_LMSTUDIO_API_KEY=${CONSULTANT_LMSTUDIO_API_KEY:-${LMSTUDIO_API_KEY:-lm-studio}}
-      - CONSULTANT_LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-qwen/qwen3-4b-2507}
-      - CONSULTANT_OLLAMA_BASE_URL=${CONSULTANT_OLLAMA_BASE_URL:-${OLLAMA_BASE_URL:-http://host.docker.internal:11434}}
-      - CONSULTANT_OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
-      - CONSULTANT_TEMPERATURE=${CONSULTANT_TEMPERATURE:-0.0}
-      - CONSULTANT_TOP_P=${CONSULTANT_TOP_P:-1.0}
-      - CONSULTANT_MAX_TOKENS=${CONSULTANT_MAX_TOKENS:-2048}
+    - CONSULTANT_ENABLED=${CONSULTANT_ENABLED:-false}
+    - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
+    - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
+    - CONSULTANT_SOURCE_URL=http://documents:8000
+    - CONSULTANT_PROVIDER=${CONSULTANT_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
+    - CONSULTANT_MODEL=${CONSULTANT_MODEL:-}
+    - CONSULTANT_LMSTUDIO_BASE_URL=${CONSULTANT_LMSTUDIO_BASE_URL:-${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}}
+    - CONSULTANT_LMSTUDIO_API_KEY=${CONSULTANT_LMSTUDIO_API_KEY:-${LMSTUDIO_API_KEY:-lm-studio}}
+    - CONSULTANT_LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-qwen/qwen3-4b-2507}
+    - CONSULTANT_OLLAMA_BASE_URL=${CONSULTANT_OLLAMA_BASE_URL:-${OLLAMA_BASE_URL:-http://host.docker.internal:11434}}
+    - CONSULTANT_OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
+    - CONSULTANT_TEMPERATURE=${CONSULTANT_TEMPERATURE:-0.0}
+    - CONSULTANT_TOP_P=${CONSULTANT_TOP_P:-1.0}
+    - CONSULTANT_MAX_TOKENS=${CONSULTANT_MAX_TOKENS:-2048}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     depends_on:
       documents:
         condition: service_healthy
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 10s
     read_only: true
     tmpfs:
-      - /tmp:size=64m
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    - /tmp:size=64m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
     restart: unless-stopped
     networks:
-      - consultant_net
-
+    - consultant_net
   webchat:
     build:
       context: ./WebChat
       dockerfile: Dockerfile
     container_name: viio_webchat
     ports:
-      - "${WEBCHAT_PORT:-3000}:3000"
+    - ${WEBCHAT_PORT:-3000}:3000
     environment:
-      - NODE_ENV=production
-      - HOST=0.0.0.0
-      - PORT=3000
-      - ASSISTENT_URL=http://assistent:8000
-      - DOCUMENTS_URL=http://documents:8000
-      - BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-}
-      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=user_db
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/user_db
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-viio-internal-secret-token}
+    - NODE_ENV=production
+    - HOST=0.0.0.0
+    - PORT=3000
+    - ASSISTENT_URL=http://assistent:8000
+    - DOCUMENTS_URL=http://documents:8000
+    - BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-}
+    - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PORT=5432
+    - POSTGRES_DB=user_db
+    - POSTGRES_USER=viio_webchat
+    - POSTGRES_PASSWORD=${WEBCHAT_DB_PASSWORD:?Configure WEBCHAT_DB_PASSWORD in .env}
+    - DATABASE_URL=postgresql://viio_webchat:${WEBCHAT_DB_PASSWORD:?Configure WEBCHAT_DB_PASSWORD in .env}@postgres:5432/user_db
+    - CHAT_API_KEY=${CHAT_API_KEY:?Configure CHAT_API_KEY in .env}
+    - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
+    - DOCUMENTS_ADMIN_KEY=${DOCUMENTS_ADMIN_KEY:?Configure DOCUMENTS_ADMIN_KEY in .env}
+    - DATABASE_MIGRATIONS_ENABLED=false
     depends_on:
       assistent:
         condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test:
+      - CMD
+      - node
+      - -e
+      - fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 15s
       timeout: 3s
       retries: 3
       start_period: 5s
     restart: unless-stopped
     networks:
-      - viio_net
-
-
+    - viio_net
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    tmpfs:
+    - /tmp:size=256m
+    pids_limit: 256
   postgres-tool:
     image: crystaldba/postgres-mcp@sha256:dbbd346860d29f1543e991f30f3284bf4ab5f096d049ecc3426528f20b1b6e6b
-    profiles: [postgres]
-    entrypoint: [python, /viio/start.py]
+    profiles:
+    - postgres
+    entrypoint:
+    - python
+    - /viio/start.py
     environment:
-      - PGSQL_HOST=${PGSQL_HOST:-host.docker.internal}
-      - PGSQL_PORT=${PGSQL_PORT:-5432}
-      - PGSQL_DATABASE=${PGSQL_DATABASE:-}
-      - PGSQL_USER=${PGSQL_USER:-}
-      - PGSQL_PASSWORD=${PGSQL_PASSWORD:-}
-      - PGSQL_SSLMODE=${PGSQL_SSLMODE:-prefer}
+    - PGSQL_HOST=${PGSQL_HOST:-host.docker.internal}
+    - PGSQL_PORT=${PGSQL_PORT:-5432}
+    - PGSQL_DATABASE=${PGSQL_DATABASE:-}
+    - PGSQL_USER=${PGSQL_USER:-}
+    - PGSQL_PASSWORD=${PGSQL_PASSWORD:-}
+    - PGSQL_SSLMODE=${PGSQL_SSLMODE:-prefer}
     volumes:
-      - ./postgres-tool/start.py:/viio/start.py:ro
+    - ./postgres-tool/start.py:/viio/start.py:ro
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     restart: unless-stopped
     networks:
-      - viio_net
-
+    - viio_net
   pdf-worker:
     build: ./pdf-worker
-    profiles: [pdf]
+    profiles:
+    - pdf
     environment:
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-viio-internal-secret-token}
-      - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
-      - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
-      - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
-      - DOCLING_CPU_THREADS=${DOCLING_CPU_THREADS:-2}
+    - INTERNAL_API_KEY=${DOCLING_API_KEY:?Configure DOCLING_API_KEY in .env}
+    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+    - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
+    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+    - DOCLING_CPU_THREADS=${DOCLING_CPU_THREADS:-2}
     volumes:
-      - docling_models:/models
+    - docling_models:/models
     mem_limit: 4g
     cpus: 2
     restart: unless-stopped
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')
       interval: 20s
       timeout: 5s
       retries: 3
       start_period: 180s
     networks:
-      - viio_net
-
+    - viio_net
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    tmpfs:
+    - /tmp:size=256m
+    pids_limit: 256
+    user: 65532:65532
 networks:
   viio_net:
     driver: bridge
   consultant_net:
     driver: bridge
-
 volumes:
-  qdrant_storage:
-  postgres_data:
-  docling_models:
-  documents_storage:
+  qdrant_storage: null
+  postgres_data: null
+  docling_models: null
+  documents_storage: null

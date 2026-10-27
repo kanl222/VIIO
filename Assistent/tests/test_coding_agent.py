@@ -17,7 +17,7 @@ from assistent.services.coding_agent import (
     create_coding_delegation_tool, is_coding_request,
 )
 from assistent.services.graph_builder import build_agent_graph
-from assistent.tools.search_tool import create_knowledge_search_tool
+from viio_documents.tools.search_tool import create_knowledge_search_tool
 
 PROGRAMMER = {"user_id": "programmer-1", "role": "programmer"}
 ADMIN = {"user_id": "admin-1", "role": "admin"}
@@ -104,8 +104,7 @@ async def test_automatic_route():
 @pytest.mark.parametrize("provider, client", [("lmstudio", "ChatOpenAI"), ("ollama", "ChatOllama")])
 def test_factory_passes_no_tools_to_separate_coder_model(provider, client):
     settings = Settings(_env_file=None, llm_provider=provider, coding_model="dedicated-coder")
-    with patch("assistent.QdrantClient"), patch("assistent.create_embeddings"), \
-         patch("assistent.QdrantVectorStoreAdapter"), patch("assistent.models.chat." + client) as models, \
+    with patch("assistent.models.chat." + client) as models, \
          patch("assistent.build_agent_graph") as graphs:
         create_app(settings=settings)
     general_name = settings.lmstudio_model if provider == "lmstudio" else settings.ollama_model

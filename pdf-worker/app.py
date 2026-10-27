@@ -83,7 +83,9 @@ def health():
 async def extract(request: Request):
     expected = os.environ.get("INTERNAL_API_KEY", "")
     supplied = request.headers.get("X-Internal-Token", "")
-    if expected and not hmac.compare_digest(expected, supplied):
+    if not expected:
+        raise HTTPException(503, "OCR service key is not configured")
+    if not hmac.compare_digest(expected.encode(), supplied.encode()):
         raise HTTPException(401, "Unauthorized")
     if busy.locked():
         raise HTTPException(429, "PDF conversion is busy")

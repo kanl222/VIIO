@@ -12,12 +12,12 @@ from qdrant_client.http import models
 from assistent.config import Settings
 from assistent.router import (
     ChatRequest,
-    DocumentCreateRequest,
     UserContext,
     create_api_router,
 )
-from assistent.services.document_service import DocumentService
-from assistent.tools.search_tool import (
+from viio_documents.router import DocumentCreateRequest
+from viio_documents.services.document_service import DocumentService
+from viio_documents.tools.search_tool import (
     build_access_filter,
     create_knowledge_search_tool,
 )
@@ -169,52 +169,15 @@ def test_document_service_indexes_with_access_attributes() -> None:
         assert meta["year"] == 2026
 
 
-def test_router_security_dependencies_and_token_validation() -> None:
-    """Роуты /api/v1/chat и /api/v1/documents защищены зависимостью verify_internal_token."""
-    settings = Settings(internal_api_key="secret-test-token")
-    mock_agent = MagicMock()
-    mock_doc = MagicMock()
-
-    router = create_api_router(mock_agent, mock_doc, settings)
-
-    routes_by_path = {r.path: r for r in router.routes}
-
-    # /health не требует токена
-    health_route = routes_by_path["/health"]
-    assert len(health_route.dependencies) == 0
-
-    # /api/v1/documents защищен verify_internal_token
-    doc_route = routes_by_path["/api/v1/documents"]
-    doc_dep_names = [dep.dependency.__name__ for dep in doc_route.dependencies]
-    assert "verify_internal_token" in doc_dep_names
-
-    # /api/v1/chat защищен verify_internal_token
-    chat_route = routes_by_path["/api/v1/chat"]
-    chat_dep_names = [dep.dependency.__name__ for dep in chat_route.dependencies]
-    assert "verify_internal_token" in chat_dep_names
-
-    # Проверяем саму функцию валидации токена
-    verify_fn = chat_route.dependencies[0].dependency
-
-    # 1. Отсутствие токена -> 401
-    with pytest.raises(HTTPException) as exc_info:
-        verify_fn(None)
-    assert exc_info.value.status_code == 401
-    assert "X-Internal-Token" in exc_info.value.detail
-
-    # 2. Неверный токен -> 401
-    with pytest.raises(HTTPException) as exc_info:
-        verify_fn("wrong-token")
-    assert exc_info.value.status_code == 401
-
-    # 3. Верный токен -> успешно без исключений
-    verify_fn("secret-test-token")
-
-    # 4. Если internal_api_key не задан в settings -> токен не требуется
-    settings_no_key = Settings(internal_api_key=None)
-    router_open = create_api_router(mock_agent, mock_doc, settings_no_key)
-    open_verify_fn = next(route for route in router_open.routes if route.path == "/api/v1/chat").dependencies[0].dependency
-    open_verify_fn(None)  # не выбрасывает исключение
+def test_router_security_dependencies_and_token_validation():
+    from fastapi.testclient import TestClient
+    from assistent import create_app
+    client=TestClient(create_app(Settings(_env_file=None,internal_api_key='secret-test-token'),agent_service=MagicMock()))
+    assert client.get('/health').status_code==200
+    assert client.post('/api/v1/chat',json={'message':'hello'}).status_code==401
+    assert client.post('/api/v1/chat',json={'message':'hello'},headers={'X-Internal-Token':'wrong'}).status_code==401
+    closed=TestClient(create_app(Settings(_env_file=None,internal_api_key=None),agent_service=MagicMock()))
+    assert closed.post('/api/v1/chat',json={'message':'hello'}).status_code==503
 
 
 def test_request_schemas_have_security_fields() -> None:

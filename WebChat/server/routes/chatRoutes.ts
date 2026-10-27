@@ -75,7 +75,7 @@ export function createChatRouter(
       // 3. Вызываем сервис диалогового агента assistent
       const agentBaseUrl = agentUrlProvider().replace(/\/+$/, '');
       const agentChatUrl = `${agentBaseUrl}/api/v1/chat`;
-      const internalApiKey = process.env.INTERNAL_API_KEY || 'viio-internal-secret-token';
+      const internalApiKey = process.env.CHAT_API_KEY || '';
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -171,7 +171,7 @@ export function createChatRouter(
       const downloadContext = new URLSearchParams({ user_role: userRole, user_id: String(req.user?.id || ''), departments: (req.user?.departments || []).join(',') });
     const agentBaseUrl = agentUrlProvider().replace(/\/+$/, '');
     const downloadUrl = `${documentsUrlProvider().replace(/\/+$/, '')}/api/v1/documents/download/${encodeURIComponent(docId)}?${downloadContext}`;
-    const internalApiKey = process.env.INTERNAL_API_KEY || 'viio-internal-secret-token';
+    const internalApiKey = process.env.DOCUMENTS_READ_KEY || '';
 
     try {
       const response = await fetchFn(downloadUrl, {

@@ -69,40 +69,8 @@ class Settings(BaseSettings):
     pgsql_max_chars: int = Field(default=12000, ge=500, le=50000)
     pgsql_timeout_seconds: int = Field(default=40, ge=5, le=90)
     # Настройки каталога документов и файлового хранилища
-    documents_storage_path: str = Field(
-        default="data/documents",
-        description="Путь к директории хранилища оригиналов документов (Docker-том).",
-    )
-    documents_catalog_enabled: bool = Field(
-        default=True,
-        description="Вести каталог документов в PostgreSQL (рекомендуется).",
-    )
     # Массовая загрузка
-    bulk_max_files: int = Field(
-        default=50,
-        ge=1,
-        le=200,
-        description="Максимальное число файлов в одной пакетной загрузке.",
-    )
-    bulk_max_file_bytes: int = Field(
-        default=10 * 1024 * 1024,
-        ge=1024,
-        le=50 * 1024 * 1024,
-        description="Максимальный размер одного файла при массовой загрузке (байт).",
-    )
-    bulk_max_workers: int = Field(
-        default=1,
-        ge=1,
-        le=8,
-        description="Максимальное число параллельных фоновых воркеров очереди.",
-    )
 
-    pdf_engine: Literal["auto", "pypdf", "docling"] = "auto"
-    pdf_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
-    pdf_max_pages: int = Field(default=50, ge=1, le=200)
-    pdf_max_chars: int = Field(default=500000, ge=100, le=500000)
-    pdf_timeout_seconds: int = Field(default=120, ge=10, le=300)
-    docling_url: str = "http://pdf-worker:8080"
 
     # Настройки LM Studio (OpenAI-compatible)
     lmstudio_base_url: str = Field(
@@ -117,10 +85,6 @@ class Settings(BaseSettings):
         default="qwen/qwen3-4b-2507",
         description="Идентификатор модели LM Studio для рассуждений агента.",
     )
-    lmstudio_embedding_model: str = Field(
-        default="text-embedding-nomic-embed-text-v1.5",
-        description="Идентификатор модели LM Studio для создания эмбеддингов.",
-    )
 
     # Настройки Ollama (обратная совместимость)
     ollama_base_url: str = Field(
@@ -131,39 +95,13 @@ class Settings(BaseSettings):
         default="llama3.1",
         description="Идентификатор модели Ollama для рассуждений агента.",
     )
-    ollama_embedding_model: str = Field(
-        default="nomic-embed-text",
-        description="Идентификатор модели Ollama для генерации эмбеддингов.",
-    )
 
     # Настройки векторного хранилища и API
-    qdrant_url: str = Field(
-        default="http://localhost:6333",
-        description="URL для подключения к Qdrant.",
-    )
-    qdrant_collection_name: str = Field(
-        default="knowledge_base",
-        description="Название коллекции векторов в Qdrant.",
-    )
-    qdrant_public_collection_name: str = Field(default='knowledge_public', min_length=1)
 
-    @model_validator(mode='after')
-    def validate_public_collection(self):
-        if self.qdrant_public_collection_name == self.qdrant_collection_name:
-            raise ValueError('Публичная и внутренняя коллекции Qdrant должны различаться')
-        return self
 
     # Настройки PostgreSQL для хранения состояния агента (LangGraph Checkpointer)
-    rag_chunk_unit: Literal["characters", "words"] = "characters"
-    rag_chunk_size: int = Field(default=500, gt=0)
-    rag_chunk_overlap: int = Field(default=50, ge=0)
     rag_context_max_chars: int = Field(default=12000, ge=1000, le=48000)
 
-    @model_validator(mode="after")
-    def validate_chunk_overlap(self) -> "Settings":
-        if self.rag_chunk_overlap >= self.rag_chunk_size:
-            raise ValueError("RAG_CHUNK_OVERLAP должен быть меньше RAG_CHUNK_SIZE")
-        return self
 
     postgres_host: str = Field(
         default="localhost",
@@ -192,9 +130,8 @@ class Settings(BaseSettings):
         description="Секретный токен для межсервисной аутентификации (X-Internal-Token).",
     )
 
-    service_role: Literal['assistent', 'documents', 'document-worker'] = 'assistent'
+    service_role: Literal['assistent'] = 'assistent'
     documents_url: str = 'http://localhost:8002'
-    document_worker_url: str = 'http://document-worker:8000'
 
     api_host: str = Field(
         default="0.0.0.0",
@@ -206,3 +143,24 @@ class Settings(BaseSettings):
         le=65535,
         description="Порт для привязки FastAPI сервера.",
     )
+
+    secure_runtime: bool = False
+    database_migrations_enabled: bool = True
+    chat_api_key: str | None = None
+    chat_api_key_previous: str | None = None
+    documents_read_key: str | None = None
+
+    def validate_runtime(self):
+        if not self.secure_runtime:
+            return
+        required = self.runtime_keys()
+        values=[getattr(self,key) for key in required]
+        if any(not value or len(value)<32 or 'viio-internal-secret-token' in value for value in values):
+            raise ValueError('Production requires distinct service keys of at least 32 characters')
+        if len(set(values))!=len(values):
+            raise ValueError('Service keys must have distinct values')
+        if self.chat_api_key_previous and (len(self.chat_api_key_previous)<32 or self.chat_api_key_previous in values):
+            raise ValueError('Previous chat key must be long and distinct')
+
+    def runtime_keys(self):
+        return ('chat_api_key','documents_read_key')

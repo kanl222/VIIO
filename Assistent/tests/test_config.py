@@ -2,11 +2,12 @@
 
 import pytest
 from assistent.config import Settings
+from viio_documents.config import Settings as DocumentSettings
 
 
 def test_public_and_internal_collections_must_differ():
     with pytest.raises(ValueError, match='должны различаться'):
-        Settings(qdrant_public_collection_name='same', qdrant_collection_name='same')
+        DocumentSettings(qdrant_public_collection_name='same', qdrant_collection_name='same')
 
 
 def test_default_settings() -> None:
@@ -17,14 +18,14 @@ def test_default_settings() -> None:
     assert settings.lmstudio_base_url == "http://localhost:1234/v1"
     assert settings.lmstudio_api_key == "lm-studio"
     assert settings.lmstudio_model == "qwen/qwen3-4b-2507"
-    assert settings.lmstudio_embedding_model == "text-embedding-nomic-embed-text-v1.5"
+    assert DocumentSettings(_env_file=None).lmstudio_embedding_model == "text-embedding-nomic-embed-text-v1.5"
 
     assert settings.ollama_base_url == "http://localhost:11434"
     assert settings.ollama_model == "llama3.1"
-    assert settings.ollama_embedding_model == "nomic-embed-text"
+    assert DocumentSettings(_env_file=None).ollama_embedding_model == "nomic-embed-text"
 
-    assert settings.qdrant_url == "http://localhost:6333"
-    assert settings.qdrant_collection_name == "knowledge_base"
+    assert DocumentSettings(_env_file=None).qdrant_url == "http://localhost:6333"
+    assert DocumentSettings(_env_file=None).qdrant_collection_name == "knowledge_base"
     assert settings.api_host == "0.0.0.0"
     assert settings.api_port == 8000
 
@@ -48,11 +49,11 @@ def test_settings_override_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.llm_provider == "ollama"
     assert settings.lmstudio_base_url == "http://custom-lms:1234/v1"
     assert settings.lmstudio_model == "qwen/qwen3.5-9b"
-    assert settings.lmstudio_embedding_model == "text-embedding-multilingual-e5-base"
+    assert DocumentSettings(_env_file=None).lmstudio_embedding_model == "text-embedding-multilingual-e5-base"
     assert settings.ollama_base_url == "http://custom-ollama:11434"
     assert settings.ollama_model == "mistral"
-    assert settings.ollama_embedding_model == "bge-m3"
-    assert settings.qdrant_url == "http://custom-qdrant:6333"
-    assert settings.qdrant_collection_name == "custom_docs"
+    assert DocumentSettings(_env_file=None).ollama_embedding_model == "bge-m3"
+    assert DocumentSettings(_env_file=None).qdrant_url == "http://custom-qdrant:6333"
+    assert DocumentSettings(_env_file=None).qdrant_collection_name == "custom_docs"
     assert settings.api_host == "127.0.0.1"
     assert settings.api_port == 9000
