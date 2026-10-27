@@ -25,6 +25,8 @@ from apiagent.router import create_api_router, DocumentCreateRequest
 from apiagent.services.bulk_queue import BulkUploadTask
 from apiagent.services.document_catalog import DocumentCatalogService
 from apiagent.services.document_ingestion import DocumentIngestion
+from apiagent.services.knowledge_data import KnowledgeData
+from apiagent.services.publication_index import PublicationIndex
 from apiagent.services.document_service import DocumentService
 from apiagent.services.file_store import LocalFileStore
 from apiagent.services.persistent_bulk_queue import PersistentBulkQueue
@@ -50,7 +52,8 @@ async def pipeline(tmp_path):
     await catalog.setup()
     store = LocalFileStore(tmp_path)
     settings = Settings(internal_api_key='integration-key')
-    ingestion = DocumentIngestion(documents, catalog, store, settings)
+    public = PublicationIndex(QdrantVectorStoreAdapter(vectors, DeterministicFakeEmbedding(size=8), 'test_public'))
+    ingestion = DocumentIngestion(documents, catalog, store, settings, KnowledgeData(catalog, public))
     queue = PersistentBulkQueue(ingestion, catalog, store, max_workers=2)
     await queue.setup()
     app = FastAPI()
@@ -105,6 +108,69 @@ async def test_public_search_prefers_specific_title_over_long_generic_manual(pip
         await ingestion.data.publish(result.document_id,title,content,'publication-rank')
     results = await ingestion.data.public_search('Для чего нужен модуль Управление сотрудниками?')
     assert results[0]['title'] == 'Модуль Управление сотрудниками'
+
+
+async def test_public_vectors_merge_with_authorized_internal_and_redacted_snapshot(pipeline):
+    from apiagent.services.enhanced_retrieval import EnhancedRetrieval
+    _, _, _, adapter, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Private original',
+        content='PRIVATE_CANARY payroll details', is_public=False, allowed_roles=['admin'], allowed_departments=[]))
+    await ingestion.data.publish(root.document_id, 'Approved guide', 'PUBLIC_CANARY support instructions', 'admin')
+    data = ingestion.data
+    external = await data.public_search('support')
+    assert external and 'PUBLIC_CANARY' in external[0]['content']
+    assert 'PRIVATE_CANARY' not in str(external)
+    inventory = await data.public_index.inventory()
+    assert len(inventory) == 1 and all(m['title'] == 'Approved guide' for chunks in inventory.values() for m in chunks)
+    retrieval = EnhancedRetrieval(adapter, data)
+    employee = await retrieval.search('support payroll', {'role': 'employee', 'user_id': 'other'}, 10)
+    admin = await retrieval.search('support payroll', {'role': 'admin'}, 10)
+    assert any('PUBLIC_CANARY' in d.page_content for d in employee)
+    assert all('PRIVATE_CANARY' not in d.page_content for d in employee)
+    assert any('PRIVATE_CANARY' in d.page_content for d in admin)
+    assert len({(d.metadata['document_id'], d.page_content) for d in admin}) == len(admin)
+
+
+async def test_public_index_repairs_missing_chunks_and_removes_stale_revisions(pipeline, monkeypatch):
+    _, _, _, _, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Guide', content='Internal original'))
+    data = ingestion.data
+    await data.publish(root.document_id, 'Guide', 'First approved revision', 'admin')
+    first = await data.publication(root.document_id)
+    await data.public_index.remove(first['id'])
+    assert not await data.public_search('Guide')
+    await data.sync_public_index()
+    assert await data.public_search('Guide')
+    async def unavailable(identifier):
+        raise RuntimeError('Qdrant unavailable')
+    with monkeypatch.context() as patch:
+        patch.setattr(data.public_index, 'remove', unavailable)
+        await data.publish(root.document_id, 'Guide', 'Second approved revision', 'admin')
+    assert 'First approved revision' not in str(await data.public_search('Guide'))
+    assert len(await data.public_index.inventory()) == 2
+    await data.sync_public_index()
+    assert len(await data.public_index.inventory()) == 1
+    with monkeypatch.context() as patch:
+        patch.setattr(data.public_index, 'remove', unavailable)
+        await data.withdraw(root.document_id)
+    assert await data.public_index.inventory()  # Simulate failed physical cleanup.
+    assert not await data.public_search('Guide')  # PostgreSQL revokes access immediately.
+    await data.sync_public_index()
+    assert not await data.public_index.inventory()
+
+
+async def test_failed_public_index_update_keeps_previous_approved_snapshot(pipeline, monkeypatch):
+    _, _, _, _, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Guide', content='Original'))
+    data = ingestion.data
+    await data.publish(root.document_id, 'Guide', 'Approved old revision', 'admin')
+    async def unavailable(row):
+        raise RuntimeError('Index failure')
+    monkeypatch.setattr(data.public_index, 'put', unavailable)
+    with pytest.raises(RuntimeError):
+        await data.publish(root.document_id, 'Guide', 'Uncommitted revision', 'admin')
+    assert (await data.publication(root.document_id))['content'] == 'Approved old revision'
+    assert 'Uncommitted revision' not in str(await data.public_search('Guide'))
 
 
 async def test_upload_survives_new_worker_and_download_checks_full_acl(pipeline):

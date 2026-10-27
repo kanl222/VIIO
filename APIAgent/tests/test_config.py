@@ -4,6 +4,11 @@ import pytest
 from apiagent.config import Settings
 
 
+def test_public_and_internal_collections_must_differ():
+    with pytest.raises(ValueError, match='должны различаться'):
+        Settings(qdrant_public_collection_name='same', qdrant_collection_name='same')
+
+
 def test_default_settings() -> None:
     """Проверка значений конфигурации по умолчанию с LM Studio в качестве основного провайдера."""
     settings = Settings(_env_file=None)

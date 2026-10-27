@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import logging
+import asyncio
 from typing import AsyncIterator
 from fastapi import FastAPI
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -27,6 +28,7 @@ from apiagent.services.database_agent import DatabaseAgentService
 from apiagent.services.document_catalog import DocumentCatalogService
 from apiagent.services.file_store import LocalFileStore
 from apiagent.services.knowledge_data import KnowledgeData
+from apiagent.services.publication_index import PublicationIndex
 from apiagent.services.enhanced_retrieval import EnhancedRetrieval
 from apiagent.services.personal_memory import PersonalFacts, MemoryAgent
 from apiagent.services.public_consultant import ConsultantProxy
@@ -120,7 +122,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await catalog_pool.close()
                 catalog_pool = None
 
+    async def reconcile_publications():
+        data = getattr(app.state, 'knowledge_data', None)
+        while True:
+            try:
+                if data is not None and catalog_svc.pool is not None:
+                    await data.sync_public_index()
+            except Exception:
+                logger.exception('Public index reconciliation failed; will retry')
+            await asyncio.sleep(30)
+
+    public_task = asyncio.create_task(reconcile_publications()) if catalog_svc else None
     yield
+
+    if public_task:
+        public_task.cancel()
+        try:
+            await public_task
+        except asyncio.CancelledError:
+            pass
 
     # Остановка воркеров
     if bulk_q is not None:
@@ -189,6 +209,9 @@ def create_app(
             embeddings=embeddings,
             collection_name=app_settings.qdrant_collection_name,
         )
+        if data is not None:
+            data.public_index = PublicationIndex(QdrantVectorStoreAdapter(
+                qdrant_client, embeddings, app_settings.qdrant_public_collection_name))
 
         if document_service is None:
             document_service = DocumentService(
@@ -255,7 +278,7 @@ def create_app(
 
     ingestion = None
     if file_store is not None and catalog_service is not None:
-        ingestion = DocumentIngestion(document_service, catalog_service, file_store, app_settings)
+        ingestion = DocumentIngestion(document_service, catalog_service, file_store, app_settings, knowledge_data=data)
         bulk_queue = PersistentBulkQueue(ingestion, catalog_service, file_store,
                                          max_workers=app_settings.bulk_max_workers)
 
@@ -274,6 +297,7 @@ def create_app(
     app.state.ingestion_service = ingestion
     app.state.catalog_service = catalog_service
     app.state.bulk_queue = bulk_queue
+    app.state.knowledge_data = data
 
     api_router = create_api_router(
         agent_service=agent_service,

@@ -3,6 +3,7 @@ import re
 import math
 from bisect import bisect_left
 import uuid
+import logging
 
 from psycopg.rows import dict_row
 from langchain_core.documents import Document
@@ -64,8 +65,41 @@ def excerpt(content, query, limit=4000):
 
 
 class KnowledgeData:
-    def __init__(self, catalog):
+    def __init__(self, catalog, public_index=None):
         self.catalog = catalog
+        self.public_index = public_index
+
+    async def sync_public_index(self):
+        """Repair interrupted writes and remove revoked snapshots across workers."""
+        if self.public_index is None:
+            return
+        async with self.catalog.pool.connection() as conn:
+            conn.row_factory = dict_row
+            await conn.execute('SELECT pg_advisory_xact_lock(76100321)')
+            rows = await (await conn.execute('''SELECT p.id::text,p.document_id,p.title,p.content
+                FROM document_publications p JOIN documents d ON d.id=p.document_id
+                WHERE d.is_active AND d.status IN ('ready','indexed') AND d.document_kind<>'code' ''')).fetchall()
+            inventory = await self.public_index.inventory()
+            for row in rows:
+                chunks = inventory.get(row['id'], [])
+                if not chunks or any(m.get('snapshot_hash') != self.public_index.digest(row)
+                    or not m.get('ingestion_ready') or m.get('expected_chunks') != len(chunks) for m in chunks):
+                    await self.public_index.put(row)
+            for identifier in inventory.keys() - {row['id'] for row in rows}:
+                if identifier:
+                    await self.public_index.remove(identifier)
+
+    async def public_vectors(self, query, k=24):
+        if self.public_index is None:
+            return []
+        docs = await self.public_index.search(query, k)
+        valid = await self.public_ids(list({d.metadata.get('publication_id', '') for d in docs}))
+        result = []
+        for doc in docs:
+            if doc.metadata.get('publication_id') in valid:
+                doc.metadata['document_id'] = doc.metadata['source_document_id']
+                result.append(doc)
+        return result
 
     async def save_text(self, identifier, content, filename, title=''):
         async with self.catalog.pool.connection() as conn:
@@ -111,19 +145,50 @@ class KnowledgeData:
     async def publish(self, identifier, title, content, publisher):
         async with self.catalog.pool.connection() as conn:
             conn.row_factory = dict_row
+            await conn.execute('SELECT pg_advisory_xact_lock(76100321)')
             row = await (await conn.execute('SELECT * FROM documents WHERE id=%s FOR UPDATE', (identifier,))).fetchone()
             if not row or not row['is_active'] or row['status'] not in {'ready', 'indexed'} or row['document_kind'] == 'code':
                 raise ValueError('Публиковать можно только актуальный готовый документ, кроме исходного кода.')
+            previous = await (await conn.execute('SELECT id::text FROM document_publications WHERE document_id=%s', (identifier,))).fetchone()
+            publication_id = str(uuid.uuid4())
+            if self.public_index is not None:
+                await self.public_index.put(dict(id=publication_id, document_id=identifier, title=title, content=content))
             await conn.execute('''INSERT INTO document_publications(id,document_id,title,content,publisher_id)
                 VALUES (%s,%s,%s,%s,%s) ON CONFLICT(document_id) DO UPDATE
                 SET id=EXCLUDED.id,title=EXCLUDED.title,content=EXCLUDED.content,publisher_id=EXCLUDED.publisher_id,published_at=now()''',
-                (uuid.uuid4(), identifier, title, content, publisher))
+                (publication_id, identifier, title, content, publisher))
+        if previous and self.public_index is not None:
+            try:
+                await self.public_index.remove(previous['id'])
+            except Exception:
+                logging.getLogger(__name__).warning('Previous publication cleanup deferred to reconciliation')
 
     async def withdraw(self, identifier):
         async with self.catalog.pool.connection() as conn:
-            await conn.execute('DELETE FROM document_publications WHERE document_id=%s', (identifier,))
+            conn.row_factory = dict_row
+            await conn.execute('SELECT pg_advisory_xact_lock(76100321)')
+            row = await (await conn.execute('DELETE FROM document_publications WHERE document_id=%s RETURNING id::text', (identifier,))).fetchone()
+        if row and self.public_index is not None:
+            try:
+                await self.public_index.remove(row['id'])
+            except Exception:
+                logging.getLogger(__name__).warning('Publication cleanup deferred to reconciliation')
 
     async def public_search(self, query):
+        if self.public_index is not None:
+            from apiagent.services.enhanced_retrieval import rank_documents
+            docs = rank_documents(query, await self.public_vectors(query, 40), 40)
+            results, selected = [], {}
+            for doc in docs:
+                identifier = doc.metadata['publication_id']
+                if identifier not in selected:
+                    if len(results) == 4:
+                        continue
+                    selected[identifier] = dict(id=identifier, title=doc.metadata['title'], content='')
+                    results.append(selected[identifier])
+                item = selected[identifier]
+                item['content'] = (item['content'] + '\n' + doc.page_content).strip()[:3200]
+            return results
         expression = tsquery(query)
         if not expression:
             return []

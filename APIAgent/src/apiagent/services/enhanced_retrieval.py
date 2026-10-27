@@ -31,15 +31,26 @@ class EnhancedRetrieval:
         self.vector_store, self.data = vector_store, data
 
     async def search(self, query, context, k):
-        semantic, lexical = await asyncio.gather(
+        searches = [
             anyio.to_thread.run_sync(partial(self.vector_store.similarity_search, query=query, k=max(k * 3, 12), filter=build_access_filter(context))),
-            self.data.lexical(query, context), return_exceptions=True)
-        if isinstance(semantic, Exception) and isinstance(lexical, Exception):
+            self.data.lexical(query, context)]
+        if getattr(self.data, 'public_index', None) is not None:
+            searches.append(self.data.public_vectors(query, max(k * 3, 12)))
+        results = await asyncio.gather(*searches, return_exceptions=True)
+        if all(isinstance(result, Exception) for result in results):
             raise RuntimeError('Поиск временно недоступен')
-        for name, result in [('semantic', semantic), ('lexical', lexical)]:
+        for name, result in zip(['semantic', 'lexical', 'public'], results):
             if isinstance(result, Exception):
                 logger.warning('%s search unavailable: %s', name, type(result).__name__)
-        candidates = ([] if isinstance(lexical, Exception) else lexical) + ([] if isinstance(semantic, Exception) else semantic)
+        candidates, seen = [], set()
+        for result in [results[1], results[0], *results[2:]]:
+            if isinstance(result, Exception):
+                continue
+            for doc in result:
+                key = (doc.metadata.get('document_id'), doc.page_content)
+                if key not in seen:
+                    candidates.append(doc)
+                    seen.add(key)
         return rank_documents(query, candidates, k)
 
     def tool(self, original, k):

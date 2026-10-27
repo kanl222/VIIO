@@ -145,6 +145,14 @@ class Settings(BaseSettings):
         default="knowledge_base",
         description="Название коллекции векторов в Qdrant.",
     )
+    qdrant_public_collection_name: str = Field(default='knowledge_public', min_length=1)
+
+    @model_validator(mode='after')
+    def validate_public_collection(self):
+        if self.qdrant_public_collection_name == self.qdrant_collection_name:
+            raise ValueError('Публичная и внутренняя коллекции Qdrant должны различаться')
+        return self
+
     # Настройки PostgreSQL для хранения состояния агента (LangGraph Checkpointer)
     rag_chunk_unit: Literal["characters", "words"] = "characters"
     rag_chunk_size: int = Field(default=500, gt=0)

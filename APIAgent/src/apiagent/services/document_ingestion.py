@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentIngestion:
-    def __init__(self, document_service, catalog, store, settings):
+    def __init__(self, document_service, catalog, store, settings, knowledge_data=None):
         self.documents = document_service
         self.catalog = catalog
         self.store = store
         self.settings = settings
-        self.data = KnowledgeData(catalog)
+        self.data = knowledge_data or KnowledgeData(catalog)
 
     async def prepare_pdf(self, task):
         extracted = await PdfExtractionService(self.settings).extract(task.data)

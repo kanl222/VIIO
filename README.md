@@ -155,6 +155,8 @@ docker compose down
 
 APIAgent разбивает текст на фрагменты, вычисляет эмбеддинги и сохраняет их в Qdrant. При поиске применяются права из метаданных: `is_public`, `allowed_roles`, `allowed_departments`, `owner_id`. Достаточно разрешения по одному основанию; администратор и автор сохраняют доступ.
 
+Для внешних пользователей служит отдельная коллекция `knowledge_public`: в ней находятся только явно опубликованные администратором снимки. Основной агент ищет и в ней, и в доступных внутренних материалах; консультант — только в публичной. Флаг `is_public` сам по себе не включает внешнюю публикацию. [Устройство индексов, синхронизация и проверки](docs/public-qdrant-2026-10-27.md).
+
 Документы передаются модели как справочный контекст. Промпт предписывает не выполнять инструкции из документов; это дополняет серверную проверку доступа, но не гарантирует отсутствие ошибок модели.
 
 Подробные действия и проверка загрузки: [работа с файлами](docs/getting-started.md#6-загрузить-файлы-в-базу-знаний).
@@ -185,7 +187,7 @@ Coder получает задачу и подготовленный контек
 | LM Studio | `LMSTUDIO_BASE_URL`, `LMSTUDIO_API_KEY`, `LMSTUDIO_MODEL`, `LMSTUDIO_EMBEDDING_MODEL` |
 | Ollama | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL` |
 | Coder | `CODING_AGENT_ENABLED`, `CODING_MODEL`, `CODING_ALLOWED_ROLES`, `CODING_CONTEXT_MAX_CHARS` |
-| База знаний | `QDRANT_COLLECTION_NAME`, `RAG_CHUNK_UNIT`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_CONTEXT_MAX_CHARS` |
+| База знаний | `QDRANT_COLLECTION_NAME`, `QDRANT_PUBLIC_COLLECTION_NAME`, `RAG_CHUNK_UNIT`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_CONTEXT_MAX_CHARS` |
 | PostgreSQL | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT` |
 | Внешние порты | `WEBCHAT_PORT`, `API_PORT`, `QDRANT_PORT`, `QDRANT_GRPC_PORT` |
 | Генерация консультанта | `CHAT_TEMPERATURE`, `CHAT_TOP_P`, `CHAT_MAX_TOKENS` |
