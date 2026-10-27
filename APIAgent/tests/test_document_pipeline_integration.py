@@ -108,6 +108,7 @@ async def test_public_search_prefers_specific_title_over_long_generic_manual(pip
         await ingestion.data.publish(result.document_id,title,content,'publication-rank')
     results = await ingestion.data.public_search('Для чего нужен модуль Управление сотрудниками?')
     assert results[0]['title'] == 'Модуль Управление сотрудниками'
+    assert results[0]['content'] == 'Создание учётной записи, изменение роли и блокировка доступа.'
 
 
 async def test_public_vectors_merge_with_authorized_internal_and_redacted_snapshot(pipeline):

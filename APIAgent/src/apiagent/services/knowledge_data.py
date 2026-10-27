@@ -178,17 +178,22 @@ class KnowledgeData:
         if self.public_index is not None:
             from apiagent.services.enhanced_retrieval import rank_documents
             docs = rank_documents(query, await self.public_vectors(query, 40), 40)
-            results, selected = [], {}
+            selected = []
             for doc in docs:
                 identifier = doc.metadata['publication_id']
-                if identifier not in selected:
-                    if len(results) == 4:
-                        continue
-                    selected[identifier] = dict(id=identifier, title=doc.metadata['title'], content='')
-                    results.append(selected[identifier])
-                item = selected[identifier]
-                item['content'] = (item['content'] + '\n' + doc.page_content).strip()[:3200]
-            return results
+                if identifier not in selected and len(selected) < 4:
+                    selected.append(identifier)
+            # Retrieve the approved snapshot, never the private source. The consultant
+            # selects a coherent bounded excerpt itself; concatenating vector hits
+            # can omit a prerequisite or join unrelated sections of a long manual.
+            async with self.catalog.pool.connection() as conn:
+                conn.row_factory = dict_row
+                rows = await (await conn.execute('''SELECT p.id::text,p.title,p.content
+                    FROM document_publications p JOIN documents d ON d.id=p.document_id
+                    WHERE p.id::text=ANY(%s) AND d.is_active AND d.status IN ('ready','indexed')
+                    AND d.document_kind<>'code' ''', (selected,))).fetchall()
+            by_id = {row['id']: row for row in rows}
+            return [by_id[identifier] for identifier in selected if identifier in by_id]
         expression = tsquery(query)
         if not expression:
             return []
