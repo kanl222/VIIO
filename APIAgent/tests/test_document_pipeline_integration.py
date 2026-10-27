@@ -94,6 +94,19 @@ async def test_reviewed_binary_original_is_preserved_with_public_search_text(pip
     assert rejected.json()['tasks'][0]['status'] == 'error'  # No unreviewed binary format opened by this import seam.
 
 
+async def test_public_search_prefers_specific_title_over_long_generic_manual(pipeline):
+    client, queue, catalog, adapter, ingestion, store = pipeline
+    for title, content in [
+        ('Общая инструкция ИС ЛО', 'Модуль управление сотрудниками общая информация. ' * 500),
+        ('Модуль Управление сотрудниками', 'Создание учётной записи, изменение роли и блокировка доступа.'),
+    ]:
+        result = await ingestion.index_text(DocumentCreateRequest(title=title,content=content,
+            owner_id='publication-rank',is_public=True,allowed_roles=[],allowed_departments=[]))
+        await ingestion.data.publish(result.document_id,title,content,'publication-rank')
+    results = await ingestion.data.public_search('Для чего нужен модуль Управление сотрудниками?')
+    assert results[0]['title'] == 'Модуль Управление сотрудниками'
+
+
 async def test_upload_survives_new_worker_and_download_checks_full_acl(pipeline):
     client, queue, catalog, adapter, ingestion, store = pipeline
     original = 'Правило отдела кадров: отпуск согласуется заранее.'.encode()

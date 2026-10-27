@@ -46,6 +46,10 @@ async def main():
         key=ingestion.store.save(data,suffix=Path(filename).suffix.lower())
         identifier,chunks=await ingestion(task,key)
         return identifier,chunks
+    async def publish(identifier,title,text):
+        await ingestion.data.publish(identifier,title,text,OWNER)
+        publication=await ingestion.data.publication(identifier)
+        return {'document_id':identifier,'publication_id':publication['id'],'title':title}
     try:
         for row in prepared['documents']:
             result={'type':'import','number':row['number'],'title':row['title'],'source_url':row['url']}
@@ -67,7 +71,7 @@ async def main():
                 identifier,chunks=await index(original,path.name,row['title'],text,metadata,mime)
                 publications=[]
                 if len(text)<=50000:
-                    publications.append(await ingestion.data.publish(identifier,row['title'][:255],text,OWNER))
+                    publications.append(await publish(identifier,row['title'][:255],text))
                 else:
                     parts=RecursiveCharacterTextSplitter(chunk_size=44000,chunk_overlap=300).split_text(text)
                     for number,part in enumerate(parts,1):
@@ -75,7 +79,7 @@ async def main():
                         content=f'# {title}\nИсточник: {row["url"]}\n\n'+part
                         part_id,_=await index(content.encode(),f'{row["number"]:02d}-part-{number}.md',title,content,
                             {**metadata,'parent_document_id':identifier,'part':number},'text/markdown')
-                        publications.append(await ingestion.data.publish(part_id,title,content,OWNER))
+                        publications.append(await publish(part_id,title,content))
                 result.update(status='ready',document_id=identifier,sha256=row['sha256'],chunks=chunks,
                     bytes=len(original),characters=len(text),is_public=True,
                     publications=publications,content_scope=metadata['content_scope'],engine=row['engine'])

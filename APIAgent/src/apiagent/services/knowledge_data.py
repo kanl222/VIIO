@@ -132,8 +132,9 @@ class KnowledgeData:
             return await (await conn.execute('''SELECT p.id::text,p.title,p.content FROM document_publications p
                 JOIN documents d ON d.id=p.document_id WHERE d.is_active AND d.status IN ('ready','indexed')
                 AND d.document_kind<>'code' AND p.search_vector @@ to_tsquery('russian',%s)
-                ORDER BY ts_rank_cd(p.search_vector,to_tsquery('russian',%s)) DESC LIMIT 4''',
-                (expression, expression))).fetchall()
+                ORDER BY (8 * ts_rank_cd(to_tsvector('russian',p.title),to_tsquery('russian',%s),32)
+                    + ts_rank_cd(p.search_vector,to_tsquery('russian',%s),32)) DESC LIMIT 4''',
+                (expression, expression, expression))).fetchall()
 
     async def public_ids(self, identifiers):
         async with self.catalog.pool.connection() as conn:
