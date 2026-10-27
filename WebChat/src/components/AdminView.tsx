@@ -711,3 +711,5 @@ export function AdminView({ user, onAccessChanged }: { user: User; onAccessChang
     </div></main>
   </div>;
 }
+
+export default AdminView;

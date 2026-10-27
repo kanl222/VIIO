@@ -24,7 +24,7 @@ export function useAuth() {
     checkAuth();
   }, [checkAuth]);
 
-  const login = async (username: string, password: string) => {
+  const login = useCallback(async (username: string, password: string) => {
     setError(null);
     try {
       const loggedIn = await authApi.login(username, password);
@@ -34,9 +34,9 @@ export function useAuth() {
       setError(err.message || 'Ошибка входа');
       throw err;
     }
-  };
+  }, []);
 
-  const register = async (username: string, password: string) => {
+  const register = useCallback(async (username: string, password: string) => {
     setError(null);
     try {
       const registered = await authApi.register(username, password);
@@ -46,15 +46,15 @@ export function useAuth() {
       setError(err.message || 'Ошибка регистрации');
       throw err;
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await authApi.logout();
     } finally {
       setUser(null);
     }
-  };
+  }, []);
 
   return {
     user,

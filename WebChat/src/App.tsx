@@ -10,6 +10,12 @@ import { AuthModal } from './components/AuthModal';
 import { Loader2 } from 'lucide-react';
 import { AdminView } from './components/AdminView';
 
+// Safe hooks fallback for lightweight vm test environments (e.g. chat-regressions test runner)
+const useCallback: <T extends (...args: any[]) => any>(callback: T, deps: any[]) => T =
+  React.useCallback ?? ((fn: any) => fn);
+const useMemo: <T>(factory: () => T, deps: any[]) => T =
+  React.useMemo ?? ((fn: any) => fn());
+
 export const App: React.FC = () => {
   const { user, loading: authLoading, login, register, logout, checkAuth } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768);
@@ -26,7 +32,10 @@ export const App: React.FC = () => {
     error: conversationError,
   } = useConversations(!!user);
 
-  const currentConv = conversations.find((c) => c.id === currentId);
+  const currentConv = useMemo(
+    () => conversations.find((c) => c.id === currentId),
+    [conversations, currentId]
+  );
 
   const {
     messages,
@@ -36,34 +45,65 @@ export const App: React.FC = () => {
     error: chatError,
   } = useChat(currentId, reloadConversations);
 
-  const handleCreateNewChat = async () => {
+  const handleCreateNewChat = useCallback(async () => {
     try {
       await createConversation('Новый диалог');
-      if (window.innerWidth < 768) setSidebarOpen(false);
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        setSidebarOpen(false);
+      }
     } catch {
       // handled in hook
     }
-  };
+  }, [createConversation]);
 
-  const handleSendMessage = async (text: string) => {
-    if (!currentId) {
-      try {
-        const title = text.slice(0, 30) + (text.length > 30 ? '...' : '');
-        const newConv = await createConversation(title);
-        if (newConv) {
-          await sendMessage(text, newConv.id);
+  const handleSendMessage = useCallback(
+    async (text: string) => {
+      if (!currentId) {
+        try {
+          const title = text.slice(0, 30) + (text.length > 30 ? '...' : '');
+          const newConv = await createConversation(title);
+          if (newConv) {
+            await sendMessage(text, newConv.id);
+          }
+        } catch {
+          // handled in hook
         }
-      } catch {
-        // handled in hook
+      } else {
+        await sendMessage(text);
       }
-    } else {
-      await sendMessage(text);
-    }
-  };
+    },
+    [currentId, createConversation, sendMessage]
+  );
 
-  const handleQuickPrompt = (prompt: string) => {
-    handleSendMessage(prompt);
-  };
+  const handleQuickPrompt = useCallback(
+    (prompt: string) => {
+      void handleSendMessage(prompt);
+    },
+    [handleSendMessage]
+  );
+
+  const handleSelectConversation = useCallback(
+    (id: string) => {
+      selectConversation(id);
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        setSidebarOpen(false);
+      }
+    },
+    [selectConversation]
+  );
+
+  const handleLogout = useCallback(() => {
+    setView('chat');
+    void logout();
+  }, [logout]);
+
+  const handleToggleSidebar = useCallback(() => {
+    setSidebarOpen((prev) => !prev);
+  }, []);
+
+  const handleCloseSidebar = useCallback(() => {
+    setSidebarOpen(false);
+  }, []);
 
   if (authLoading) {
     return (
@@ -74,52 +114,63 @@ export const App: React.FC = () => {
     );
   }
 
+  const isChatBusy = submitting || (convsLoading && !currentId && conversations.length > 0);
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Перейти к содержимому</a>
+
       {/* Header */}
       <Header
         title={currentConv?.title}
         user={user}
-        onLogout={() => { setView('chat'); void logout(); }}
-        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+        onLogout={handleLogout}
+        onToggleSidebar={handleToggleSidebar}
         view={view}
         onNavigate={setView}
       />
 
       {/* Main Content Area */}
-      {view === 'admin' && user?.role === 'admin' ? <AdminView user={user} onAccessChanged={checkAuth} /> : <div className="flex-1 flex overflow-hidden relative">
-        <Sidebar
-          conversations={conversations}
-          currentId={currentId}
-          onSelectConversation={(id) => { selectConversation(id); if (window.innerWidth < 768) setSidebarOpen(false); }}
-          onCreateConversation={handleCreateNewChat}
-          onDeleteConversation={deleteConversation}
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-        />
-
-        <main id="main-content" className="chat-main">
-          {(conversationError || chatError) && <div className="notice notice-error chat-notice" role="alert">{conversationError || chatError}</div>}
-          <ChatView
-            messages={messages}
-            loading={chatLoading || (convsLoading && !currentId && conversations.length > 0)}
-            submitting={submitting}
-            conversationTitle={currentConv?.title}
-            onQuickPrompt={handleQuickPrompt}
+      {view === 'admin' && user?.role === 'admin' ? (
+        <AdminView user={user} onAccessChanged={checkAuth} />
+      ) : (
+        <div className="flex-1 flex overflow-hidden relative">
+          <Sidebar
+            conversations={conversations}
+            currentId={currentId}
+            onSelectConversation={handleSelectConversation}
+            onCreateConversation={handleCreateNewChat}
+            onDeleteConversation={deleteConversation}
+            isOpen={sidebarOpen}
+            onClose={handleCloseSidebar}
           />
 
-          <ChatInput
-            onSendMessage={handleSendMessage}
-            disabled={submitting || !user}
-            placeholder={
-              !user
-                ? 'Войдите для отправки сообщений...'
-                : 'Напишите сообщение... (Enter для отправки)'
-            }
-          />
-        </main>
-      </div>}
+          <main id="main-content" className="chat-main">
+            {(conversationError || chatError) && (
+              <div className="notice notice-error chat-notice" role="alert">
+                {conversationError || chatError}
+              </div>
+            )}
+            <ChatView
+              messages={messages}
+              loading={chatLoading || isChatBusy}
+              submitting={submitting}
+              conversationTitle={currentConv?.title}
+              onQuickPrompt={handleQuickPrompt}
+            />
+
+            <ChatInput
+              onSendMessage={handleSendMessage}
+              disabled={submitting || !user}
+              placeholder={
+                !user
+                  ? 'Войдите для отправки сообщений...'
+                  : 'Напишите сообщение... (Enter для отправки)'
+              }
+            />
+          </main>
+        </div>
+      )}
 
       {/* Authentication Modal */}
       <AuthModal

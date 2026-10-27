@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { User, Bot, Copy, Check, Info } from 'lucide-react';
 import type { Message } from '../types';
 
@@ -6,7 +6,30 @@ interface ChatMessageProps {
   message: Message;
 }
 
-const CodeBlock: React.FC<{ raw: string }> = ({ raw }) => {
+// Hoisted regular expressions to avoid re-compilation per line/render (js-hoist-regexp)
+const INLINE_REGEX = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g;
+const ORDERED_REGEX = /^(\d+)\.\s+(.*)$/;
+const FENCE_REGEX = /^\s*(`{3,}|~{3,})/;
+const NORMALIZE_BULLET_REGEX = /^(?:[-*•]|\d+[.)])\s+/;
+const NORMALIZE_DOC_REGEX = /^(?:материал|документ)\s+/i;
+const NORMALIZE_CLEAN_REGEX = /[«»“”"'`*_]/g;
+const NORMALIZE_TRAILING_PUNCT = /[.;:,]+$/;
+const NORMALIZE_SPACES_REGEX = /\s+/g;
+const HEADING_STRIP_HASH = /^#{1,6}\s*/;
+const HEADING_STRIP_FORMAT = /[*_]/g;
+const HEADING_STRIP_COLON = /:\s*$/;
+
+const KNOWN_HEADINGS = new Set([
+  'источник',
+  'источники',
+  'материалы',
+  'предоставленные материалы',
+  'подтверждающие материалы',
+  'документы, подтверждающие ответ',
+]);
+
+const CodeBlock: React.FC<{ raw: string }> = memo(({ raw }) => {
   const [copied, setCopied] = useState(false);
 
   // First line might be language
@@ -46,15 +69,17 @@ const CodeBlock: React.FC<{ raw: string }> = ({ raw }) => {
       </pre>
     </div>
   );
-};
+});
+
+CodeBlock.displayName = 'CodeBlock';
 
 function renderInline(text: string): React.ReactNode {
   const parts: React.ReactNode[] = [];
-  const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  INLINE_REGEX.lastIndex = 0;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(text)) !== null) {
+  while ((match = INLINE_REGEX.exec(text)) !== null) {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
@@ -87,29 +112,6 @@ function renderInline(text: string): React.ReactNode {
     parts.push(text.slice(lastIndex));
   }
   return parts.length > 0 ? parts : text;
-}
-
-function renderMarkdown(content: string): React.ReactNode {
-  // 1. Split by code blocks ```
-  const codeBlockRegex = /```([\s\S]*?)```/g;
-  const nodes: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = codeBlockRegex.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      const textSection = content.slice(lastIndex, match.index);
-      nodes.push(renderTextLines(textSection, `text-${lastIndex}`));
-    }
-    nodes.push(<CodeBlock key={`code-${match.index}`} raw={match[1]} />);
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < content.length) {
-    nodes.push(renderTextLines(content.slice(lastIndex), `text-${lastIndex}`));
-  }
-
-  return nodes;
 }
 
 function renderTextLines(section: string, keyPrefix: string): React.ReactNode {
@@ -160,7 +162,7 @@ function renderTextLines(section: string, keyPrefix: string): React.ReactNode {
             </div>
           );
         }
-        const orderedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+        const orderedMatch = trimmed.match(ORDERED_REGEX);
         if (orderedMatch) {
           return (
             <div key={idx} className="flex items-start space-x-1.5 ml-2 text-xs">
@@ -180,6 +182,28 @@ function renderTextLines(section: string, keyPrefix: string): React.ReactNode {
   );
 }
 
+function renderMarkdown(content: string): React.ReactNode {
+  CODE_BLOCK_REGEX.lastIndex = 0;
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = CODE_BLOCK_REGEX.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      const textSection = content.slice(lastIndex, match.index);
+      nodes.push(renderTextLines(textSection, `text-${lastIndex}`));
+    }
+    nodes.push(<CodeBlock key={`code-${match.index}`} raw={match[1]} />);
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    nodes.push(renderTextLines(content.slice(lastIndex), `text-${lastIndex}`));
+  }
+
+  return nodes;
+}
+
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -193,27 +217,37 @@ function formatTime(iso: string): string {
 /** Hide a redundant terminal bibliography only when every entry is already shown below. */
 export function stripDuplicateSources(text: string, titles: string[]): string {
   if (!titles.length) return text;
-  const normalize = (value: string) => value.trim()
-    .replace(/^(?:[-*•]|\d+[.)])\s+/, '')
-    .replace(/^(?:материал|документ)\s+/i, '')
-    .replace(/[«»“”"'`*_]/g, '').replace(/[.;:,]+$/, '')
-    .replace(/\s+/g, ' ').toLocaleLowerCase('ru').replace(/ё/g, 'е');
+  const normalize = (value: string) =>
+    value
+      .trim()
+      .replace(NORMALIZE_BULLET_REGEX, '')
+      .replace(NORMALIZE_DOC_REGEX, '')
+      .replace(NORMALIZE_CLEAN_REGEX, '')
+      .replace(NORMALIZE_TRAILING_PUNCT, '')
+      .replace(NORMALIZE_SPACES_REGEX, ' ')
+      .toLocaleLowerCase('ru')
+      .replace(/ё/g, 'е');
+
   const known = new Set(titles.map(normalize));
-  const headings = new Set(['источник', 'источники', 'материалы', 'предоставленные материалы',
-    'подтверждающие материалы', 'документы, подтверждающие ответ']);
   const lines = text.split('\n');
   let fence = '';
   let heading = -1;
+
   for (let index = 0; index < lines.length; index++) {
-    const marker = lines[index].match(/^\s*(`{3,}|~{3,})/);
+    const marker = lines[index].match(FENCE_REGEX);
     if (marker) {
       if (!fence) fence = marker[1];
       else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = '';
       continue;
     }
     if (fence) continue;
-    const label = lines[index].trim().replace(/^#{1,6}\s*/, '').replace(/[*_]/g, '').replace(/:\s*$/, '').toLocaleLowerCase('ru');
-    if (headings.has(label)) heading = index;
+    const label = lines[index]
+      .trim()
+      .replace(HEADING_STRIP_HASH, '')
+      .replace(HEADING_STRIP_FORMAT, '')
+      .replace(HEADING_STRIP_COLON, '')
+      .toLocaleLowerCase('ru');
+    if (KNOWN_HEADINGS.has(label)) heading = index;
   }
   if (heading < 0) return text;
   const entries = lines.slice(heading + 1).filter(line => line.trim());
@@ -221,7 +255,7 @@ export function stripDuplicateSources(text: string, titles: string[]): string {
   return lines.slice(0, heading).join('\n').trimEnd();
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = memo(({ message }) => {
   const isUser = message.sender === 'user';
   const isSystem = message.sender === 'system';
   const sourceEntries = !isUser ? (message.attachments || []).filter(item => item.type === 'knowledge_source' && item.name) : [];
@@ -273,7 +307,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             <div className="mt-2 text-xs text-gray-600 dark:text-zinc-400" aria-label="Предоставленные материалы">
               <p className="font-medium">Предоставленные материалы</p>
               <ul className="mt-1 space-y-1 list-disc pl-4">
-                {sources.map((source, index) => <li className="break-words" key={index}>{source.name}</li>)}
+                {sources.map((source, index) => (
+                  <li className="break-words" key={source.data?.document_id || source.name || index}>
+                    {source.name}
+                  </li>
+                ))}
               </ul>
             </div>
           )}
@@ -292,4 +330,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       </div>
     </div>
   );
-};
+});
+
+ChatMessage.displayName = 'ChatMessage';

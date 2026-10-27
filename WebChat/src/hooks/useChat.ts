@@ -16,6 +16,11 @@ export function useChat(
   const activeId = useRef(conversationId);
   const loadVersion = useRef(0);
   const pendingSend = useRef<{ id: string; messages: Message[] } | null>(null);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const onConversationUpdatedRef = useRef(onConversationUpdated);
+  onConversationUpdatedRef.current = onConversationUpdated;
+
   activeId.current = conversationId;
 
   // Загрузка сообщений выбранного диалога
@@ -78,9 +83,10 @@ export function useChat(
         created_at: new Date().toISOString(),
       };
 
+      const curHistory = historyRef.current;
       const pending = {
         id: targetId,
-        messages: [...(history.id === targetId ? history.messages : []), userMessage],
+        messages: [...(curHistory.id === targetId ? curHistory.messages : []), userMessage],
       };
       pendingSend.current = pending;
       setHistory(pending);
@@ -101,8 +107,8 @@ export function useChat(
 
         if (isCurrent()) setHistory({ id: targetId, messages: [...pending.messages, assistantMessage] });
 
-        if (onConversationUpdated) {
-          onConversationUpdated();
+        if (onConversationUpdatedRef.current) {
+          onConversationUpdatedRef.current();
         }
       } catch (err: any) {
         const errMsg = err.message || 'Не удалось получить ответ от агента';
@@ -121,7 +127,7 @@ export function useChat(
         setSubmitting(false);
       }
     },
-    [conversationId, history, onConversationUpdated]
+    [conversationId]
   );
 
   return {

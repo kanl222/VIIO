@@ -55,19 +55,21 @@ export function useConversations(isAuthenticated: boolean) {
   const deleteConversation = useCallback(async (id: string) => {
     try {
       await convApi.deleteConversation(id);
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      setCurrentId((prev) => {
-        if (prev === id) {
-          const remaining = conversations.filter((c) => c.id !== id);
-          return remaining.length > 0 ? remaining[0].id : null;
-        }
-        return prev;
+      setConversations((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        setCurrentId((curr) => {
+          if (curr === id) {
+            return next.length > 0 ? next[0].id : null;
+          }
+          return curr;
+        });
+        return next;
       });
     } catch (err: any) {
       setError(err.message || 'Ошибка удаления диалога');
       throw err;
     }
-  }, [conversations]);
+  }, []);
 
   return {
     conversations,
