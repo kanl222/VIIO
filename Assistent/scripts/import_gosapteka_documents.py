@@ -20,6 +20,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from assistent import create_app
 from assistent.config import Settings
 from assistent.services.bulk_queue import BulkUploadTask
+from assistent.services.text_normalization import normalize_document_text
 
 ROOT=Path('/tmp/gosapteka-import')
 OWNER='gosapteka56-public-import-2026-10-27'
@@ -65,6 +66,9 @@ async def main():
                 text=(ROOT/row['text_path']).read_text(encoding='utf-8')
                 if hashlib.sha256(text.encode()).hexdigest()!=row['text_sha256']:
                     raise ValueError('Reviewed text hash mismatch')
+                # Verify the reviewed source first; clean before splitting and publishing.
+                if path.suffix.lower() in {'.pdf', '.docx'}:
+                    text=normalize_document_text(text)
                 metadata={'source_url':row['url'],'source_page':prepared['source_page'],'import_batch':OWNER,
                     'extraction_engine':row['engine'],'pages':row.get('pages'),
                     'content_scope':row.get('content_scope','extracted_document_text'),

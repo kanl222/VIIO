@@ -32,6 +32,16 @@ def test_normalizer_removes_noise_without_removing_meaning_or_code_indentation()
     assert normalize_document_text(cleaned)==cleaned
 
 
+def test_old_imported_pdf_title_page_has_no_layout_whitespace():
+    text = '[Страница 1]\n  \n1 \n \n \n \nИнструкция для медицинских организаций  \nпо работе в ИС «Аптечный учёт в МО» \nмодуль «Аптека»   \n \n \nДата актуализации 23.05.2022 \n  \n\n[Страница 2]\n  \n2 '
+    cleaned = normalize_document_text(text)
+    assert '\n\n\n' not in cleaned
+    assert all(not line or line == line.strip() for line in cleaned.splitlines())
+    assert '[Страница 1]\n\n1\n\nИнструкция для медицинских организаций' in cleaned
+    assert 'Дата актуализации 23.05.2022\n\n[Страница 2]\n\n2' in cleaned
+    assert ''.join(text.split()) == ''.join(cleaned.split())
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('suffix',['.docx','.odt'])
 async def test_rejects_corrupt_packages_and_empty_text(suffix):

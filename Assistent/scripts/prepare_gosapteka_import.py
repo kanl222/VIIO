@@ -10,6 +10,8 @@ from pypdf import PdfReader
 from docx import Document
 import openpyxl
 
+from assistent.services.text_normalization import normalize_document_text
+
 ROOT = Path(__file__).resolve().parents[2] / 'data/gosapteka56/2026-10-27'
 sys.path.insert(0,str(ROOT/'_libs'))
 import xlrd
@@ -70,6 +72,8 @@ def main():
         else:
             raise ValueError('Unsupported source '+str(path))
         body=body.replace('\x00','')
+        if ext in {'.pdf', '.docx'}:
+            body=normalize_document_text(body)
         text=f"# {row['title']}\n\nИсточник: {row['url']}\nСтраница раздела: {manifest['source_page']}\n\n"+body
         destination=target/f"{row['number']:02d}.txt"
         destination.write_text(text,encoding='utf-8')
