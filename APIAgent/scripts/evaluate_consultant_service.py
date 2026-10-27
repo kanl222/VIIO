@@ -34,7 +34,7 @@ async def main():
         external = {'X-Consultant-Key': settings.consultant_api_key}
         base, standalone = 'http://127.0.0.1:8000', 'http://consultant:8000'
         try:
-            files = [('files', (name + '.txt', ('Internal draft. ' + canary + ' ' + tag).encode(), 'text/plain')) for name in (*material.keys(), 'unpublished')]
+            files = [('files', (name + '.txt', (name + ' internal draft. ' + canary + ' ' + tag).encode(), 'text/plain')) for name in (*material.keys(), 'unpublished')]
             response = await client.post(base + '/api/v1/documents/bulk-upload', headers=internal,
                 params={'owner_id': owner, 'is_public': True}, files=files)
             response.raise_for_status()
@@ -50,6 +50,7 @@ async def main():
                     await asyncio.sleep(.25)
             assert all(item['status'] == 'ready' for item in states), states
             doc_ids = [item['document_id'] for item in states]
+            assert len(set(doc_ids)) == 4, 'Evaluation requires four distinct fixture documents'
             for item in states:
                 key = item['filename'].removesuffix('.txt')
                 if key in material:
