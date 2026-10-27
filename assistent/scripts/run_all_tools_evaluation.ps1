@@ -15,22 +15,22 @@ $composeArgs = @('compose','--project-name',$prefix,'--env-file',$envPath,'-f',$
 try {
     & docker @composeArgs up -d --wait --wait-timeout 180 tools-eval-postgres
     if ($LASTEXITCODE -ne 0) { throw 'Temporary fixture services did not become ready' }
-    & docker cp $configPath "viio_apiagent:$remoteConfig"
+    & docker cp $configPath "viio_assistent:$remoteConfig"
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy fixture configuration' }
-    & docker cp (Join-Path $PSScriptRoot 'evaluate_all_tools.py') 'viio_apiagent:/tmp/evaluate_all_tools.py'
+    & docker cp (Join-Path $PSScriptRoot 'evaluate_all_tools.py') 'viio_assistent:/tmp/evaluate_all_tools.py'
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy evaluation script' }
-    & docker exec viio_apiagent python /tmp/evaluate_all_tools.py $remoteConfig --seed
+    & docker exec viio_assistent python /tmp/evaluate_all_tools.py $remoteConfig --seed
     if ($LASTEXITCODE -ne 0) { throw 'Could not seed the temporary database' }
     & docker @composeArgs up -d --wait --wait-timeout 180 tools-eval-mcp
     if ($LASTEXITCODE -ne 0) { throw 'Temporary MCP did not become ready' }
-    & docker exec viio_apiagent python /tmp/evaluate_all_tools.py $remoteConfig | Out-File -Encoding utf8 $reportPath
+    & docker exec viio_assistent python /tmp/evaluate_all_tools.py $remoteConfig | Out-File -Encoding utf8 $reportPath
     if ($LASTEXITCODE -ne 0) { throw "Evaluation failed; see $Report" }
-    & docker cp (Join-Path $PSScriptRoot 'evaluate_postgres_controls.py') 'viio_apiagent:/tmp/evaluate_postgres_controls.py'
+    & docker cp (Join-Path $PSScriptRoot 'evaluate_postgres_controls.py') 'viio_assistent:/tmp/evaluate_postgres_controls.py'
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy adapter controls' }
-    & docker exec viio_apiagent python /tmp/evaluate_postgres_controls.py $remoteConfig | Out-File -Encoding utf8 ($reportPath + '.controls.jsonl')
+    & docker exec viio_assistent python /tmp/evaluate_postgres_controls.py $remoteConfig | Out-File -Encoding utf8 ($reportPath + '.controls.jsonl')
     if ($LASTEXITCODE -ne 0) { throw 'Adapter controls failed' }
 } finally {
-    & docker exec viio_apiagent python -c "from pathlib import Path; Path('$remoteConfig').unlink(missing_ok=True)"
+    & docker exec viio_assistent python -c "from pathlib import Path; Path('$remoteConfig').unlink(missing_ok=True)"
     & docker @composeArgs down --volumes
     # Exact generated files, no directory enumeration or recursive deletion.
     Remove-Item -LiteralPath $envPath,$configPath -Force -ErrorAction SilentlyContinue

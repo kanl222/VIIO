@@ -226,6 +226,8 @@ VIIO/
 │   │   ├── config.py        # Настройки из окружения
 │   │   └── router.py        # HTTP API и схемы запросов
 │   └── tests/
+├── Documents/              # Образ API документов и worker, инструкции запуска
+├── Consultant/             # Самостоятельный агент-консультант
 ├── WebChat/
 │   ├── src/                # React-интерфейс
 │   ├── server/             # Express, сессии, чат и администрирование

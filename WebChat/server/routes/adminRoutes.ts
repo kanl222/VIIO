@@ -33,7 +33,7 @@ export function createAdminRouter(
   router.get('/overview', async (_req, res) => {
     try {
       const pool = poolProvider();
-      const [counts, database, agent] = await Promise.all([
+      const [counts, database, agent, documents] = await Promise.all([
         pool.query(`SELECT
           (SELECT COUNT(*)::int FROM users) AS users,
           (SELECT COUNT(*)::int FROM conversations) AS conversations,
@@ -45,12 +45,15 @@ export function createAdminRouter(
             status: string; model?: string; provider?: string; documents_count?: number;
           } : null)
           .catch(() => null),
+        fetchFn(`${documentsUrl().replace(/\/+$/, '')}/health`, { signal: AbortSignal.timeout(5000) })
+          .then(async response => response.ok ? await response.json() as { documents_count?: number } : null)
+          .catch(() => null),
       ]);
       res.json({
         counts: counts.rows[0], database,
         agent: agent ? {
           healthy: agent.status === 'healthy', model: agent.model,
-          provider: agent.provider, chunks: agent.documents_count,
+          provider: agent.provider, chunks: documents?.documents_count,
         } : { healthy: false },
         checked_at: new Date().toISOString(),
       });

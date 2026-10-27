@@ -60,3 +60,10 @@ SERVICE_ROLE=assistent DOCUMENTS_URL=http://localhost:8002 uv run uvicorn assist
 CPU и память обработки отделены от агентов. Общий сервер моделей и общая БД всё ещё могут испытывать нагрузку, поэтому отдельные процессы сами по себе не гарантируют неизменную задержку ответов; для этого нужен нагрузочный прогон.
 
 В Docker для `document-worker` по умолчанию заданы `DOCUMENT_WORKER_CPUS=1` и `DOCUMENT_WORKER_MEMORY=2g`. Настройки ограничивают потребление обработчика; существующий PDF worker сохраняет собственные ограничения.
+
+Доверенный импорт бинарных материалов и ручную синхронизацию индекса запускайте только в `viio_document_worker`. Например:
+
+```sh
+docker cp assistent/scripts/sync_public_index.py viio_document_worker:/tmp/sync_public_index.py
+docker exec viio_document_worker python /tmp/sync_public_index.py
+```

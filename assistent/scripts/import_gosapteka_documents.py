@@ -31,6 +31,8 @@ def emit(row):
 
 async def main():
     settings=Settings()
+    if settings.service_role != 'document-worker':
+        raise RuntimeError('Trusted file import must run in viio_document_worker, not in the assistant container')
     app=create_app(settings=settings,checkpointer=MemorySaver())
     pool=AsyncConnectionPool(make_conninfo(host=settings.postgres_host,port=settings.postgres_port,
         dbname=settings.postgres_db,user=settings.postgres_user,password=settings.postgres_password),

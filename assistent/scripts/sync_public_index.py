@@ -17,6 +17,8 @@ from assistent.utils.vector_store import QdrantVectorStoreAdapter
 
 async def main():
     settings = Settings()
+    if settings.service_role != 'document-worker':
+        raise RuntimeError('Run index maintenance in viio_document_worker')
     client = QdrantClient(url=settings.qdrant_url)
     try:
         async with AsyncConnectionPool(make_conninfo(host=settings.postgres_host,

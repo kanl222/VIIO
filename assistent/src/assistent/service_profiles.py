@@ -3,6 +3,7 @@
 The services share domain code in one distribution; no duplicate catalog or index.
 """
 from fastapi import Depends, HTTPException, Request
+import anyio.to_thread
 from pydantic import BaseModel, ConfigDict, Field
 
 from assistent.router import UserContext
@@ -41,6 +42,11 @@ def configure_service(app, api_router=None):
         if role == 'assistent':
             result.update(provider=settings.llm_provider,
                 model=settings.lmstudio_model if settings.llm_provider == 'lmstudio' else settings.ollama_model)
+        if role == 'documents' and getattr(app.state, 'document_service', None) is not None:
+            try:
+                result['documents_count'] = await anyio.to_thread.run_sync(app.state.document_service.count_documents)
+            except Exception:
+                raise HTTPException(503, 'Поисковый индекс недоступен') from None
         return result
 
     if remote:

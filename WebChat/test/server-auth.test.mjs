@@ -281,12 +281,12 @@ test('Password hashing and verification with bcryptjs', async () => {
   assert.equal(fails, false, 'Incorrect password should fail verification');
 });
 
-async function adminFixture(role = 'admin', fetchFn = async () => ({ ok: true, json: async () => ({ status: 'healthy', model: 'test-model', documents_count: 3 }) })) {
+async function adminFixture(role = 'admin', fetchFn = async () => ({ ok: true, json: async () => ({ status: 'healthy', model: 'test-model', documents_count: 3 }) }), urls = {}) {
   const pool = new MockPool();
   const id = '00000000-0000-0000-0000-000000000001';
   pool.users.set(id, { id, username: 'admin-test', role, departments: ['general'] });
   const sid = await createSession(pool, id);
-  const server = await startServer(createApp({ pool, fetchFn }));
+  const server = await startServer(createApp({ pool, fetchFn, ...urls }));
   return { ...server, pool, id, cookie: `${SESSION_COOKIE_NAME}=${sid}` };
 }
 
@@ -397,6 +397,24 @@ test('Admin overview and user search expose counts and safe user fields', async 
     const users = await (await fixture.request('/api/admin/users?search=admin', { headers: { Cookie: fixture.cookie } })).json();
     assert.equal(users.total, 1);
     assert.equal(users.users[0].password_hash, undefined);
+  } finally { await fixture.close(); }
+});
+
+test('Admin overview reads the model from assistent and fragment count from Documents', async () => {
+  const calls = [];
+  const fixture = await adminFixture('admin', async (url) => {
+    calls.push(String(url));
+    return { ok: true, json: async () => String(url).startsWith('http://documents.test')
+      ? { status: 'healthy', documents_count: 782 }
+      : { status: 'healthy', model: 'main-model', documents_count: 999 } };
+  }, { agentUrl: 'http://assistent.test', documentsUrl: 'http://documents.test' });
+  try {
+    const response = await fixture.request('/api/admin/overview', { headers: { Cookie: fixture.cookie } });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.agent.model, 'main-model');
+    assert.equal(body.agent.chunks, 782);
+    assert.deepEqual(calls.sort(), ['http://assistent.test/health', 'http://documents.test/health']);
   } finally { await fixture.close(); }
 });
 

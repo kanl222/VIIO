@@ -133,3 +133,22 @@ async def test_worker_busy_with_indexing_does_not_block_its_health_or_other_serv
                 assert (await client.get('/health')).status_code==200
             assert not task.done()
         assert (await task).status_code==200
+
+
+@pytest.mark.asyncio
+async def test_document_count_is_owned_by_document_api_not_agent_or_worker():
+    for role in ['documents','document-worker','assistent']:
+        app=FastAPI()
+        app.state.settings=Settings(service_role=role)
+        app.state.remote_documents=role=='assistent'
+        app.state.catalog_service=MagicMock(available=True)
+        app.state.document_service=MagicMock()
+        app.state.document_service.count_documents.return_value=782
+        app.state.vector_store=MagicMock()
+        app.state.knowledge_data=MagicMock()
+        app.state.processing_slots=asyncio.Semaphore(1)
+        configure_service(app)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app),base_url='http://service') as client:
+            body=(await client.get('/health')).json()
+        assert body.get('documents_count')==(782 if role=='documents' else None)
+        assert app.state.document_service.count_documents.call_count==(1 if role=='documents' else 0)
