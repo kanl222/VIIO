@@ -8,6 +8,7 @@ import httpx
 from pypdf import PdfReader
 
 from assistent.config import Settings
+from assistent.services.text_normalization import normalize_document_text
 
 
 class PdfExtractionError(Exception):
@@ -38,7 +39,7 @@ class PdfExtractionService:
             raise PdfExtractionError(422, "В PDF не удалось распознать текст.")
         if len(text) > self.settings.pdf_max_chars:
             raise PdfExtractionError(413, "В PDF больше 500 000 символов. Разделите документ на части.")
-        return {"content": text.strip(), "pages": pages, "engine": "docling-cpu"}
+        return {"content": normalize_document_text(text), "pages": pages, "engine": "docling-cpu"}
 
     def _read(self, data: bytes) -> tuple[str, int, bool]:
         try:
@@ -78,7 +79,7 @@ class PdfExtractionService:
             if self.settings.pdf_engine == "pypdf" and needs_ocr:
                 raise PdfExtractionError(422, "В PDF есть страницы без текста. Включите Docling для распознавания сканов.")
             if self.settings.pdf_engine != "docling" and not needs_ocr and content:
-                return {"content": content, "pages": pages, "engine": "pypdf"}
+                return {"content": normalize_document_text(content), "pages": pages, "engine": "pypdf"}
             headers = {"Content-Type": "application/pdf"}
             if self.settings.internal_api_key:
                 headers["X-Internal-Token"] = self.settings.internal_api_key

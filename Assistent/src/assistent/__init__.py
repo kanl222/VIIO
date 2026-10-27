@@ -313,7 +313,7 @@ def create_app(
                                          max_workers=app_settings.bulk_max_workers, processing_slots=processing_slots)
 
     app = FastAPI(
-        title="assistent",
+        title="Assistent",
         description="LangGraph RAG Agent REST API с Qdrant и поддержкой LM Studio / Ollama",
         version="0.1.0",
         lifespan=lifespan,

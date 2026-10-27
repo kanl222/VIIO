@@ -44,8 +44,8 @@ WebChat/server/**/*.js
 tmp/
 .superpowers/
 .impeccable/hook.cache.json
-assistent/tests/repro_bug.py
-assistent/tests/scratch_debug.py
+Assistent/tests/repro_bug.py
+Assistent/tests/scratch_debug.py
 
 # Local document originals
 /data/

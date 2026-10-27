@@ -13,6 +13,8 @@ from assistent.services.document_catalog import sha256_of_bytes
 from assistent.services.pdf_extraction import PdfExtractionService
 from assistent.services.bulk_queue import BulkUploadTask, PreparedReview, DocumentVersionConflict
 from assistent.services.knowledge_data import KnowledgeData
+from assistent.services.office_extraction import OfficeExtractionService, OFFICE_MIMES
+from assistent.services.text_normalization import normalize_document_text
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +95,17 @@ class DocumentIngestion:
             content = task.reviewed_content
         elif task.mime_type == 'application/pdf':
             raise ValueError('PDF требует проверки текста перед индексацией')
+        elif task.mime_type in OFFICE_MIMES.values():
+            extracted = await OfficeExtractionService(self.settings).extract(task.data, task.filename)
+            content = extracted['content']
+            task.metadata['extraction_engine'] = extracted['engine']
         else:
             content = task.data.decode('utf-8-sig')
+            if '\x00' in content:
+                raise ValueError('Двоичный файл нельзя индексировать как текст')
+        if task.kind != 'code' and task.mime_type != 'text/markdown' and task.metadata.get('input_format') != 'manual-text':
+            content = normalize_document_text(content)
+            task.metadata['text_normalization'] = 'prose-v1'
         if not content.strip() or '\x00' in content or len(content) > self.settings.pdf_max_chars:
             raise ValueError('Пустой, двоичный или слишком большой текст')
         await anyio.to_thread.run_sync(self.documents.delete_document, identifier)
@@ -146,7 +157,7 @@ class DocumentIngestion:
     async def index_text(self, request):
         task = BulkUploadTask(uuid.uuid4().hex, request.title + '.txt', request.content.encode('utf-8'),
             request.title, request.owner_id, request.is_public, 'text/plain',
-            request.allowed_roles, request.allowed_departments, metadata=request.metadata or {})
+            request.allowed_roles, request.allowed_departments, metadata={**(request.metadata or {}), 'input_format':'manual-text'})
         key = await anyio.to_thread.run_sync(partial(self.store.save, task.data, suffix='.txt'))
         try:
             identifier, chunks = await self(task, key)

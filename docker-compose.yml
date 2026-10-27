@@ -158,7 +158,7 @@ services:
 
   assistent:
     build:
-      context: ./assistent
+      context: ./Assistent
       dockerfile: Dockerfile
     container_name: viio_assistent
     ports:

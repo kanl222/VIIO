@@ -210,8 +210,8 @@ function DocumentVersionsPanel({ docId, onClose, onUpload, onDownload }: {
           {item.has_original && <button className="text-button" type="button" onClick={() => onDownload(item)}><Download size={14} aria-hidden="true" /> Скачать</button>}
         </li>)}
       </ul>
-      {current && <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Загрузить новую версию</strong><small>Один PDF, TXT, Markdown или исходник до 10 МБ. Код доступен только программистам и администраторам.</small></span>
-        <input type="file" accept=".pdf,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={uploading} aria-label="Файл новой версии документа" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} />
+      {current && <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Загрузить новую версию</strong><small>Один PDF, DOCX, ODT, TXT, Markdown или исходник до 10 МБ. Код доступен только программистам и администраторам.</small></span>
+        <input type="file" accept=".pdf,.docx,.odt,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={uploading} aria-label="Файл новой версии документа" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} />
       </label>}
       {uploading && <p role="status">Сохраняем файл новой версии…</p>}
     </>}
@@ -278,7 +278,7 @@ function KnowledgePanel() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const suffix = ({ 'application/pdf': '.pdf', 'text/plain': '.txt', 'text/markdown': '.md' } as Record<string, string>)[doc.mime_type] || '';
+      const suffix = ({ 'application/pdf': '.pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx', 'application/vnd.oasis.opendocument.text': '.odt', 'text/plain': '.txt', 'text/markdown': '.md' } as Record<string, string>)[doc.mime_type] || '';
       a.download = doc.original_filename || (doc.title.toLowerCase().endsWith(suffix) ? doc.title : doc.title + suffix);
       document.body.appendChild(a);
       a.click();
@@ -312,16 +312,19 @@ function KnowledgePanel() {
     if (!file) return;
     setError(''); setSuccess(''); setExtractionInfo('');
     const pdf = /\.pdf$/i.test(file.name);
-    if (!/\.(txt|md|markdown|pdf)$/i.test(file.name) || file.size > (pdf ? 10 : 2) * 1024 * 1024) {
-      setError('Выберите PDF до 10 МБ или TXT/Markdown до 2 МБ.'); return;
+    const office = /\.(docx|odt)$/i.test(file.name);
+    if (!/\.(txt|md|markdown|pdf|docx|odt)$/i.test(file.name) || file.size > ((pdf || office) ? 10 : 2) * 1024 * 1024) {
+      setError('Выберите PDF/DOCX/ODT до 10 МБ или TXT/Markdown до 2 МБ.'); return;
     }
     setExtracting(true);
     try {
-      const extracted = pdf ? await adminApi.extractPdf(file) : null;
+      const extracted = pdf ? await adminApi.extractPdf(file) : office ? await adminApi.extractOffice(file) : null;
       const text = extracted ? extracted.content : await file.text();
       if (text.length > 500000) { setError('В документе больше 500 000 символов. Разделите его на части.'); return; }
       setContent(text); if (!title) setTitle(file.name.replace(/\.[^.]+$/, '').slice(0, 255));
-      if (extracted) setExtractionInfo(`Из PDF получен текст: ${extracted.pages} стр. Проверьте его перед добавлением в базу знаний.`);
+      if (extracted) setExtractionInfo(office
+        ? 'Текст DOCX/ODT очищен. Проверьте его перед добавлением. Для сохранения оригинала используйте массовую загрузку.'
+        : `Из PDF получен текст: ${extracted.pages} стр. Проверьте его перед добавлением в базу знаний.`);
     } catch (err) { setError(errorText(err)); }
     finally { setExtracting(false); }
   };
@@ -429,7 +432,7 @@ function KnowledgePanel() {
   };
 
   const uploadVersion = async (file: File, current: CatalogDocument) => {
-    if (!/\.(pdf|txt|md|markdown|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(file.name) || file.size > 10 * 1024 * 1024) throw new Error('Выберите PDF, TXT или Markdown до 10 МБ.');
+    if (!/\.(pdf|docx|odt|txt|md|markdown|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(file.name) || file.size > 10 * 1024 * 1024) throw new Error('Выберите PDF, DOCX, ODT, TXT или Markdown до 10 МБ.');
     const result = await adminApi.bulkUpload([file], { is_public: current.is_public,
       allowed_roles: current.allowed_roles, allowed_departments: current.allowed_departments, version_parent_id: current.id });
     const task = result.tasks[0];
@@ -445,11 +448,11 @@ function KnowledgePanel() {
     const newFiles: File[] = [];
     for (let i = 0; i < selected.length; i++) {
       const f = selected[i];
-      if (/\.(txt|md|markdown|pdf|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(f.name) && f.size <= 10 * 1024 * 1024) {
+      if (/\.(txt|md|markdown|pdf|docx|odt|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(f.name) && f.size <= 10 * 1024 * 1024) {
         newFiles.push(f);
       }
     }
-    if (newFiles.length !== selected.length || bulkFiles.length + newFiles.length > 50) setBulkError('Часть файлов не выбрана: допустимы PDF, TXT, Markdown до 10 МБ, всего до 50 файлов.');
+    if (newFiles.length !== selected.length || bulkFiles.length + newFiles.length > 50) setBulkError('Часть файлов не выбрана: допустимы PDF, DOCX, ODT, TXT, Markdown до 10 МБ, всего до 50 файлов.');
     setBulkFiles(prev => [...prev, ...newFiles].slice(0, 50));
   };
 
@@ -553,7 +556,7 @@ function KnowledgePanel() {
           <div className="section-heading"><h2>Новый документ</h2><FileText size={19} aria-hidden="true" /></div>
           {error && <Notice>{error}</Notice>}{success && <Notice success><Check size={18} aria-hidden="true" />{success}</Notice>}
           <label className="field">Название<input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Например, регламент работы с клиентами" maxLength={255} disabled={saving || extracting} /></label>
-          <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать файл</strong><small>PDF до 10 МБ · TXT или Markdown до 2 МБ</small></span><input ref={fileInput} type="file" accept=".pdf,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={saving || extracting} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать PDF или текстовый файл" /></label>
+          <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать файл</strong><small>PDF, DOCX, ODT до 10 МБ · TXT/Markdown до 2 МБ</small></span><input ref={fileInput} type="file" accept=".pdf,.docx,.odt,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={saving || extracting} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать PDF, DOCX, ODT или текстовый файл" /></label>
           {extracting && <p className="field-help" role="status"><Loader2 size={16} className="animate-spin" /> Извлекаем текст. Для сканов обработка может занять несколько минут.</p>}
           {extractionInfo && <p className="field-help" role="status">{extractionInfo}</p>}
           <label className="field">Содержание<textarea required value={content} onChange={e => setContent(e.target.value)} placeholder="Вставьте текст документа…" rows={10} maxLength={500000} disabled={saving || extracting} /><small className="character-count">{content.length.toLocaleString('ru-RU')} / 500 000 символов</small></label>
@@ -584,13 +587,13 @@ function KnowledgePanel() {
             <Upload size={19} aria-hidden="true" />
             <span>
               <strong>Выбрать несколько файлов</strong>
-              <small>PDF, TXT, Markdown и исходный код до 10 МБ каждый (до 50 файлов за раз)</small>
+              <small>PDF, DOCX, ODT, TXT, Markdown и исходный код до 10 МБ каждый (до 50 файлов за раз)</small>
             </span>
             <input
               ref={bulkInputRef}
               type="file"
               multiple
-              accept=".pdf,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h"
+              accept=".pdf,.docx,.odt,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h"
               disabled={bulkUploading}
               onChange={e => handleBulkFileSelect(e.target.files)}
               aria-label="Выбрать несколько файлов"

@@ -25,6 +25,10 @@ export const addDocument = (document: {
 export const extractPdf = (file: File) => apiFetch<{ content: string; pages: number; engine: string }>(
   '/api/admin/documents/extract-pdf', { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file }
 );
+export const extractOffice = (file: File) => apiFetch<{ content: string; pages: null; engine: string }>(
+  `/api/admin/documents/extract-office?filename=${encodeURIComponent(file.name)}`,
+  { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }
+);
 
 export interface CatalogDocument {
   id: string;

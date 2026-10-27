@@ -65,7 +65,7 @@ def configure_service(app, api_router=None):
         @app.middleware('http')
         async def limit_processing(request, call_next):
             path = request.url.path
-            heavy = request.method == 'POST' and path in {'/api/v1/documents', '/api/v1/documents/extract-pdf'}
+            heavy = request.method == 'POST' and path in {'/api/v1/documents', '/api/v1/documents/extract-pdf', '/api/v1/documents/extract-office'}
             publication = request.method in {'POST','DELETE'} and path.startswith('/api/v1/documents/publication/')
             if heavy or publication:
                 try:
@@ -92,7 +92,7 @@ def configure_service(app, api_router=None):
             # durable queue directly and immediately return task identifiers.
             path = request.url.path
             heavy = request.method == 'POST' and path in {
-                '/api/v1/documents', '/api/v1/documents/extract-pdf'}
+                '/api/v1/documents', '/api/v1/documents/extract-pdf', '/api/v1/documents/extract-office'}
             publication = request.method in {'POST', 'DELETE'} and path.startswith('/api/v1/documents/publication/')
             if heavy or publication:
                 try:

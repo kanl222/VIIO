@@ -93,8 +93,95 @@ async def test_reviewed_binary_original_is_preserved_with_public_search_text(pip
     assert mime in result.headers['content-type']
     rows = await ingestion.data.lexical('отпуск лекарств',{'role':'employee'})
     assert rows and rows[0].metadata['document_id'] == identifier
-    rejected = await client.post('/api/v1/documents/bulk-upload',files=[('files',('other.docx',original,mime))])
-    assert rejected.json()['tasks'][0]['status'] == 'error'  # No unreviewed binary format opened by this import seam.
+    accepted = await client.post('/api/v1/documents/bulk-upload',files=[('files',('other.docx',original,mime))])
+    assert accepted.json()['tasks'][0]['status'] == 'queued'
+    queue.start()
+    failed = await terminal(queue,accepted.json()['tasks'][0]['task_id'])
+    assert failed.status == 'error'  # Ordinary Office uploads must be real parseable files.
+
+
+@pytest.mark.parametrize('suffix',['.docx','.odt'])
+async def test_office_preview_extracts_clean_text_without_indexing(pipeline,suffix):
+    from office_samples import office_sample
+    client,queue,catalog,adapter,ingestion,store=pipeline
+    response=await client.post('/api/v1/documents/extract-office',params={'filename':'Порядок'+suffix},
+        content=office_sample(suffix),headers={'Content-Type':'application/octet-stream'})
+    assert response.status_code==200,response.text
+    assert 'Контрольная фраза договор' in response.json()['content']
+    assert response.json()['pages'] is None
+    async with catalog.pool.connection() as conn:
+        assert (await(await conn.execute('SELECT count(*) AS total FROM documents')).fetchone())['total']==0
+    denied=await client.post('/api/v1/documents/extract-office',params={'filename':'Порядок'+suffix},
+        content=office_sample(suffix),headers={'X-Internal-Token':'wrong'})
+    assert denied.status_code==401
+
+
+@pytest.mark.parametrize('suffix',['.docx','.odt'])
+async def test_office_upload_indexes_clean_text_and_preserves_original(pipeline,suffix):
+    from office_samples import office_sample
+    from assistent.services.office_extraction import OFFICE_MIMES
+    client,queue,catalog,adapter,ingestion,store=pipeline
+    original=office_sample(suffix)
+    response=await client.post('/api/v1/documents/bulk-upload',params={'is_public':'true','allowed_roles':'','allowed_departments':''},
+        files=[('files',('Инструкция'+suffix,original,OFFICE_MIMES[suffix]))])
+    assert response.status_code==202
+    queue.start()
+    result=await terminal(queue,response.json()['tasks'][0]['task_id'])
+    assert result.status=='ready',result.error
+    record=await catalog.get(result.document_id)
+    assert record.mime_type==OFFICE_MIMES[suffix] and record.original_filename=='Инструкция'+suffix
+    downloaded=await client.get('/api/v1/documents/download/'+record.id,params={'user_role':'employee'})
+    assert downloaded.status_code==200 and downloaded.content==original
+    assert OFFICE_MIMES[suffix] in downloaded.headers['content-type']
+    hits=await ingestion.data.lexical('Контрольная фраза',{'role':'employee'})
+    assert hits and 'Контрольная фраза договор № 42.' in hits[0].page_content
+    assert '\t' not in hits[0].page_content and '\u00ad' not in hits[0].page_content
+    assert 'Срок | 14 дней' in hits[0].page_content
+    assert not await ingestion.data.public_search('Контрольная фраза')
+
+
+async def test_office_format_can_change_in_new_version_with_inherited_acl(pipeline):
+    from office_samples import office_sample
+    client,queue,catalog,adapter,ingestion,store=pipeline
+    response=await client.post('/api/v1/documents/bulk-upload',params={'owner_id':'office-owner','allowed_roles':'programmer','allowed_departments':''},
+        files=[('files',('v1.docx',office_sample('.docx'),'application/octet-stream'))])
+    queue.start()
+    first=await terminal(queue,response.json()['tasks'][0]['task_id'])
+    assert first.status=='ready'
+    response=await client.post('/api/v1/documents/bulk-upload',params={'version_parent_id':first.document_id,'is_public':'true','allowed_roles':'employee','owner_id':'spoofed'},
+        files=[('files',('v2.odt',office_sample('.odt','Новая редакция'),'application/octet-stream'))])
+    second=await terminal(queue,response.json()['tasks'][0]['task_id'])
+    assert second.status=='ready',second.error
+    record=await catalog.get(second.document_id)
+    assert record.version==2 and record.owner_id=='office-owner' and not record.is_public
+    assert record.allowed_roles==['programmer'] and record.original_filename=='v2.odt'
+    assert not (await catalog.get(first.document_id)).is_active
+    assert (await client.get('/api/v1/documents/download/'+record.id,params={'user_role':'employee'})).status_code==403
+
+
+async def test_normalization_does_not_modify_code_or_markdown(pipeline):
+    client,queue,catalog,adapter,ingestion,store=pipeline
+    for filename,original in [('demo.py',b'def sample():\n    return "a  b"\n'),('guide.md',b'# Title\n\n    indented code  \n\n```py\n  x = 1\n```\n')]:
+        response=await client.post('/api/v1/documents/bulk-upload',files=[('files',(filename,original,'text/plain'))])
+        queue.start()
+        result=await terminal(queue,response.json()['tasks'][0]['task_id'])
+        assert result.status=='ready'
+        async with catalog.pool.connection() as conn:
+            row=await(await conn.execute('SELECT content FROM document_contents WHERE document_id=%s',(result.document_id,))).fetchone()
+        assert row['content']==original.decode()
+
+
+async def test_plain_text_upload_is_cleaned_but_download_remains_original(pipeline):
+    client,queue,catalog,adapter,ingestion,store=pipeline
+    original='\ufeff  Порядок   работы\r\n\r\n\r\n\tСумма 1\u00a0000 ₽.\u200b  '.encode()
+    response=await client.post('/api/v1/documents/bulk-upload',params={'is_public':'true'},files=[('files',('plain.txt',original,'text/plain'))])
+    queue.start();result=await terminal(queue,response.json()['tasks'][0]['task_id'])
+    assert result.status=='ready'
+    async with catalog.pool.connection() as conn:
+        text=(await(await conn.execute('SELECT content FROM document_contents WHERE document_id=%s',(result.document_id,))).fetchone())['content']
+    assert text=='Порядок работы\n\nСумма 1 000 ₽.'
+    download=await client.get('/api/v1/documents/download/'+result.document_id,params={'user_role':'employee'})
+    assert download.content==original
 
 
 async def test_public_search_prefers_specific_title_over_long_generic_manual(pipeline):

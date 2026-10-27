@@ -384,6 +384,47 @@ test('Invalid PDF and CPU extraction failures are reported without adding knowle
   } finally { await f.close(); }
 });
 
+test('Office extraction requires administrator access and rejects other extensions', async () => {
+  let calls=0;
+  const f=await adminFixture('employee',async()=>{calls++;throw new Error('must not forward');});
+  const headers={'Content-Type':'application/octet-stream'};
+  try {
+    assert.equal((await f.request('/api/admin/documents/extract-office?filename=test.docx',
+      {method:'POST',headers,body:Buffer.from('PK')})).status,401);
+    assert.equal((await f.request('/api/admin/documents/extract-office?filename=test.docx',
+      {method:'POST',headers:{...headers,Cookie:f.cookie},body:Buffer.from('PK')})).status,403);
+    assert.equal(calls,0);
+  } finally { await f.close(); }
+  const admin=await adminFixture('admin',async()=>{calls++;throw new Error('must not forward');});
+  try {
+    assert.equal((await admin.request('/api/admin/documents/extract-office?filename=test.exe',
+      {method:'POST',headers:{...headers,Cookie:admin.cookie},body:Buffer.from('PK')})).status,400);
+    assert.equal(calls,0);
+  } finally { await admin.close(); }
+});
+
+for (const extension of ['docx','odt']) {
+  test(`Office ${extension} preview forwards original bytes and returns normalized text without indexing`,async()=>{
+    const original=Buffer.from('PK original binary fixture');
+    let calls=0;
+    const fixture=await adminFixture('admin',async(url,options)=>{
+      calls++;
+      assert.equal(new URL(url).pathname,'/api/v1/documents/extract-office');
+      assert.equal(new URL(url).searchParams.get('filename'),`Порядок работы.${extension}`);
+      assert.deepEqual(Buffer.from(options.body),original);
+      assert.ok(options.headers['X-Internal-Token']);
+      return {status:200,json:async()=>({content:'Очищенный текст',pages:null,engine:'test'})};
+    });
+    try {
+      const response=await fixture.request(`/api/admin/documents/extract-office?filename=${encodeURIComponent(`Порядок работы.${extension}`)}`,
+        {method:'POST',headers:{Cookie:fixture.cookie,'Content-Type':'application/octet-stream'},body:original});
+      assert.equal(response.status,200);
+      assert.equal((await response.json()).content,'Очищенный текст');
+      assert.equal(calls,1);
+    } finally { await fixture.close(); }
+  });
+}
+
 test('Admin overview and user search expose counts and safe user fields', async () => {
   const fixture = await adminFixture();
   try {

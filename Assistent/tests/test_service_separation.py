@@ -64,7 +64,8 @@ async def test_remote_search_sends_only_trusted_scope_and_no_personal_notes(monk
 
 
 @pytest.mark.asyncio
-async def test_document_api_forwards_heavy_work_but_retains_control_routes(monkeypatch):
+@pytest.mark.parametrize('path',['/api/v1/documents','/api/v1/documents/extract-office'])
+async def test_document_api_forwards_heavy_work_but_retains_control_routes(monkeypatch,path):
     app=FastAPI()
     app.state.settings=Settings(service_role='documents',internal_api_key='service-secret')
     app.state.remote_documents=False
@@ -72,6 +73,7 @@ async def test_document_api_forwards_heavy_work_but_retains_control_routes(monke
     app.state.vector_store=MagicMock()
     app.state.knowledge_data=MagicMock()
     @app.post('/api/v1/documents')
+    @app.post('/api/v1/documents/extract-office')
     async def bad_local_index():
         raise AssertionError('API must not index locally')
     @app.get('/api/v1/documents/catalog')
@@ -86,8 +88,8 @@ async def test_document_api_forwards_heavy_work_but_retains_control_routes(monke
         return JSONResponse({'document_id':'worker-owned'},status_code=201)
     monkeypatch.setattr('assistent.service_profiles.forward_documents',forward)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app),base_url='http://documents') as client:
-        assert (await client.post('/api/v1/documents',json={})).status_code==401
-        result=await client.post('/api/v1/documents',json={},headers={'X-Internal-Token':'service-secret'})
+        assert (await client.post(path,json={})).status_code==401
+        result=await client.post(path,json={},headers={'X-Internal-Token':'service-secret'})
         assert result.status_code==201 and result.json()['document_id']=='worker-owned'
         assert (await client.get('/api/v1/documents/catalog')).status_code==200
 

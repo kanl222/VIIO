@@ -130,6 +130,23 @@ export function createAdminRouter(
     }
   });
 
+  router.post('/documents/extract-office', raw({ type: 'application/octet-stream', limit: '10mb' }), async (req, res) => {
+    const filename = typeof req.query.filename === 'string' ? req.query.filename : '';
+    if (!filename || filename.length > 255 || !/\.(docx|odt)$/i.test(filename) || !Buffer.isBuffer(req.body)) {
+      res.status(400).json({ detail: 'Передайте DOCX или ODT до 10 МБ.' }); return;
+    }
+    try {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/extract-office?filename=${encodeURIComponent(filename)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
+        body: new Uint8Array(req.body), signal: AbortSignal.timeout(120000),
+      });
+      const payload = await response.json().catch(() => ({ detail: 'Не удалось обработать документ.' }));
+      res.status(response.status).json(payload);
+    } catch {
+      res.status(503).json({ detail: 'Сервис обработки документов недоступен.' });
+    }
+  });
+
   router.post('/documents/extract-pdf', raw({ type: 'application/pdf', limit: '10mb' }), async (req, res) => {
     if (!Buffer.isBuffer(req.body) || !req.body.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
       res.status(400).json({ detail: 'Выберите корректный PDF-файл.' });

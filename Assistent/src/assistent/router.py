@@ -21,6 +21,7 @@ from assistent.services.pdf_extraction import PdfExtractionService, PdfExtractio
 from assistent.services.document_access import can_read_document
 from assistent.services.code_documents import is_code_file
 from assistent.services.document_catalog import DocumentCatalogService
+from assistent.services.office_extraction import OFFICE_MIMES, OfficeExtractionService, OfficeExtractionError
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,20 @@ def create_api_router(
             return await pdf_service.extract(bytes(data))
         except PdfExtractionError as exc:
             raise HTTPException(exc.status, exc.detail) from None
+
+    @router.post('/api/v1/documents/extract-office', dependencies=[Depends(verify_internal_token)], tags=['Documents'])
+    async def extract_office(request: Request, filename: str = Query(min_length=1, max_length=255)) -> dict:
+        if Path(filename).suffix.lower() not in OFFICE_MIMES:
+            raise HTTPException(415, 'Поддерживаются DOCX и ODT')
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > settings.bulk_max_file_bytes:
+                raise HTTPException(413, 'Документ превышает лимит загрузки')
+            data.extend(chunk)
+        try:
+            return await OfficeExtractionService(settings).extract(bytes(data), filename)
+        except OfficeExtractionError as error:
+            raise HTTPException(422, str(error)) from None
 
     @router.get(
         "/health",
@@ -484,11 +499,11 @@ def create_api_router(
                 continue
 
             suffix = Path(filename).suffix.lower()
-            mime = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown', '.markdown': 'text/markdown'}.get(suffix)
+            mime = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown', '.markdown': 'text/markdown', **OFFICE_MIMES}.get(suffix)
             if is_code_file(filename):
                 mime = 'text/plain'
             if mime is None or not data:
-                tasks_info.append({"task_id": None, "filename": filename, "status": "error", "error": "Поддерживаются непустые PDF, TXT и Markdown."})
+                tasks_info.append({"task_id": None, "filename": filename, "status": "error", "error": "Поддерживаются непустые PDF, DOCX, ODT, TXT и Markdown."})
                 continue
             task_id = uuid.uuid4().hex
             title = filename.rsplit(".", 1)[0][:255] if "." in filename else filename[:255]

@@ -3,10 +3,10 @@ FROM ghcr.io/astral-sh/uv:latest AS uv
 FROM python:3.12-slim AS builder
 WORKDIR /app
 COPY --from=uv /uv /bin/uv
-COPY assistent/pyproject.toml assistent/uv.lock ./
+COPY Assistent/pyproject.toml Assistent/uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
-COPY assistent/src ./src
-COPY assistent/README.md ./README.md
+COPY Assistent/src ./src
+COPY Assistent/README.md ./README.md
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim AS runner
