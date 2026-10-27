@@ -1,0 +1,75 @@
+# VIIO Consultant
+
+Отдельное приложение и Docker-образ внешнего консультанта. Код не импортирует APIAgent и не содержит внутренних инструментов, RAG по закрытым документам, coder, доступа к базе или личной памяти.
+
+Консультант запрашивает только явно опубликованные тексты через служебные маршруты APIAgent. После генерации он повторно проверяет актуальность публикаций. Источник недоступен или публикация отозвана — ответ по старым или внутренним данным не используется.
+
+## Запуск из корня VIIO
+
+В `.env` задать:
+
+```dotenv
+CONSULTANT_ENABLED=true
+CONSULTANT_API_KEY=отдельный_случайный_ключ_не_короче_32_символов
+CONSULTANT_SOURCE_KEY=другой_случайный_служебный_ключ_не_короче_32_символов
+CONSULTANT_PORT=8001
+CONSULTANT_PROVIDER=lmstudio
+CONSULTANT_MODEL=
+```
+
+Ключи должны различаться между собой и с `INTERNAL_API_KEY`. Клиентам выдаётся только `CONSULTANT_API_KEY`; служебный ключ используется между двумя сервисами. В текущем локальном окружении ключи уже настроены в игнорируемом Git файле `.env`.
+
+После коммита проверенного выпуска, Windows и Linux:
+
+```text
+docker compose build apiagent consultant
+docker compose up -d --wait apiagent consultant
+docker compose ps
+```
+
+Основной адрес: `http://localhost:8001/api/v1/consultant/chat`. Прежний `http://localhost:8000/api/v1/consultant/chat` работает как прокси. Формат запроса и заголовок `X-Consultant-Key` сохранены. `/health` показывает готовность процесса; доступность источника и модели проверяется при обработке запроса.
+
+```bash
+curl http://localhost:8001/api/v1/consultant/chat \
+  -H "X-Consultant-Key: $CONSULTANT_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Когда работает поддержка?"}'
+```
+
+В PowerShell:
+
+```powershell
+$headers = @{ 'X-Consultant-Key' = $env:CONSULTANT_API_KEY }
+$body = @{ message = 'Когда работает поддержка?' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8001/api/v1/consultant/chat -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+```
+
+Переменная оболочки не загружается из `.env` автоматически. Для содержательных ответов администратор должен явно опубликовать проверенные тексты в каталоге WebChat. Существующие внутренние документы автоматически не публикуются.
+
+## Своя модель
+
+`CONSULTANT_MODEL` выбирает модель независимо от основного агента. Пустое значение использует модель выбранного провайдера из настроек проекта. Дополнительно доступны:
+
+- `CONSULTANT_PROVIDER=lmstudio` или `ollama`;
+- `CONSULTANT_LMSTUDIO_BASE_URL`, `CONSULTANT_LMSTUDIO_API_KEY`;
+- `CONSULTANT_OLLAMA_BASE_URL`;
+- `CONSULTANT_TEMPERATURE`, `CONSULTANT_TOP_P`, `CONSULTANT_MAX_TOKENS`.
+
+Контейнер содержит сервис агента и клиент модели. Сами веса продолжает обслуживать настроенный LM Studio/Ollama; отдельный GPU-сервер моделей этот выпуск не создаёт.
+
+Без Docker: из `Consultant` настроить те же переменные окружения, в том числе `CONSULTANT_SOURCE_URL=http://localhost:8000`, и выполнить:
+
+```text
+uv sync
+uv run uvicorn viio_consultant:create_app --factory --host 127.0.0.1 --port 8001
+```
+
+## Границы сервиса
+
+Docker собирает только каталог `Consultant`. Контейнер работает без root, с файловой системой только для чтения и отдельной сетью `consultant_net`. Он не получает пароли PostgreSQL, адрес Qdrant, внутренний токен APIAgent или том оригиналов.
+
+Два служебных маршрута источника: `POST /api/v1/consultant-materials/search` и `/validate`, заголовок `X-Publication-Key`. Они возвращают только актуальные публичные снимки и их идентификаторы. Ни служебный, ни внешний ключ не открывают внутренний каталог и инструменты.
+
+Генерация и перезапуск консультанта независимы от внутреннего агента. Данные остаются в общем авторитетном источнике публикаций: если APIAgent недоступен, консультант вернёт 503. Копирования закрытой базы или устаревающего локального кэша нет.
+
+`uv.lock` фиксирует собственные зависимости. При Docker-сборке выполняются тесты сервиса; в финальный образ тестовые зависимости не копируются. Дополнительно APIAgent содержит межсервисные проверки контракта публикаций и прокси.

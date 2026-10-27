@@ -473,7 +473,7 @@ async def test_personal_facts_persist_deduplicate_and_follow_access_scope(pipeli
 
 
 async def test_public_api_never_uses_internal_public_documents_or_client_roles(pipeline):
-    from apiagent.services.public_consultant import PublicConsultant
+    from viio_consultant.agent import PublicConsultant
     from langchain_core.messages import AIMessage
     client, _, catalog, _, ingestion, _ = pipeline
     root = await ingestion.index_text(DocumentCreateRequest(title='Internal policy', content='INTERNAL_SECRET internal details', is_public=True))
@@ -508,7 +508,7 @@ async def test_public_api_never_uses_internal_public_documents_or_client_roles(p
 
 
 async def test_publication_is_withdrawn_on_new_version_and_during_generation(pipeline):
-    from apiagent.services.public_consultant import PublicConsultant
+    from viio_consultant.agent import PublicConsultant
     from langchain_core.messages import AIMessage
     _, _, _, _, ingestion, store = pipeline
     root = await ingestion.index_text(DocumentCreateRequest(title='Support', content='Internal support'))
@@ -524,3 +524,37 @@ async def test_publication_is_withdrawn_on_new_version_and_during_generation(pip
         'text/plain', [], [], version_parent_id=root.document_id)
     await ingestion(task, store.save(task.data, suffix='.txt'))
     assert not await ingestion.data.public_search('Support')
+
+
+async def test_standalone_consultant_http_gateway_preserves_publication_boundary(pipeline):
+    from viio_consultant import create_app as create_consultant
+    from viio_consultant.config import ConsultantSettings
+    from viio_consultant.source import HttpPublicationSource
+    from viio_consultant.agent import PublicConsultant
+    from langchain_core.messages import AIMessage
+    _, _, catalog, _, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Private', content='PRIVATE_INTERNAL_BODY', is_public=True))
+    await ingestion.data.publish(root.document_id, 'Support', 'Support on Monday', 'admin')
+    gateway = FastAPI()
+    gateway.include_router(create_api_router(MagicMock(), ingestion.documents,
+        Settings(internal_api_key='internal', consultant_api_key='a' * 40, consultant_source_key='s' * 40),
+        catalog_service=catalog, knowledge_data=ingestion.data))
+    class Model:
+        async def ainvoke(self, messages):
+            assert 'PRIVATE_INTERNAL_BODY' not in str(messages)
+            return AIMessage(content='Support on Monday')
+    async with httpx.AsyncClient(base_url='http://gateway', transport=httpx.ASGITransport(gateway), headers={'X-Publication-Key': 's' * 40}) as source_client:
+        source = HttpPublicationSource(source_client)
+        external_app = create_consultant(ConsultantSettings(enabled=True, api_key='a' * 40, source_key='s' * 40),
+            agent=PublicConsultant(source, Model()))
+        async with httpx.AsyncClient(base_url='http://external', transport=httpx.ASGITransport(external_app), headers={'X-Consultant-Key': 'a' * 40}) as client:
+            response = await client.post('/api/v1/consultant/chat', json={'message': 'Support'})
+            assert response.status_code == 200 and response.json()['sources']
+            await ingestion.data.withdraw(root.document_id)
+            response = await client.post('/api/v1/consultant/chat', json={'message': 'Support'})
+            assert response.status_code == 200 and not response.json()['sources']
+        denied = await source_client.get('/api/v1/documents/catalog')
+        assert denied.status_code == 401
+        denied = await source_client.post('/api/v1/consultant-materials/search', json={'message': 'Support'},
+            headers={'X-Publication-Key': 'a' * 40})
+        assert denied.status_code == 401

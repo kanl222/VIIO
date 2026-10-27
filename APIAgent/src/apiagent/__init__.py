@@ -29,7 +29,7 @@ from apiagent.services.file_store import LocalFileStore
 from apiagent.services.knowledge_data import KnowledgeData
 from apiagent.services.enhanced_retrieval import EnhancedRetrieval
 from apiagent.services.personal_memory import PersonalFacts, MemoryAgent
-from apiagent.services.public_consultant import PublicConsultant
+from apiagent.services.public_consultant import ConsultantProxy
 from apiagent.tools.postgres_tool import create_postgres_readonly_tool
 from apiagent.services.coding_agent import (
     CODING_SYSTEM_PROMPT, DELEGATION_PROMPT, CodingAgentService,
@@ -250,7 +250,7 @@ def create_app(
             if app_settings.consultant_enabled:
                 if not data or not app_settings.consultant_api_key or len(app_settings.consultant_api_key) < 32 or app_settings.consultant_api_key == app_settings.internal_api_key:
                     raise ValueError('Для внешнего консультанта нужны каталог и отдельный CONSULTANT_API_KEY длиной от 32 символов.')
-                consultant = PublicConsultant(data, create_chat_model(app_settings))
+                consultant = ConsultantProxy(app_settings.consultant_url, app_settings.consultant_api_key)
 
     ingestion = None
     if file_store is not None and catalog_service is not None:

@@ -154,6 +154,11 @@ class PublicQuestion(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
 
 
+class PublishedIdsRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    publication_ids: list[uuid.UUID] = Field(max_length=4)
+
+
 def create_api_router(
     agent_service: IAgentService,
     document_service: IDocumentService,
@@ -635,6 +640,27 @@ def create_api_router(
         except Exception:
             logger.exception('Ошибка внешнего консультанта')
             raise HTTPException(503, 'Консультант временно недоступен') from None
+
+    def verify_publication_key(x_publication_key: str | None = Header(default=None, alias='X-Publication-Key')):
+        expected = settings.consultant_source_key
+        if not expected or len(expected) < 32 or expected in {settings.internal_api_key, settings.consultant_api_key}:
+            raise HTTPException(503, 'Источник публикаций не настроен')
+        if not x_publication_key or not compare_digest(x_publication_key.encode(), expected.encode()):
+            raise HTTPException(401, 'Необходим служебный ключ публикаций')
+
+    @router.post('/api/v1/consultant-materials/search', dependencies=[Depends(verify_publication_key)], tags=['Published materials'])
+    async def search_publications(request: PublicQuestion):
+        require_catalog()
+        if knowledge_data is None:
+            raise HTTPException(503, 'Источник публикаций недоступен')
+        return {'items': await knowledge_data.public_search(request.message)}
+
+    @router.post('/api/v1/consultant-materials/validate', dependencies=[Depends(verify_publication_key)], tags=['Published materials'])
+    async def validate_publications(request: PublishedIdsRequest):
+        require_catalog()
+        if knowledge_data is None:
+            raise HTTPException(503, 'Источник публикаций недоступен')
+        return {'publication_ids': sorted(await knowledge_data.public_ids([str(identifier) for identifier in request.publication_ids]))}
 
     return router
 

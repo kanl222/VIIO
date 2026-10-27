@@ -83,6 +83,8 @@ services:
       - CONVERSATION_HISTORY_MAX_CHARS=${CONVERSATION_HISTORY_MAX_CHARS:-18000}
       - CONSULTANT_ENABLED=${CONSULTANT_ENABLED:-false}
       - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
+      - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
+      - CONSULTANT_URL=http://consultant:8000
       - CHAT_TEMPERATURE=${CHAT_TEMPERATURE:-0.0}
       - CHAT_TOP_P=${CHAT_TOP_P:-1.0}
       - CHAT_MAX_TOKENS=${CHAT_MAX_TOKENS:-2048}
@@ -123,8 +125,51 @@ services:
         aliases:
           - apiagent
           - api
+      consultant_net: {}
     volumes:
       - documents_storage:/data/documents
+
+  consultant:
+    build:
+      context: ./Consultant
+      dockerfile: Dockerfile
+    container_name: viio_consultant
+    ports:
+      - "${CONSULTANT_PORT:-8001}:8000"
+    environment:
+      - CONSULTANT_ENABLED=${CONSULTANT_ENABLED:-false}
+      - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
+      - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
+      - CONSULTANT_SOURCE_URL=http://apiagent:8000
+      - CONSULTANT_PROVIDER=${CONSULTANT_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
+      - CONSULTANT_MODEL=${CONSULTANT_MODEL:-}
+      - CONSULTANT_LMSTUDIO_BASE_URL=${CONSULTANT_LMSTUDIO_BASE_URL:-${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}}
+      - CONSULTANT_LMSTUDIO_API_KEY=${CONSULTANT_LMSTUDIO_API_KEY:-${LMSTUDIO_API_KEY:-lm-studio}}
+      - CONSULTANT_LMSTUDIO_MODEL=${LMSTUDIO_MODEL:-qwen/qwen3-4b-2507}
+      - CONSULTANT_OLLAMA_BASE_URL=${CONSULTANT_OLLAMA_BASE_URL:-${OLLAMA_BASE_URL:-http://host.docker.internal:11434}}
+      - CONSULTANT_OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
+      - CONSULTANT_TEMPERATURE=${CONSULTANT_TEMPERATURE:-0.0}
+      - CONSULTANT_TOP_P=${CONSULTANT_TOP_P:-1.0}
+      - CONSULTANT_MAX_TOKENS=${CONSULTANT_MAX_TOKENS:-2048}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      apiagent:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    networks:
+      - consultant_net
 
   webchat:
     build:
@@ -207,6 +252,8 @@ services:
 
 networks:
   viio_net:
+    driver: bridge
+  consultant_net:
     driver: bridge
 
 volumes:

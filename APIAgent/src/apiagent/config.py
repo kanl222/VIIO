@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     conversation_history_max_chars: int = Field(default=18000, ge=4000, le=60000)
     consultant_enabled: bool = False
     consultant_api_key: str | None = None
+    consultant_source_key: str | None = None
+    consultant_url: str = 'http://consultant:8000'
     # Independent generation budgets for the consultant and text-only coder.
     chat_temperature: float = Field(default=0.0, ge=0, le=2)
     chat_top_p: float = Field(default=1.0, gt=0, le=1)
