@@ -1,0 +1,432 @@
+
+> agentai-chat@1.0.0 test
+> npm run build:server && node --test test/server-auth.test.mjs test/chat-regressions.test.mjs test/bootstrap-admin.test.mjs test/catalog-routes.test.mjs test/session.test.mjs test/server.test.mjs test/highlighter.test.mjs
+
+
+> agentai-chat@1.0.0 build:server
+> tsc -p tsconfig.server.json
+
+TAP version 13
+# Subtest: bootstrap is opt-in and validates credentials without exposing the password
+ok 1 - bootstrap is opt-in and validates credentials without exposing the password
+  ---
+  duration_ms: 3.5816
+  type: 'test'
+  ...
+# Subtest: empty configuration does not access the database
+ok 2 - empty configuration does not access the database
+  ---
+  duration_ms: 0.434
+  type: 'test'
+  ...
+# Subtest: first admin gets a hashed password; repeated startup does not overwrite it
+ok 3 - first admin gets a hashed password; repeated startup does not overwrite it
+  ---
+  duration_ms: 211.0647
+  type: 'test'
+  ...
+# Subtest: any existing administrator prevents creation of another one
+ok 4 - any existing administrator prevents creation of another one
+  ---
+  duration_ms: 0.4215
+  type: 'test'
+  ...
+# Subtest: a registered employee is never silently promoted
+ok 5 - a registered employee is never silently promoted
+  ---
+  duration_ms: 0.6431
+  type: 'test'
+  ...
+# Subtest: database failure rolls back and releases the connection
+ok 6 - database failure rolls back and releases the connection
+  ---
+  duration_ms: 103.1577
+  type: 'test'
+  ...
+# Subtest: Admin /documents/catalog forwards pagination and returns items
+ok 7 - Admin /documents/catalog forwards pagination and returns items
+  ---
+  duration_ms: 45.3282
+  type: 'test'
+  ...
+# Subtest: Admin /documents/download/:id returns original file with headers
+ok 8 - Admin /documents/download/:id returns original file with headers
+  ---
+  duration_ms: 10.5869
+  type: 'test'
+  ...
+# Subtest: Chat /api/chat/download/:id allows permitted employee to download file
+ok 9 - Chat /api/chat/download/:id allows permitted employee to download file
+  ---
+  duration_ms: 7.3871
+  type: 'test'
+  ...
+# Subtest: Admin /documents/bulk forwards multipart payload and receives tasks
+ok 10 - Admin /documents/bulk forwards multipart payload and receives tasks
+  ---
+  duration_ms: 11.1438
+  type: 'test'
+  ...
+# Subtest: Download uses session access, ignoring forged query context and accepting full IDs
+ok 11 - Download uses session access, ignoring forged query context and accepting full IDs
+  ---
+  duration_ms: 10.218
+  type: 'test'
+  ...
+# Subtest: Retry upload is restricted to admin and forwards POST to the agent
+ok 12 - Retry upload is restricted to admin and forwards POST to the agent
+  ---
+  duration_ms: 13.9752
+  type: 'test'
+  ...
+# Subtest: Review and cancellation reject employees and anonymous callers before forwarding
+ok 13 - Review and cancellation reject employees and anonymous callers before forwarding
+  ---
+  duration_ms: 15.2669
+  type: 'test'
+  ...
+# Subtest: Review approval uses session reviewer and forwards only validated content and token
+ok 14 - Review approval uses session reviewer and forwards only validated content and token
+  ---
+  duration_ms: 31.5691
+  type: 'test'
+  ...
+# Subtest: Review and cancel preserve conflict responses from agent
+ok 15 - Review and cancel preserve conflict responses from agent
+  ---
+  duration_ms: 8.4635
+  type: 'test'
+  ...
+# Subtest: Version history is admin-only and forwards the document identity
+ok 16 - Version history is admin-only and forwards the document identity
+  ---
+  duration_ms: 6.3986
+  type: 'test'
+  ...
+# Subtest: New-version upload preserves target ID and trusted session owner
+ok 17 - New-version upload preserves target ID and trusted session owner
+  ---
+  duration_ms: 6.4546
+  type: 'test'
+  ...
+# Subtest: External publication is restricted to admin and uses session publisher
+ok 18 - External publication is restricted to admin and uses session publisher
+  ---
+  duration_ms: 28.3981
+  type: 'test'
+  ...
+# Subtest: Publication rejects empty public excerpts without forwarding
+ok 19 - Publication rejects empty public excerpts without forwarding
+  ---
+  duration_ms: 5.3558
+  type: 'test'
+  ...
+# Subtest: a late history response cannot replace the selected conversation
+ok 20 - a late history response cannot replace the selected conversation
+  ---
+  duration_ms: 200.5608
+  type: 'test'
+  ...
+# Subtest: a reply from another conversation cannot appear in the selected chat
+ok 21 - a reply from another conversation cannot appear in the selected chat
+  ---
+  duration_ms: 77.7152
+  type: 'test'
+  ...
+# Subtest: history loaded during a send cannot erase optimistic messages
+ok 22 - history loaded during a send cannot erase optimistic messages
+  ---
+  duration_ms: 43.1053
+  type: 'test'
+  ...
+# Subtest: returning to an in-flight chat restores its messages, not another chat history
+ok 23 - returning to an in-flight chat restores its messages, not another chat history
+  ---
+  duration_ms: 50.6404
+  type: 'test'
+  ...
+# Subtest: the first prompt is sent with the newly created conversation ID
+ok 24 - the first prompt is sent with the newly created conversation ID
+  ---
+  duration_ms: 147.1393
+  type: 'test'
+  ...
+# Subtest: the hook sends a first message before the new selection is committed
+ok 25 - the hook sends a first message before the new selection is committed
+  ---
+  duration_ms: 50.6721
+  type: 'test'
+  ...
+# Subtest: SQL keywords, strings and numbers receive distinct syntax tokens
+ok 26 - SQL keywords, strings and numbers receive distinct syntax tokens
+  ---
+  duration_ms: 15.3403
+  type: 'test'
+  ...
+# Subtest: normalizes common aliases without guessing an unknown language
+ok 27 - normalizes common aliases without guessing an unknown language
+  ---
+  duration_ms: 73.6798
+  type: 'test'
+  ...
+# Subtest: escapes HTML inside code instead of interpreting model markup
+ok 28 - escapes HTML inside code instead of interpreting model markup
+  ---
+  duration_ms: 11.755
+  type: 'test'
+  ...
+# Subtest: long code safely remains plain text
+ok 29 - long code safely remains plain text
+  ---
+  duration_ms: 0.3245
+  type: 'test'
+  ...
+# Subtest: Password hashing and verification with bcryptjs
+ok 30 - Password hashing and verification with bcryptjs
+  ---
+  duration_ms: 300.634
+  type: 'test'
+  ...
+# Subtest: PostgreSQL chat denies employee before forwarding or storing the request
+ok 31 - PostgreSQL chat denies employee before forwarding or storing the request
+  ---
+  duration_ms: 54.1066
+  type: 'test'
+  ...
+# Subtest: PostgreSQL chat denies manager before forwarding or storing the request
+ok 32 - PostgreSQL chat denies manager before forwarding or storing the request
+  ---
+  duration_ms: 15.1654
+  type: 'test'
+  ...
+# Subtest: PostgreSQL chat allows programmer but never saves queries or database results
+ok 33 - PostgreSQL chat allows programmer but never saves queries or database results
+  ---
+  duration_ms: 14.929
+  type: 'test'
+  ...
+# Subtest: PostgreSQL chat allows admin but never saves queries or database results
+ok 34 - PostgreSQL chat allows admin but never saves queries or database results
+  ---
+  duration_ms: 12.3437
+  type: 'test'
+  ...
+# Subtest: Admin API rejects anonymous and non-admin users on every route
+ok 35 - Admin API rejects anonymous and non-admin users on every route
+  ---
+  duration_ms: 21.9732
+  type: 'test'
+  ...
+# Subtest: PDF extraction is restricted to admins before reading or forwarding data
+ok 36 - PDF extraction is restricted to admins before reading or forwarding data
+  ---
+  duration_ms: 28.257
+  type: 'test'
+  ...
+# Subtest: Admin PDF extraction forwards binary with server token but does not index
+ok 37 - Admin PDF extraction forwards binary with server token but does not index
+  ---
+  duration_ms: 9.4036
+  type: 'test'
+  ...
+# Subtest: Invalid PDF and CPU extraction failures are reported without adding knowledge
+ok 38 - Invalid PDF and CPU extraction failures are reported without adding knowledge
+  ---
+  duration_ms: 11.8576
+  type: 'test'
+  ...
+# Subtest: Admin overview and user search expose counts and safe user fields
+ok 39 - Admin overview and user search expose counts and safe user fields
+  ---
+  duration_ms: 11.9814
+  type: 'test'
+  ...
+# Subtest: Admin cannot demote the last administrator, but can update another user
+ok 40 - Admin cannot demote the last administrator, but can update another user
+  ---
+  duration_ms: 20.9741
+  type: 'test'
+  ...
+# Subtest: Admin document upload forwards trusted owner and access, preserving the server token
+ok 41 - Admin document upload forwards trusted owner and access, preserving the server token
+  ---
+  duration_ms: 9.6756
+  type: 'test'
+  ...
+# Subtest: Unavailable agent is reported as unavailable without breaking the overview
+ok 42 - Unavailable agent is reported as unavailable without breaking the overview
+  ---
+  duration_ms: 13.8331
+  type: 'test'
+  ...
+# Subtest: Session creation, retrieval, and deletion in PostgreSQL sessions table
+ok 43 - Session creation, retrieval, and deletion in PostgreSQL sessions table
+  ---
+  duration_ms: 1.2775
+  type: 'test'
+  ...
+# Subtest: authMiddleware enforces session authentication
+ok 44 - authMiddleware enforces session authentication
+  ---
+  duration_ms: 0.7905
+  type: 'test'
+  ...
+# Subtest: HTTP API: /health returns status: ok and db status
+ok 45 - HTTP API: /health returns status: ok and db status
+  ---
+  duration_ms: 10.6517
+  type: 'test'
+  ...
+# Subtest: HTTP API: Full Authentication flow (Register -> Me -> Logout -> Login)
+ok 46 - HTTP API: Full Authentication flow (Register -> Me -> Logout -> Login)
+  ---
+  duration_ms: 304.0602
+  type: 'test'
+  ...
+# Subtest: HTTP API: Conversations CRUD and cascading messages
+ok 47 - HTTP API: Conversations CRUD and cascading messages
+  ---
+  duration_ms: 107.9693
+  type: 'test'
+  ...
+# Subtest: HTTP API: Chat endpoint invokes APIAgent and saves messages
+ok 48 - HTTP API: Chat endpoint invokes APIAgent and saves messages
+  ---
+  duration_ms: 150.2281
+  type: 'test'
+  ...
+# Subtest: HTTP API: Security: Passes X-Internal-Token and user_context to APIAgent
+ok 49 - HTTP API: Security: Passes X-Internal-Token and user_context to APIAgent
+  ---
+  duration_ms: 128.5468
+  type: 'test'
+  ...
+# Subtest: serves the real interface, module MIME types, HEAD and security headers
+ok 50 - serves the real interface, module MIME types, HEAD and security headers
+  ---
+  duration_ms: 237.3751
+  type: 'test'
+  ...
+# Subtest: health checks only the Node service; an old /error address redirects home
+ok 51 - health checks only the Node service; an old /error address redirects home
+  ---
+  duration_ms: 22.4556
+  type: 'test'
+  ...
+# Subtest: never exposes server files, configuration or traversal paths
+ok 52 - never exposes server files, configuration or traversal paths
+  ---
+  duration_ms: 29.2982
+  type: 'test'
+  ...
+# Subtest: forwards the personal key and raw query to the fixed backend, without cookies
+ok 53 - forwards the personal key and raw query to the fixed backend, without cookies
+  ---
+  duration_ms: 22.6436
+  type: 'test'
+  ...
+# Subtest: streams POST JSON and returns the queued job unchanged
+ok 54 - streams POST JSON and returns the queued job unchanged
+  ---
+  duration_ms: 15.4631
+  type: 'test'
+  ...
+# Subtest: preserves authorization, queue and service failures from AgentAI
+ok 55 - preserves authorization, queue and service failures from AgentAI
+  ---
+  duration_ms: 33.0304
+  type: 'test'
+  ...
+# Subtest: preserves exact PDF bytes and download headers; strips hop-by-hop headers
+ok 56 - preserves exact PDF bytes and download headers; strips hop-by-hop headers
+  ---
+  duration_ms: 13.9053
+  type: 'test'
+  ...
+# Subtest: rejects oversized Content-Length before contacting the backend
+ok 57 - rejects oversized Content-Length before contacting the backend
+  ---
+  duration_ms: 16.2998
+  type: 'test'
+  ...
+# Subtest: enforces the body limit for chunked uploads without Content-Length
+ok 58 - enforces the body limit for chunked uploads without Content-Length
+  ---
+  duration_ms: 16.3993
+  type: 'test'
+  ...
+# Subtest: returns a bounded 504 for a stalled backend and remains available
+ok 59 - returns a bounded 504 for a stalled backend and remains available
+  ---
+  duration_ms: 69.0531
+  type: 'test'
+  ...
+# Subtest: returns a safe 502 when the backend is offline
+ok 60 - returns a safe 502 when the backend is offline
+  ---
+  duration_ms: 14.8946
+  type: 'test'
+  ...
+# Subtest: independent proxy requests run concurrently
+ok 61 - independent proxy requests run concurrently
+  ---
+  duration_ms: 26.313
+  type: 'test'
+  ...
+# Subtest: client cancellation closes the corresponding upstream response
+ok 62 - client cancellation closes the corresponding upstream response
+  ---
+  duration_ms: 19.7765
+  type: 'test'
+  ...
+# Subtest: refuses invalid upstreams and API paths that could become an open proxy
+ok 63 - refuses invalid upstreams and API paths that could become an open proxy
+  ---
+  duration_ms: 9.4566
+  type: 'test'
+  ...
+# Subtest: remembers validated sessions across server restart and proxies without exposing keys
+ok 64 - remembers validated sessions across server restart and proxies without exposing keys
+  ---
+  duration_ms: 48.8209
+  type: 'test'
+  ...
+# Subtest: session endpoints reject cross-site requests and malformed login data
+ok 65 - session endpoints reject cross-site requests and malformed login data
+  ---
+  duration_ms: 22.082
+  type: 'test'
+  ...
+# Subtest: encrypted sessions expire and reject changes or another server key
+ok 66 - encrypted sessions expire and reject changes or another server key
+  ---
+  duration_ms: 3.4137
+  type: 'test'
+  ...
+# Subtest: the key survives restart without being replaced
+ok 67 - the key survives restart without being replaced
+  ---
+  duration_ms: 74.5763
+  type: 'test'
+  ...
+# Subtest: conversation and draft state is isolated by user and survives reload
+ok 68 - conversation and draft state is isolated by user and survives reload
+  ---
+  duration_ms: 1.1815
+  type: 'test'
+  ...
+# Subtest: history groups dates and keeps unnamed chats findable
+ok 69 - history groups dates and keeps unnamed chats findable
+  ---
+  duration_ms: 5.9927
+  type: 'test'
+  ...
+1..69
+# tests 69
+# suites 0
+# pass 69
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2009.3181
