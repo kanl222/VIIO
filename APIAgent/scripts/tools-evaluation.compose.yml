@@ -1,0 +1,42 @@
+# Temporary fixtures only. Run with a unique project/prefix and generated env file.
+services:
+  tools-eval-postgres:
+    image: postgres:16-alpine
+    container_name: ${VIIO_EVAL_PREFIX:?}-postgres
+    environment:
+      POSTGRES_USER: fixture_owner
+      POSTGRES_DB: viio_tools_evaluation
+      POSTGRES_PASSWORD: ${VIIO_EVAL_PASSWORD:?}
+    tmpfs:
+      - /var/lib/postgresql/data:size=512m
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U fixture_owner -d viio_tools_evaluation]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [evaluation]
+  tools-eval-mcp:
+    image: crystaldba/postgres-mcp@sha256:dbbd346860d29f1543e991f30f3284bf4ab5f096d049ecc3426528f20b1b6e6b
+    container_name: ${VIIO_EVAL_PREFIX:?}-mcp
+    entrypoint: [python, /viio/start.py]
+    environment:
+      PGSQL_HOST: ${VIIO_EVAL_PREFIX:?}-postgres
+      PGSQL_DATABASE: viio_tools_evaluation
+      PGSQL_USER: viio_reader
+      PGSQL_PASSWORD: ${VIIO_EVAL_PASSWORD:?}
+      PGSQL_SSLMODE: disable
+    volumes:
+      - ../../postgres-tool/start.py:/viio/start.py:ro
+    depends_on:
+      tools-eval-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1',8000),2).close()"]
+      interval: 3s
+      timeout: 4s
+      retries: 40
+    networks: [evaluation]
+networks:
+  evaluation:
+    external: true
+    name: ${VIIO_EVAL_NETWORK:-viio_viio_net}
