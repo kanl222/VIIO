@@ -19,31 +19,9 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from apiagent.prompts import CODING_SYSTEM_PROMPT, DELEGATION_PROMPT
 from apiagent.services.agent_service import AgentService
 from apiagent.services.conversation_route import ConversationRoute
-from apiagent.services.request_policy import DOMAIN, FOLLOWUP, NO_CODE, calculate, request_mode
+from apiagent.services.request_policy import DOMAIN, FOLLOWUP, NO_CODE, calculate, request_mode, is_coding_request
 
 logger = logging.getLogger(__name__)
-
-# Keep ordinary domain questions (e.g. "код рецепта") in the knowledge agent.
-# Explicit technical requests must not depend on a small model emitting a tool call.
-CODING_INTENT = re.compile(
-    r"\b(?:sql|soap|rest|graphql|wsdl|git|python|javascript|typescript|csharp|java|"
-    r"pytest|npm|docker|langgraph|fastapi|react|api)\b|"
-    r"```|Traceback \(most recent call last\)|"
-    r"\b[\w/-]+\.(?:py|tsx?|jsx?|cs|sql|go|rs|java|wsdl)\b|"
-    r"исходник|исходн[а-я]*\s+код|программирован|рефактор|отладк|"
-    r"(?:напиш|напис|созда|исправ|перепиш|перепис|проверь|провер|измен|добав)[\s\S]{0,80}"
-    r"(?:\bкод\b|функци|метод|юнит.?тест|unit.?test)|"
-    r"(?:оптимиз|ускор)[\s\S]{0,60}(?:\bкод\b|функци|алгоритм)|"
-    r"(?:ошибк|баг)[\s\S]{0,50}(?:\bкод[ае]?\b|сборк|компиля|функци)",
-    re.IGNORECASE,
-)
-
-
-def is_coding_request(message: str) -> bool:
-    if NO_CODE.search(message):
-        return False
-    return bool(CODING_INTENT.search(message))
-
 
 def needs_knowledge(message: str) -> bool:
     return bool(DOMAIN.search(message))

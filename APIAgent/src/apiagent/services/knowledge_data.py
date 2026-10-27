@@ -1,5 +1,7 @@
 """Canonical searchable text and explicitly approved external snapshots."""
 import re
+import math
+from bisect import bisect_left
 import uuid
 
 from psycopg.rows import dict_row
@@ -38,9 +40,26 @@ def tsquery(query):
     return ' | '.join(term + ':*' for term in query_terms(query))
 
 
-def excerpt(content, query, limit=2400):
-    positions = [content.lower().find(term) for term in query_terms(query)]
-    start = max(0, min((pos for pos in positions if pos >= 0), default=0) - 300)
+def excerpt(content, query, limit=4000):
+    """Choose a bounded window covering distinctive terms, not the first match.
+
+    A small Cyrillic prefix tolerance matches список/списка and отчёт/отчета.
+    It changes only excerpt selection; PostgreSQL still ranks/access-checks docs.
+    """
+    text = content.casefold().replace('ё', 'е')
+    terms = [term.casefold().replace('ё', 'е') for term in query_terms(query)]
+    terms = list(dict.fromkeys(term[:-2] if len(term) > 5 and re.fullmatch('[а-я]+', term) else term for term in terms))
+    positions = [list(match.start() for match in re.finditer(re.escape(term), text)) for term in terms]
+    weights = [1 / math.sqrt(len(found)) if found else 0 for found in positions]
+    # Bound candidate count even for very repetitive source documents.
+    starts = {0}
+    for found in positions:
+        stride = max(1, len(found) // 100)
+        starts.update(max(0, position - 300) for position in found[::stride][:100])
+    def score(start):
+        return sum(weight for weight, found in zip(weights, positions)
+                   if bisect_left(found, start) < bisect_left(found, start + limit))
+    start = max(sorted(starts), key=score)
     return content[start:start + limit], content[:start].count('\n') + 1
 
 

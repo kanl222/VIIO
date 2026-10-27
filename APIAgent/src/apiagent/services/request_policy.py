@@ -21,6 +21,23 @@ FOLLOWUP = re.compile(
     r"объясни\s+(?:этот|предыдущий)|а\s+(?:если|теперь))\b", re.I,
 )
 
+# Shared by the supervisor fallback and the explicit coder router.
+CODING_INTENT = re.compile(
+    r"\b(?:sql|soap|rest|graphql|wsdl|git|python|javascript|typescript|csharp|java|"
+    r"pytest|npm|docker|langgraph|fastapi|react|api)\b|"
+    r"```|Traceback \(most recent call last\)|"
+    r"\b[\w/-]+\.(?:py|tsx?|jsx?|cs|sql|go|rs|java|wsdl)\b|"
+    r"исходник|исходн[а-я]*\s+код|программирован|рефактор|отладк|"
+    r"(?:напиш|напис|созда|исправ|перепиш|перепис|проверь|провер|измен|добав)[\s\S]{0,80}"
+    r"(?:\bкод\b|функци|метод|юнит.?тест|unit.?test)|"
+    r"(?:оптимиз|ускор)[\s\S]{0,60}(?:\bкод\b|функци|алгоритм)|"
+    r"(?:ошибк|баг)[\s\S]{0,50}(?:\bкод[ае]?\b|сборк|компиля|функци)", re.I,
+)
+
+
+def is_coding_request(message: str) -> bool:
+    return not NO_CODE.search(message) and bool(CODING_INTENT.search(message))
+
 
 def request_mode(message: str) -> str:
     """Default to retrieval for ambiguous business/domain questions."""

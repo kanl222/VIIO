@@ -21,7 +21,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.runtime import Runtime
 
 from apiagent.prompts import DEFAULT_SYSTEM_PROMPT, GENERAL_SYSTEM_PROMPT, REWRITE_SYSTEM_PROMPT
-from apiagent.services.request_policy import calculate, request_mode
+from apiagent.services.request_policy import calculate, request_mode, is_coding_request
 from apiagent.services.answer_sources import clean_answer, readable_reference, sources_from_reference, turn_provenance, cited_sources
 from apiagent.services.dialogue_summary import compact_dialogue
 
@@ -197,7 +197,6 @@ def build_agent_graph(
             response = await (llm if mode != "knowledge" or (model_first_tools and len(calls) >= 3) else llm_with_tools).ainvoke(messages)
             if model_first_tools and not response.tool_calls and not calls:
                 # Small models occasionally answer without a required tool. One audited fallback.
-                from apiagent.services.coding_agent import is_coding_request
                 names = {tool.name for tool in active_tools}
                 if "coding_agent" in names and is_coding_request(question):
                     response = AIMessage(content="", tool_calls=[{"name": "coding_agent", "args": {"task": question}, "id": "fallback-code-" + uuid.uuid4().hex}])

@@ -9,6 +9,7 @@ from apiagent.services.agent_service import AgentService
 from apiagent.services.answer_sources import cited_sources
 from apiagent.services.database_agent import DatabaseAgentService, is_database_request
 from apiagent.services.graph_builder import build_agent_graph
+from apiagent.services.knowledge_data import excerpt
 from apiagent.tools.search_tool import create_knowledge_search_tool
 from test_required_retrieval import NoToolCallsModel
 from test_database_agent import tool_fixture
@@ -92,3 +93,10 @@ async def test_natural_database_question_model_selects_read_tool_without_persist
 @pytest.mark.parametrize('question', ['Напиши SQL SELECT из products', 'Что такое PostgreSQL?', 'Как получить список отчётов в ИСЛО?'])
 def test_database_router_does_not_capture_code_theory_or_documents(question):
     assert not is_database_request(question)
+
+
+def test_excerpt_keeps_list_method_instead_of_only_intro_and_single_lookup():
+    text = 'Общее описание отчётов\n' + 'обзор\n' * 900 + 'Источник списка доступных отчётов: getTreeForUser()\n' + 'прочее\n' * 900
+    selected, line = excerpt(text, 'Как получить список доступных отчётов?', limit=600)
+    assert 'getTreeForUser()' in selected and len(selected) <= 600
+    assert line > 1
