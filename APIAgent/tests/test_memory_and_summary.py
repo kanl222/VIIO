@@ -54,6 +54,18 @@ async def test_summary_scope_change_never_reuses_privileged_summary():
 
 
 @pytest.mark.asyncio
+async def test_few_large_turns_summarize_before_trimming_user_goal():
+    llm = AsyncMock()
+    llm.ainvoke.return_value = AIMessage(content='Goal preserved')
+    messages = [HumanMessage(content='Project goal: invoices'), AIMessage(content='x' * 6000),
+                HumanMessage(content='Second step'), AIMessage(content='Acknowledged'), HumanMessage(content='Continue')]
+    prepared, update = await compact_dialogue(messages, {}, {'history_scope': 'owner'}, llm, 24, 4000)
+    assert update['summary_upto'] == 2
+    assert 'Goal preserved' in prepared[0].content
+    assert 'Project goal: invoices' in str(llm.ainvoke.call_args)
+
+
+@pytest.mark.asyncio
 async def test_memory_commands_are_explicit_and_untrusted_client_notes_are_removed():
     agent, facts = AsyncMock(), AsyncMock()
     facts.remember.return_value = 'id'

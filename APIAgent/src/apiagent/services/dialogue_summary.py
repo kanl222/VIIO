@@ -12,8 +12,11 @@ async def compact_dialogue(messages, state, boundary, llm, threshold=24, max_cha
     upto = state.get('summary_upto', 0) if same_scope else 0
     human_positions = [i for i, msg in enumerate(messages) if isinstance(msg, HumanMessage)]
     cut = human_positions[-6] if len(human_positions) > 6 else 0
+    over_budget = sum(len(str(msg.content)) for msg in messages[upto:-1]) > max_chars
+    if over_budget and len(human_positions) > 2:
+        cut = max(cut, human_positions[-2])
     update = {'dialogue_summary': summary, 'summary_upto': upto}
-    if threshold and len(messages) - upto > threshold and cut > upto:
+    if threshold and (len(messages) - upto > threshold or over_budget) and cut > upto:
         transcript = '\n'.join(f'{msg.type}: {str(msg.content)[:2000]}' for msg in messages[upto:cut]
             if isinstance(msg, (HumanMessage, AIMessage)) and not getattr(msg, 'tool_calls', None))[-24000:]
         try:
