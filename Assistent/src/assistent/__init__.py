@@ -14,7 +14,6 @@ from assistent.services.documents_client import create_remote_search_tool
 from assistent.services.agent_service import AgentService
 from assistent.services.database_agent import DatabaseAgentService
 from assistent.services.personal_memory import PersonalFacts,MemoryAgent
-from assistent.services.public_consultant import ConsultantProxy
 from assistent.services.coding_agent import CODING_SYSTEM_PROMPT,DELEGATION_PROMPT,CodingAgentService,MultiAgentService,create_coding_delegation_tool
 from assistent.services.graph_builder import DEFAULT_SYSTEM_PROMPT,build_agent_graph
 from assistent.tools.postgres_tool import create_postgres_readonly_tool
@@ -97,10 +96,6 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
         )
         if catalog_service:
             agent_service = MemoryAgent(agent_service, PersonalFacts(catalog_service))
-        if app_settings.consultant_enabled:
-            if not app_settings.consultant_api_key or len(app_settings.consultant_api_key) < 32 or app_settings.consultant_api_key == app_settings.internal_api_key:
-                raise ValueError('Для внешнего консультанта нужны каталог и отдельный CONSULTANT_API_KEY длиной от 32 символов.')
-            consultant = ConsultantProxy(app_settings.consultant_url, app_settings.consultant_api_key)
     app=FastAPI(title='Assistent',lifespan=lifespan)
     app.state.settings=app_settings
     app.state.agent_service=agent_service
