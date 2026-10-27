@@ -1,4 +1,4 @@
-"""An independent unbound model client; no tools or internal application imports."""
+"""Independent model client; agent binds only the permitted knowledge search tool."""
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 

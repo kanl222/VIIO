@@ -595,8 +595,12 @@ async def test_public_api_never_uses_internal_public_documents_or_client_roles(p
     class Model:
         def __init__(self):
             self.calls = []
+        def bind_tools(self, tools):
+            return self
         async def ainvoke(self, messages):
-            self.calls.append(messages)
+            self.calls.append(list(messages))
+            if messages[-1].type == 'human':
+                return AIMessage(content='', tool_calls=[{'name': 'search_published_documents', 'args': {'query': 'Support'}, 'id': 'search'}])
             return AIMessage(content='Support is available Monday.')
     model = Model()
     consultant = PublicConsultant(ingestion.data, model)
@@ -609,7 +613,7 @@ async def test_public_api_never_uses_internal_public_documents_or_client_roles(p
         assert (await external.post(path, json={'message': 'Support'}, headers={'X-Internal-Token': 'internal'})).status_code == 401
         assert (await external.post(path, json={'message': 'Support', 'user_context': {'role': 'admin'}}, headers={'X-Consultant-Key': 'k' * 40})).status_code == 422
         response = await external.post(path, json={'message': 'Support'}, headers={'X-Consultant-Key': 'k' * 40})
-        assert response.status_code == 200 and not response.json()['sources'] and not model.calls
+        assert response.status_code == 200 and not response.json()['sources'] and len(model.calls) == 2
         published = await client.post('/api/v1/documents/publication/' + root.document_id, params={'publisher_id': 'admin'},
             json={'title': 'Public support', 'content': 'Support is available Monday.'})
         assert published.status_code == 200
@@ -619,7 +623,7 @@ async def test_public_api_never_uses_internal_public_documents_or_client_roles(p
         assert set(response.json()['sources'][0]) == {'publication_id', 'title'}
         await client.delete('/api/v1/documents/publication/' + root.document_id)
         response = await external.post(path, json={'message': 'Support'}, headers={'X-Consultant-Key': 'k' * 40})
-        assert not response.json()['sources'] and len(model.calls) == 1
+        assert not response.json()['sources'] and len(model.calls) == 6
 
 
 async def test_publication_is_withdrawn_on_new_version_and_during_generation(pipeline):
@@ -629,7 +633,11 @@ async def test_publication_is_withdrawn_on_new_version_and_during_generation(pip
     root = await ingestion.index_text(DocumentCreateRequest(title='Support', content='Internal support'))
     await ingestion.data.publish(root.document_id, 'Support', 'Support on Monday', 'admin')
     class WithdrawingModel:
+        def bind_tools(self, tools):
+            return self
         async def ainvoke(self, messages):
+            if messages[-1].type == 'human':
+                return AIMessage(content='', tool_calls=[{'name': 'search_published_documents', 'args': {'query': 'Support'}, 'id': 'search'}])
             await ingestion.data.withdraw(root.document_id)
             return AIMessage(content='Stale public answer')
     result = await PublicConsultant(ingestion.data, WithdrawingModel()).chat('Support')
@@ -655,8 +663,12 @@ async def test_standalone_consultant_http_gateway_preserves_publication_boundary
         Settings(internal_api_key='internal', consultant_api_key='a' * 40, consultant_source_key='s' * 40),
         catalog_service=catalog, knowledge_data=ingestion.data))
     class Model:
+        def bind_tools(self, tools):
+            return self
         async def ainvoke(self, messages):
             assert 'PRIVATE_INTERNAL_BODY' not in str(messages)
+            if messages[-1].type == 'human':
+                return AIMessage(content='', tool_calls=[{'name': 'search_published_documents', 'args': {'query': 'Support'}, 'id': 'search'}])
             return AIMessage(content='Support on Monday')
     async with httpx.AsyncClient(base_url='http://gateway', transport=httpx.ASGITransport(gateway), headers={'X-Publication-Key': 's' * 40}) as source_client:
         source = HttpPublicationSource(source_client)
