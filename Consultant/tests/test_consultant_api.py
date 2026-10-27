@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from viio_consultant import create_app
 from viio_consultant.config import ConsultantSettings
 from viio_consultant.source import HttpPublicationSource
+from viio_consultant.agent import clean_reply
 
 
 def settings():
@@ -39,6 +40,14 @@ def test_enabled_service_requires_distinct_keys():
         ConsultantSettings(enabled=True, api_key='short', source_key='short')
     with pytest.raises(ValueError):
         ConsultantSettings(enabled=True, api_key='a' * 40, source_key='a' * 40)
+
+
+def test_model_source_markup_is_replaced_with_published_title():
+    docs = [{'title': 'Support & hours'}]
+    result = clean_reply('Open weekdays. Source: <material title="Support &amp; hours">\n</material>', docs)
+    assert result == 'Open weekdays. Source: Support & hours'
+    assert 'Invented private source' not in clean_reply('<material title="Invented private source">', docs)
+    assert clean_reply([{'type': 'text', 'text': 'Readable answer'}], docs) == 'Readable answer'
 
 
 @pytest.mark.asyncio

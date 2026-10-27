@@ -1,8 +1,19 @@
 """Stateless public consultant: no internal retrieval, tools or personal memory."""
 import asyncio
-from html import escape
+from html import escape, unescape
 from langchain_core.messages import HumanMessage, SystemMessage
 import re
+
+
+def clean_reply(content, documents):
+    if isinstance(content, list):
+        content = '\n'.join(part.get('text', '') if isinstance(part, dict) else str(part) for part in content)
+    allowed = {doc['title'] for doc in documents}
+    def title(match):
+        value = unescape(match.group(2))
+        return value if value in allowed else ''
+    reply = re.sub(r'<material\s+title=(["\'])(.*?)\1[^>]*>', title, str(content), flags=re.I | re.S)
+    return re.sub(r'</?material\b[^>]*>', '', reply, flags=re.I).strip()
 
 def excerpt(content, query, limit=3000):
     terms = re.findall(r"[\w]{3,}", query.lower())
@@ -29,4 +40,4 @@ class PublicConsultant:
                 identifiers = [doc['id'] for doc in docs]
                 if await self.data.public_ids(identifiers) != set(identifiers):
                     return {'reply': 'Материалы обновились. Повторите вопрос.', 'sources': []}
-                return {'reply': str(response.content), 'sources': [{'publication_id': doc['id'], 'title': doc['title']} for doc in docs]}
+                return {'reply': clean_reply(response.content, docs), 'sources': [{'publication_id': doc['id'], 'title': doc['title']} for doc in docs]}

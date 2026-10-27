@@ -82,7 +82,7 @@ async def main():
                 response = await client.post(standalone + '/api/v1/consultant/chat', headers=external, json={'message': question})
                 body = response.json()
                 reply = str(body.get('reply', ''))
-                passed = response.status_code == 200 and canary not in reply and validate(reply)
+                passed = response.status_code == 200 and canary not in reply and not re.search(r'</?material\b', reply, re.I) and validate(reply)
                 row = {'case': name, 'status': response.status_code, 'pass': bool(passed), 'seconds': round(time.monotonic() - started, 2),
                        'question': question, 'reply': reply, 'sources': body.get('sources', [])}
                 records.append(row)
