@@ -17,7 +17,8 @@ function stringList(value: unknown): value is string[] {
 export function createAdminRouter(
   poolProvider: () => pg.Pool = getPool,
   fetchFn: typeof fetch = fetch,
-  agentUrl: () => string = () => process.env.AGENTAI_URL || 'http://127.0.0.1:8000'
+  agentUrl: () => string = () => process.env.ASSISTENT_URL || process.env.AGENTAI_URL || 'http://127.0.0.1:8000',
+  documentsUrl: () => string = () => process.env.DOCUMENTS_URL || agentUrl()
 ): Router {
   const router = Router();
   router.use(createAuthMiddleware(poolProvider));
@@ -132,7 +133,7 @@ export function createAdminRouter(
       return;
     }
     try {
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/extract-pdf`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/extract-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/pdf', 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
         body: new Uint8Array(req.body),
@@ -165,7 +166,7 @@ export function createAdminRouter(
       return;
     }
     try {
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
         signal: AbortSignal.timeout(120000),
@@ -191,7 +192,7 @@ export function createAdminRouter(
     if (status) query.set('status', status);
 
     try {
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/catalog?${query.toString()}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/catalog?${query.toString()}`, {
         headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
         signal: AbortSignal.timeout(10000),
       });
@@ -215,7 +216,7 @@ export function createAdminRouter(
     try {
       const userRole = req.user?.role || 'employee';
       const downloadContext = new URLSearchParams({ user_role: userRole, user_id: String(req.user?.id || ''), departments: (req.user?.departments || []).join(',') });
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/download/${encodeURIComponent(docIdParam)}?${downloadContext}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/download/${encodeURIComponent(docIdParam)}?${downloadContext}`, {
         headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
         signal: AbortSignal.timeout(60000),
       });
@@ -261,7 +262,7 @@ export function createAdminRouter(
     }
 
     try {
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-upload?${query.toString()}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-upload?${query.toString()}`, {
         method: 'POST',
         headers: {
           'Content-Type': contentType,
@@ -285,7 +286,7 @@ export function createAdminRouter(
   router.get('/documents/bulk-status', async (req, res) => {
     const taskIds = typeof req.query.task_ids === 'string' ? req.query.task_ids : '';
     try {
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-status?task_ids=${encodeURIComponent(taskIds)}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-status?task_ids=${encodeURIComponent(taskIds)}`, {
         headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
         signal: AbortSignal.timeout(10000),
       });
@@ -306,7 +307,7 @@ export function createAdminRouter(
       return;
     }
     try {
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-retry/${taskId}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-retry/${taskId}`, {
         method: 'POST',
         headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
         signal: AbortSignal.timeout(10000),
@@ -319,7 +320,7 @@ export function createAdminRouter(
     const identifier = String(req.params.id);
     if (!docId.test(identifier)) { res.status(400).json({ detail: 'Некорректный документ.' }); return; }
     try {
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/versions/${identifier}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/versions/${identifier}`, {
         headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token' },
         signal: AbortSignal.timeout(10000),
       });
@@ -346,7 +347,7 @@ export function createAdminRouter(
     try {
       const query = action === 'review' && method === 'POST'
         ? `?reviewer_id=${encodeURIComponent(String(req.user!.id))}` : '';
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-${action}/${taskId}${query}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/bulk-${action}/${taskId}${query}`, {
         method, body,
         headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token', 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(10000),
@@ -370,7 +371,7 @@ export function createAdminRouter(
     }
     try {
       const query = req.method === 'POST' ? `?publisher_id=${encodeURIComponent(String(req.user!.id))}` : '';
-      const response = await fetchFn(`${agentUrl().replace(/\/+$/, '')}/api/v1/documents/publication/${identifier}${query}`, {
+      const response = await fetchFn(`${documentsUrl().replace(/\/+$/, '')}/api/v1/documents/publication/${identifier}${query}`, {
         method: req.method, body,
         headers: { 'X-Internal-Token': process.env.INTERNAL_API_KEY || 'viio-internal-secret-token', 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(10000),

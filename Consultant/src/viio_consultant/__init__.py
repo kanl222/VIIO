@@ -1,4 +1,4 @@
-"""Standalone public API, intentionally independent of the APIAgent package."""
+"""Standalone public API, intentionally independent of the assistent package."""
 import logging
 from contextlib import asynccontextmanager
 from hmac import compare_digest

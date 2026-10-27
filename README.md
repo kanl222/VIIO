@@ -41,9 +41,15 @@ VIIO — платформа с веб-чатом, поиском по докум
 flowchart TD
     Browser[Браузер] -->|HTTP :3000| WebChat[WebChat · React + Express]
     WebChat -->|Пользователи и диалоги| UserDB[(PostgreSQL · user_db)]
-    WebChat -->|Запрос и контекст пользователя| API[APIAgent · FastAPI + LangGraph]
+    WebChat -->|Запрос и контекст пользователя| API[assistent · FastAPI + LangGraph]
     API -->|Состояние графа| AgentDB[(PostgreSQL · agent_db)]
-    API -->|Поиск с проверкой прав| Qdrant[(Qdrant · база знаний)]
+    API -->|Поиск с проверкой прав| Documents[Documents API · :8002]
+    Consultant[Агент-консультант · :8001] -->|Только опубликованное| Documents
+    WebChat -->|Загрузка, каталог, скачивание| Documents
+    Documents --> Qdrant[(Qdrant · база знаний)]
+    Documents --> Worker[Document Worker · очередь и индексация]
+    Worker --> Qdrant
+    Worker --> Files[(Оригиналы документов)]
     API --> Models[LM Studio / Ollama]
     Models --> Chat[Модель консультанта]
     Models --> Coder[Модель coder]
@@ -53,14 +59,19 @@ flowchart TD
 | Сервис | Стек | Ответственность |
 | --- | --- | --- |
 | `webchat` | React 18, TypeScript, Vite, Tailwind CSS, Express; Node.js 24 в Docker | Интерфейс, пользовательские сессии, диалоги, административные маршруты и передача запросов агенту |
-| `apiagent` | Python 3.12, FastAPI, LangChain, LangGraph | Маршрутизация задач, поиск знаний, обращение к моделям и индексация документов |
+| `assistent` | Python 3.12, FastAPI, LangChain, LangGraph | Основной агент, coder, диалоги и личные факты; поиск через Documents API |
+| `consultant` | FastAPI, LangChain | Самостоятельный агент-консультант; инструмент поиска разрешённых публикаций |
+| `documents` | FastAPI, PostgreSQL, Qdrant | Общий каталог, права, версии, публикации, загрузка, скачивание и поиск |
+| `document-worker` | Python, очередь PostgreSQL | Обработка файлов, PDF/OCR, индексация и синхронизация публикаций в отдельном процессе |
 | `postgres` | PostgreSQL 16 | Две базы: `user_db` для веб-чата и `agent_db` для состояния LangGraph |
 | `qdrant` | Qdrant | Хранение поисковых фрагментов и векторов, поиск с фильтрацией доступа |
+
+Прежний каталог и Python-пакет `APIAgent/apiagent` переименованы в `assistent/assistent`, контейнер — `viio_assistent`. Документы и worker используют общую библиотеку доменной логики из `assistent/src`, но запускаются отдельным образом и процессами; модели диалога/coder в них не создаются. У основного агента нет тома с оригиналами и обработчиков очереди. [Границы сервисов и запуск](Documents/README.md).
 
 ### Путь запроса
 
 1. WebChat проверяет сессию и принадлежность диалога пользователю.
-2. APIAgent получает сообщение и серверный контекст пользователя: идентификатор, роль и подразделения.
+2. assistent получает сообщение и серверный контекст пользователя: идентификатор, роль и подразделения.
 3. Основная модель выбирает поиск и делегирование coder. Если она пропустила обязательный поиск по внутреннему вопросу или передачу задачи программирования, сервер выполняет запасной вызов; журнал отличает его от выбора модели. Приветствия, поддерживаемые вычисления и преобразование текста обходят ненужный поиск. Для coder поиск подготавливается сервером, когда задаче нужны проектные сведения.
 4. Модель получает доступные фрагменты и формирует ответ. WebChat сохраняет сообщения; LangGraph сохраняет состояние через `AsyncPostgresSaver`.
 
@@ -110,8 +121,8 @@ docker compose ps
 | --- | --- |
 | Веб-чат | [localhost:3000](http://localhost:3000) |
 | Состояние WebChat и подключения к БД | [localhost:3000/health](http://localhost:3000/health) |
-| Документация APIAgent | [localhost:8000/docs](http://localhost:8000/docs) |
-| Состояние APIAgent | [localhost:8000/health](http://localhost:8000/health) |
+| Документация assistent | [localhost:8000/docs](http://localhost:8000/docs) |
+| Состояние assistent | [localhost:8000/health](http://localhost:8000/health) |
 | Панель Qdrant | [localhost:6333/dashboard](http://localhost:6333/dashboard) |
 | PostgreSQL | `localhost:5432` |
 
@@ -120,7 +131,7 @@ docker compose ps
 ### Остановка и логи
 
 ```text
-docker compose logs --tail 100 apiagent webchat
+docker compose logs --tail 100 assistent webchat
 docker compose down
 ```
 
@@ -153,7 +164,7 @@ docker compose down
 | Название | До 255 символов |
 | Варианты доступа | Сотрудникам, выбранным подразделениям, администраторам или всем |
 
-APIAgent разбивает текст на фрагменты, вычисляет эмбеддинги и сохраняет их в Qdrant. При поиске применяются права из метаданных: `is_public`, `allowed_roles`, `allowed_departments`, `owner_id`. Достаточно разрешения по одному основанию; администратор и автор сохраняют доступ.
+assistent разбивает текст на фрагменты, вычисляет эмбеддинги и сохраняет их в Qdrant. При поиске применяются права из метаданных: `is_public`, `allowed_roles`, `allowed_departments`, `owner_id`. Достаточно разрешения по одному основанию; администратор и автор сохраняют доступ.
 
 Для внешних пользователей служит отдельная коллекция `knowledge_public`: в ней находятся только явно опубликованные администратором снимки. Основной агент ищет и в ней, и в доступных внутренних материалах; консультант — только в публичной. Флаг `is_public` сам по себе не включает внешнюю публикацию. [Устройство индексов, синхронизация и проверки](docs/public-qdrant-2026-10-27.md).
 
@@ -196,16 +207,16 @@ Coder получает задачу и подготовленный контек
 | Межсервисный доступ | `INTERNAL_API_KEY` |
 | Тестовая PostgreSQL | `PGSQL_ENABLED`, `PGSQL_HOST`, `PGSQL_PORT`, `PGSQL_DATABASE`, `PGSQL_USER`, `PGSQL_PASSWORD`; [подключение и команды](docs/postgresql-tool.md) |
 
-Для сервера моделей на хосте контейнер APIAgent использует `host.docker.internal`. Корневой Compose содержит соответствующее сопоставление для Linux. Сервер моделей должен слушать адрес, доступный контейнерам.
+Для сервера моделей на хосте контейнер assistent использует `host.docker.internal`. Корневой Compose содержит соответствующее сопоставление для Linux. Сервер моделей должен слушать адрес, доступный контейнерам.
 
-WebChat добавляет `X-Internal-Token` к защищённым запросам APIAgent. Этот токен предназначен для серверного обмена, а не для входа пользователя. При прямой интеграции его требуют `POST /api/v1/chat` и `POST /api/v1/documents`; схемы и примеры — в [APIAgent/README.md](APIAgent/README.md).
+WebChat добавляет `X-Internal-Token` к защищённым запросам assistent. Этот токен предназначен для серверного обмена, а не для входа пользователя. При прямой интеграции его требуют `POST /api/v1/chat` и `POST /api/v1/documents`; схемы и примеры — в [assistent/README.md](assistent/README.md).
 
 ## Структура проекта
 
 ```text
 VIIO/
-├── APIAgent/
-│   ├── src/apiagent/
+├── assistent/
+│   ├── src/assistent/
 │   │   ├── models/          # Фабрики моделей: chat, coder, embeddings
 │   │   ├── services/        # Граф агента, маршрутизация, документы
 │   │   ├── tools/           # Поиск в базе знаний
@@ -240,13 +251,13 @@ npm start
 ```
 
 ```bash
-# APIAgent/
+# assistent/
 uv sync
 uv run pytest tests/
-uv run uvicorn apiagent:create_app --factory --reload --port 8000
+uv run uvicorn assistent:create_app --factory --reload --port 8000
 ```
 
-Тесты и сборка проверяют приложение; фактическое качество ответов локальной модели и корректность загруженных знаний оцениваются отдельно. Инструкции компонентов: [WebChat](WebChat/README.md) и [APIAgent](APIAgent/README.md).
+Тесты и сборка проверяют приложение; фактическое качество ответов локальной модели и корректность загруженных знаний оцениваются отдельно. Инструкции компонентов: [WebChat](WebChat/README.md) и [assistent](assistent/README.md).
 
 ## Текущие ограничения
 
@@ -267,7 +278,7 @@ uv run uvicorn apiagent:create_app --factory --reload --port 8000
 | [Инструмент PostgreSQL](docs/postgresql-tool.md) | Настройки тестовой БД, профиль Docker, роли, SELECT и отсутствие сохранения результатов |
 | [Обработка запросов](docs/request-performance.md) | Поиск без лишних обращений, лимит контекста, параллельность coder и 140 тестов |
 | [WebChat](WebChat/README.md) | Запуск интерфейса и сервера, маршруты, сборка и проверки |
-| [APIAgent](APIAgent/README.md) | Устройство сервиса, локальный запуск и HTTP API |
+| [assistent](assistent/README.md) | Устройство сервиса, локальный запуск и HTTP API |
 | [Административный интерфейс](docs/admin-ui.md) | Возможности, правила доступа и результаты проверки интерфейса |
 | [Оформление интерфейса](DESIGN.md) | Цвета, компоненты и адаптивное поведение |
 | [Оценка системы · 26.10.2026](docs/system-evaluation-2026-10-26.md) | Результаты проверки системы на указанную дату |

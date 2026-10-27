@@ -12,7 +12,8 @@ export function createChatRouter(
   poolProvider: () => pg.Pool = getPool,
   authMw?: any,
   fetchFn: typeof fetch = fetch,
-  agentUrlProvider: () => string = () => process.env.AGENTAI_URL || 'http://127.0.0.1:8000'
+  agentUrlProvider: () => string = () => process.env.ASSISTENT_URL || process.env.AGENTAI_URL || 'http://127.0.0.1:8000',
+  documentsUrlProvider: () => string = () => process.env.DOCUMENTS_URL || agentUrlProvider()
 ): Router {
   const router = Router();
   const middleware = authMw || createAuthMiddleware(poolProvider);
@@ -71,7 +72,7 @@ export function createChatRouter(
           JSON.stringify(databaseRequest ? [] : cleanAttachments)]
       );
 
-      // 3. Вызываем сервис диалогового агента APIAgent
+      // 3. Вызываем сервис диалогового агента assistent
       const agentBaseUrl = agentUrlProvider().replace(/\/+$/, '');
       const agentChatUrl = `${agentBaseUrl}/api/v1/chat`;
       const internalApiKey = process.env.INTERNAL_API_KEY || 'viio-internal-secret-token';
@@ -102,9 +103,9 @@ export function createChatRouter(
           signal: AbortSignal.timeout(120_000),
         });
       } catch (networkErr: any) {
-        console.error('[Chat] Network error connecting to APIAgent:', networkErr.message);
+        console.error('[Chat] Network error connecting to assistent:', networkErr.message);
         res.status(502).json({
-          detail: 'Сервис диалогового агента APIAgent недоступен. Попробуйте позже.',
+          detail: 'Сервис диалогового агента assistent недоступен. Попробуйте позже.',
         });
         return;
       }
@@ -169,7 +170,7 @@ export function createChatRouter(
     const userRole = req.user?.role || 'employee';
       const downloadContext = new URLSearchParams({ user_role: userRole, user_id: String(req.user?.id || ''), departments: (req.user?.departments || []).join(',') });
     const agentBaseUrl = agentUrlProvider().replace(/\/+$/, '');
-    const downloadUrl = `${agentBaseUrl}/api/v1/documents/download/${encodeURIComponent(docId)}?${downloadContext}`;
+    const downloadUrl = `${documentsUrlProvider().replace(/\/+$/, '')}/api/v1/documents/download/${encodeURIComponent(docId)}?${downloadContext}`;
     const internalApiKey = process.env.INTERNAL_API_KEY || 'viio-internal-secret-token';
 
     try {

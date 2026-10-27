@@ -54,7 +54,7 @@ export function createApp(options?: AppOptions): express.Express {
   // 4. API маршруты
   app.use('/api/admin', createAdminRouter(
     () => options?.pool || getPool(), options?.fetchFn,
-    () => options?.agentUrl || process.env.AGENTAI_URL || 'http://127.0.0.1:8000'
+    () => options?.agentUrl || process.env.ASSISTENT_URL || process.env.AGENTAI_URL || 'http://127.0.0.1:8000'
   ));
   if (options?.pool) {
     const poolProvider = () => options.pool!;
@@ -65,7 +65,7 @@ export function createApp(options?: AppOptions): express.Express {
       poolProvider,
       authMw,
       options.fetchFn,
-      () => options.agentUrl || process.env.AGENTAI_URL || 'http://127.0.0.1:8000'
+      () => options.agentUrl || process.env.ASSISTENT_URL || process.env.AGENTAI_URL || 'http://127.0.0.1:8000'
     ));
   } else {
     app.use('/api/auth', authRoutes);

@@ -697,7 +697,7 @@ test('HTTP API: Conversations CRUD and cascading messages', async () => {
   }
 });
 
-test('HTTP API: Chat endpoint invokes APIAgent and saves messages', async () => {
+test('HTTP API: Chat endpoint invokes assistent and saves messages', async () => {
   const pool = new MockPool();
 
   const mockFetch = async (_url, opts) => {
@@ -772,7 +772,7 @@ test('HTTP API: Chat endpoint invokes APIAgent and saves messages', async () => 
   }
 });
 
-test('HTTP API: Security: Passes X-Internal-Token and user_context to APIAgent', async () => {
+test('HTTP API: Security: Passes X-Internal-Token and user_context to assistent', async () => {
   const pool = new MockPool();
   let capturedHeaders = null;
   let capturedBody = null;
@@ -830,7 +830,7 @@ test('HTTP API: Security: Passes X-Internal-Token and user_context to APIAgent',
     });
     assert.equal(chatRes.status, 200);
 
-    // 4. Проверяем переданные заголовки и тело в APIAgent
+    // 4. Проверяем переданные заголовки и тело в assistent
     assert.ok(capturedHeaders['X-Internal-Token'], 'Должен передаваться заголовок X-Internal-Token');
     assert.equal(capturedBody.user_context.role, 'employee');
     assert.deepEqual(capturedBody.user_context.departments, ['general']);

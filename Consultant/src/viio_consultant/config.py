@@ -8,7 +8,7 @@ class ConsultantSettings(BaseSettings):
     enabled: bool = False
     api_key: str | None = None
     source_key: str | None = None
-    source_url: str = 'http://apiagent:8000'
+    source_url: str = 'http://documents:8000'
     provider: Literal['lmstudio', 'ollama'] = 'lmstudio'
     model: str | None = None
     lmstudio_base_url: str = 'http://host.docker.internal:1234/v1'

@@ -1,0 +1,9 @@
+**
+!assistent/
+!assistent/pyproject.toml
+!assistent/uv.lock
+!assistent/README.md
+!assistent/src/
+!assistent/src/**
+!Documents/
+!Documents/Dockerfile
