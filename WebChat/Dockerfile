@@ -8,6 +8,7 @@ COPY src ./src
 COPY server ./server
 RUN npm run build
 COPY test ./test
+COPY server.mjs session.mjs ./
 RUN npm test
 
 FROM node:24-alpine AS runner
