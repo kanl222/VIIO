@@ -133,9 +133,10 @@ def create_coding_delegation_tool(specialist: CodingAgentService) -> BaseTool:
 class MultiAgentService:
     """Keep the existing chat API; /code bypasses model-dependent delegation."""
 
-    def __init__(self, general: AgentService, coding: CodingAgentService) -> None:
+    def __init__(self, general: AgentService, coding: CodingAgentService, *, model_first: bool = False) -> None:
         self.general = general
         self.coding = coding
+        self.model_first = model_first
         saver = general.checkpointer if isinstance(general.checkpointer, BaseCheckpointSaver) else None
         self.routes = ConversationRoute(saver)
         self._locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
@@ -164,7 +165,7 @@ class MultiAgentService:
                             and not NO_CODE.search(message) and request_mode(message) != "rewrite"
                             and not needs_knowledge(message) and calculate(message) is None
                             and not re.search(r"отч[её]т|письм|сообщени|продаж|отпуск|отдел", message, re.I))
-        if explicit or is_coding_request(message) or continuation:
+        if explicit or continuation or (not self.model_first and is_coding_request(message)):
             if explicit and len(parts) == 1:
                 raise ValueError("После /code укажите задачу для агента кода.")
             thread_id = thread_id or str(uuid.uuid4())

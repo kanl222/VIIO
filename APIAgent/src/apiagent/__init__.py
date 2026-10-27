@@ -235,12 +235,13 @@ def create_app(
                 checkpointer=initial_checkpointer,
                 system_prompt=DEFAULT_SYSTEM_PROMPT + (DELEGATION_PROMPT if coding_service else ""),
                 context_max_chars=app_settings.rag_context_max_chars,
+                model_first_tools=True,
                 summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
                 history_max_chars=app_settings.conversation_history_max_chars,
             )
             agent_service = AgentService(graph=graph)
             if coding_service:
-                agent_service = MultiAgentService(agent_service, coding_service)
+                agent_service = MultiAgentService(agent_service, coding_service, model_first=True)
             agent_service = DatabaseAgentService(
                 agent_service, llm, create_postgres_readonly_tool(app_settings),
                 enabled=app_settings.pgsql_enabled,

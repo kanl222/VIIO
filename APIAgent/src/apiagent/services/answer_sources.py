@@ -62,6 +62,19 @@ class AgentReply(str):
         return instance
 
 
+def cited_sources(text: str, candidates: list[AnswerSource]) -> list[AnswerSource]:
+    """Candidates are not citations; require a title and suppress missing-answer lists.
+
+    This is a conservative attribution filter, not a factual entailment verifier.
+    """
+    prose = re.sub(r"```[\s\S]*?```", "", text)
+    if re.search(r"(?:сведени[яй]|информаци[яи]|данны[ех]|упоминани[яй]).{0,100}(?:отсутству|не найден|нет)|"
+                 r"(?:недостаточно данных|невозможно определить|нет (?:информации|сведений)|не удалось (?:найти|получить))", prose, re.I | re.S):
+        return []
+    normalized = " ".join(prose.casefold().replace("ё", "е").split())
+    return [s for s in candidates if " ".join(s["title"].casefold().replace("ё", "е").split()) in normalized]
+
+
 def turn_provenance(messages):
     """Only current-turn results of server-controlled tools carry provenance."""
     latest = max((i for i, m in enumerate(messages) if m.type == "human"), default=-1)

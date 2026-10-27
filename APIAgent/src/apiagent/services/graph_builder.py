@@ -22,7 +22,7 @@ from langgraph.runtime import Runtime
 
 from apiagent.prompts import DEFAULT_SYSTEM_PROMPT, GENERAL_SYSTEM_PROMPT, REWRITE_SYSTEM_PROMPT
 from apiagent.services.request_policy import calculate, request_mode
-from apiagent.services.answer_sources import clean_answer, readable_reference, sources_from_reference, turn_provenance
+from apiagent.services.answer_sources import clean_answer, readable_reference, sources_from_reference, turn_provenance, cited_sources
 from apiagent.services.dialogue_summary import compact_dialogue
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,7 @@ def build_agent_graph(
     context_max_chars: int = 12000,
     summary_after: int = 0,
     history_max_chars: int = 18000,
+    model_first_tools: bool = False,
 ) -> CompiledStateGraph:
     """Сборка и компиляция StateGraph агента с поддержкой инструментов и сохранением состояния.
 
@@ -170,7 +171,7 @@ def build_agent_graph(
         question = next(str(m.content) for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
         if task_modes and calculate(question) is not None:
             return "calculate"
-        return "prepare_search" if has_search and needs_automatic_search(question) else "agent"
+        return "prepare_search" if not model_first_tools and has_search and needs_automatic_search(question) else "agent"
 
     has_search = any(tool.name == "search_knowledge_base" for tool in active_tools)
 
@@ -179,15 +180,33 @@ def build_agent_graph(
 
         async def agent_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
             history, boundary = history_for_turn(state, runtime)
+            latest = max((i for i, m in enumerate(history) if isinstance(m, HumanMessage)), default=-1)
+            turn = history[latest + 1:]
+            # Delegation output is already the text-only specialist's final answer.
+            delegated = next((m for m in reversed(turn) if isinstance(m, ToolMessage) and m.name == "coding_agent"), None)
+            if model_first_tools and delegated is not None:
+                sources, active = turn_provenance(history)
+                return {**boundary, "messages": [AIMessage(content=str(delegated.content), response_metadata={"sources": sources, "active_specialist": active})]}
             bounded, summary_update = await compact_dialogue(history, state, boundary, llm, summary_after, history_max_chars)
             messages = with_user_notes(messages_with_retrieved_context(bounded, context_max_chars), runtime)
             question = next(str(m.content) for m in reversed(history) if isinstance(m, HumanMessage))
             if not any(isinstance(m, SystemMessage) for m in messages):
                 messages = [SystemMessage(content=prompt_for(question))] + messages
             mode = request_mode(question) if task_modes else "knowledge"
-            response = await (llm if mode != "knowledge" else llm_with_tools).ainvoke(messages)
+            calls = [call for m in turn if isinstance(m, AIMessage) for call in m.tool_calls]
+            response = await (llm if mode != "knowledge" or (model_first_tools and len(calls) >= 3) else llm_with_tools).ainvoke(messages)
+            if model_first_tools and not response.tool_calls and not calls:
+                # Small models occasionally answer without a required tool. One audited fallback.
+                from apiagent.services.coding_agent import is_coding_request
+                names = {tool.name for tool in active_tools}
+                if "coding_agent" in names and is_coding_request(question):
+                    response = AIMessage(content="", tool_calls=[{"name": "coding_agent", "args": {"task": question}, "id": "fallback-code-" + uuid.uuid4().hex}])
+                elif has_search and needs_automatic_search(question):
+                    response = AIMessage(content="", tool_calls=[{"name": "search_knowledge_base", "args": {"query": question}, "id": "knowledge-" + uuid.uuid4().hex}])
             sources, active = turn_provenance(history)
             if isinstance(response.content, str) and not response.tool_calls:
+                if model_first_tools:
+                    sources = cited_sources(response.content, sources)
                 response = response.model_copy(update={"content": clean_answer(response.content, sources),
                                                        "response_metadata": {**response.response_metadata, "sources": sources, "active_specialist": active}})
             return {**boundary, **summary_update, "messages": [response]}
