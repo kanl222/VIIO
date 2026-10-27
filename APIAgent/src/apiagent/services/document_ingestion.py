@@ -46,7 +46,7 @@ class DocumentIngestion:
         identity_fields = [task.owner_id, task.is_public, sorted(task.allowed_roles),
                            sorted(task.allowed_departments), digest]
         if task.kind == 'code':
-            identity_fields.append('code')
+            identity_fields.extend(['code', task.filename])
         if task.reviewed_content is not None:
             identity_fields.append(sha256_of_bytes(task.reviewed_content.encode()))
         identity = json.dumps(identity_fields, ensure_ascii=False)

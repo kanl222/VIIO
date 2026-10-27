@@ -29,6 +29,16 @@ async def main(mode):
                        user=settings.postgres_user, password=settings.postgres_password)
     async with httpx.AsyncClient(base_url='http://127.0.0.1:8000', timeout=150,
                                 headers={'X-Internal-Token': settings.internal_api_key}) as client:
+        if mode != 'cleanup':
+            async with asyncio.timeout(45):
+                while True:
+                    try:
+                        health = await client.get('/health', timeout=2)
+                        if health.status_code == 200:
+                            break
+                    except httpx.TransportError:
+                        pass
+                    await asyncio.sleep(0.25)
         async def ask(message, thread, context):
             response = await client.post('/api/v1/chat', json={'message': message, 'thread_id': thread, 'user_context': context})
             response.raise_for_status()

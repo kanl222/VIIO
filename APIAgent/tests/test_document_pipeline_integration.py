@@ -426,6 +426,18 @@ async def test_code_is_private_even_to_owner_employee_and_has_line_references(pi
     assert publish.status_code == 409
 
 
+async def test_identical_code_in_different_files_keeps_both_source_names(pipeline):
+    client, queue, catalog, _, _, _ = pipeline
+    source = b'def shared_helper():\n    return 1\n'
+    response = await client.post('/api/v1/documents/bulk-upload', files=[
+        ('files', ('first.py', source, 'text/plain')), ('files', ('second.py', source, 'text/plain'))])
+    queue.start()
+    results = await asyncio.gather(*(terminal(queue, item['task_id']) for item in response.json()['tasks']))
+    assert all(item.status == 'ready' for item in results)
+    assert len({item.document_id for item in results}) == 2
+    assert {item.original_filename for item in (await catalog.list_documents()).items} == {'first.py', 'second.py'}
+
+
 async def test_lexical_search_filters_departments_and_archived_versions(pipeline):
     from apiagent.services.enhanced_retrieval import EnhancedRetrieval
     _, _, _, adapter, ingestion, _ = pipeline
