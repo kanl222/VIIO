@@ -30,6 +30,7 @@ from apiagent.services.database_agent import DatabaseAgentService
 from apiagent.services.graph_builder import build_agent_graph, scope_key
 from apiagent.services.agent_service import AgentService
 from apiagent.tools.postgres_tool import PostgresMCPClient
+from apiagent.prompts import DEFAULT_SYSTEM_PROMPT, CODING_SYSTEM_PROMPT, DELEGATION_PROMPT
 
 
 def emit(row):
@@ -132,6 +133,8 @@ async def main(config_path):
     results = []
     emit({'type': 'configuration', 'model': base.lmstudio_model if base.llm_provider == 'lmstudio' else base.ollama_model,
           'coder_model': base.coding_model, 'mode': 'production app factory via ASGI; real KB; temporary real PostgreSQL/MCP',
+          'prompt_sha256': {name:hashlib.sha256(text.encode()).hexdigest() for name,text in
+                            [('main',DEFAULT_SYSTEM_PROMPT),('coder',CODING_SYSTEM_PROMPT),('delegation',DELEGATION_PROMPT)]},
           'production_pgsql_enabled_unchanged': base.pgsql_enabled,
           'tool_inventory': {'main': ['search_knowledge_base', 'coding_agent'], 'database': ['postgresql_readonly'],
                              'database_operations': ['schemas','tables','describe','query','explain']},

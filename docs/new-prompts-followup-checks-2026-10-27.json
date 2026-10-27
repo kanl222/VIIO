@@ -1,0 +1,10 @@
+{
+  "checks": {
+    "controller": true,
+    "literal_mapping": true,
+    "parameter_types": true,
+    "directions": true
+  },
+  "scope": "Required facts only; additional explanations require manual review. Literal AST inspection; no generated code execution.",
+  "mapping_adjudication": "Earlier inverse mapping {1:SSRS,2:ISLO} is semantically valid because the initial prompt did not specify key direction; the followup explicitly fixes keys."
+}
