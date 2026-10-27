@@ -190,10 +190,43 @@ function formatTime(iso: string): string {
   }
 }
 
+/** Hide a redundant terminal bibliography only when every entry is already shown below. */
+export function stripDuplicateSources(text: string, titles: string[]): string {
+  if (!titles.length) return text;
+  const normalize = (value: string) => value.trim()
+    .replace(/^(?:[-*•]|\d+[.)])\s+/, '')
+    .replace(/^(?:материал|документ)\s+/i, '')
+    .replace(/[«»“”"'`*_]/g, '').replace(/[.;:,]+$/, '')
+    .replace(/\s+/g, ' ').toLocaleLowerCase('ru').replace(/ё/g, 'е');
+  const known = new Set(titles.map(normalize));
+  const headings = new Set(['источник', 'источники', 'материалы', 'предоставленные материалы',
+    'подтверждающие материалы', 'документы, подтверждающие ответ']);
+  const lines = text.split('\n');
+  let fence = '';
+  let heading = -1;
+  for (let index = 0; index < lines.length; index++) {
+    const marker = lines[index].match(/^\s*(`{3,}|~{3,})/);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = '';
+      continue;
+    }
+    if (fence) continue;
+    const label = lines[index].trim().replace(/^#{1,6}\s*/, '').replace(/[*_]/g, '').replace(/:\s*$/, '').toLocaleLowerCase('ru');
+    if (headings.has(label)) heading = index;
+  }
+  if (heading < 0) return text;
+  const entries = lines.slice(heading + 1).filter(line => line.trim());
+  if (!entries.length || !entries.every(line => known.has(normalize(line)))) return text;
+  return lines.slice(0, heading).join('\n').trimEnd();
+}
+
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const isUser = message.sender === 'user';
   const isSystem = message.sender === 'system';
-  const sources = !isUser ? (message.attachments || []).filter(item => item.type === 'knowledge_source' && item.name) : [];
+  const sourceEntries = !isUser ? (message.attachments || []).filter(item => item.type === 'knowledge_source' && item.name) : [];
+  const sources = Array.from(new Map(sourceEntries.map(source => [source.data?.document_id || source.name, source])).values());
+  const displayText = stripDuplicateSources(message.text, sources.map(source => source.name || ''));
 
   if (isSystem) {
     return (
@@ -232,7 +265,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             {isUser ? (
               <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>
             ) : (
-              renderMarkdown(message.text)
+              renderMarkdown(displayText)
             )}
           </div>
 

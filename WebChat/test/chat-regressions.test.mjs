@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import ts from 'typescript';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const require = createRequire(import.meta.url);
 function loadSource(path, mocks) {
@@ -17,6 +19,49 @@ function loadSource(path, mocks) {
   });
   return exports;
 }
+
+test('saved assistant messages show one source list rather than model and attachment duplicates', () => {
+  const { ChatMessage } = loadSource('../src/components/ChatMessage.tsx', {});
+  const title = 'Плюсы ИС ЛО по сравнению с ЕЦП';
+  const html = renderToStaticMarkup(React.createElement(ChatMessage, { message: {
+    id: 'source-replay', sender: 'assistant', text: `Ответ по документам.\n\nИсточники:\n- Материал «${title}»`,
+    attachments: [{ type: 'knowledge_source', name: title, data: { document_id: 'doc-one' } }],
+  } }));
+  assert.equal(html.split(title).length - 1, 1);
+  assert(html.includes('Ответ по документам.'));
+  assert(html.includes('Предоставленные материалы'));
+});
+
+test('citation cleanup preserves code and explanations after a source heading', () => {
+  const { stripDuplicateSources } = loadSource('../src/components/ChatMessage.tsx', {});
+  const code = '```text\nИсточники:\n- Материал «Регламент»\n```';
+  assert.equal(stripDuplicateSources(code + '\n\n**Источники:**\n- Материал «Регламент»', ['Регламент']), code);
+  const explanation = 'Источники:\n- Регламент\n\nПрименяется только для филиалов.';
+  assert.equal(stripDuplicateSources(explanation, ['Регламент']), explanation);
+});
+
+test('citation cleanup keeps text without attachments and unknown source titles', () => {
+  const { stripDuplicateSources } = loadSource('../src/components/ChatMessage.tsx', {});
+  const text = 'Ответ.\n\nИсточники:\n- Регламент';
+  assert.equal(stripDuplicateSources(text, []), text);
+  assert.equal(stripDuplicateSources(text, ['Другой документ']), text);
+});
+
+test('formatted quoted source titles are matched while inline attribution is retained', () => {
+  const { stripDuplicateSources } = loadSource('../src/components/ChatMessage.tsx', {});
+  const text = 'В материале «ИС "ЛО"» описаны права.\n\n### Источники:\n1. Материал «ИС "ЛО"»\n2. **Регистр.**';
+  assert.equal(stripDuplicateSources(text, ['ИС "ЛО"', 'Регистр.']), 'В материале «ИС "ЛО"» описаны права.');
+});
+
+test('duplicate structured attachments are shown once and user messages are unchanged', () => {
+  const { ChatMessage } = loadSource('../src/components/ChatMessage.tsx', {});
+  const attachment = { type: 'knowledge_source', name: 'Регламент', data: { document_id: 'doc-one' } };
+  const assistant = renderToStaticMarkup(React.createElement(ChatMessage, { message: { id:'a',sender:'assistant',text:'Ответ',attachments:[attachment,attachment] } }));
+  assert.equal(assistant.split('Регламент').length - 1, 1);
+  const user = renderToStaticMarkup(React.createElement(ChatMessage, { message: { id:'u',sender:'user',text:'Источники:\n- Регламент',attachments:[attachment] } }));
+  assert(user.includes('Источники:'));
+  assert(!user.includes('Предоставленные материалы'));
+});
 
 // Small hook runner for deterministic request ordering without a browser or timers.
 function chatHarness(api) {
