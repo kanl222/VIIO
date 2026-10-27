@@ -78,6 +78,22 @@ async def terminal(queue, identifier, states=('ready', 'error')):
             await asyncio.sleep(0.05)
 
 
+async def test_reviewed_binary_original_is_preserved_with_public_search_text(pipeline):
+    client, queue, catalog, adapter, ingestion, store = pipeline
+    original = b'PK\x03\x04binary-source-document'
+    mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    task = BulkUploadTask(uuid.uuid4().hex, 'Инструкция.docx', original, 'Инструкция',
+                         'public-import', True, mime, [], [], reviewed_content='Проверенный текст инструкции по отпуску лекарств.')
+    identifier, _ = await ingestion(task, store.save(original,suffix='.docx'))
+    result = await client.get('/api/v1/documents/download/' + identifier, params={'user_role':'employee'})
+    assert result.status_code == 200 and result.content == original
+    assert mime in result.headers['content-type']
+    rows = await ingestion.data.lexical('отпуск лекарств',{'role':'employee'})
+    assert rows and rows[0].metadata['document_id'] == identifier
+    rejected = await client.post('/api/v1/documents/bulk-upload',files=[('files',('other.docx',original,mime))])
+    assert rejected.json()['tasks'][0]['status'] == 'error'  # No unreviewed binary format opened by this import seam.
+
+
 async def test_upload_survives_new_worker_and_download_checks_full_acl(pipeline):
     client, queue, catalog, adapter, ingestion, store = pipeline
     original = 'Правило отдела кадров: отпуск согласуется заранее.'.encode()

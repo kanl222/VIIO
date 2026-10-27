@@ -89,10 +89,10 @@ class DocumentIngestion:
                     await anyio.to_thread.run_sync(self.documents.set_document_active, record.id, record.is_active)
 
     async def _index(self, task, storage_key, identifier, digest, *, parent=None, version=1):
-        if task.mime_type == 'application/pdf':
-            if task.reviewed_content is None:
-                raise ValueError('PDF требует проверки текста перед индексацией')
+        if task.reviewed_content is not None:
             content = task.reviewed_content
+        elif task.mime_type == 'application/pdf':
+            raise ValueError('PDF требует проверки текста перед индексацией')
         else:
             content = task.data.decode('utf-8-sig')
         if not content.strip() or '\x00' in content or len(content) > self.settings.pdf_max_chars:
