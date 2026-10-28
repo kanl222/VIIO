@@ -1,5 +1,0 @@
-{"case": "preview.docx", "status": 200, "engine": "python-docx", "characters": 130, "normalized_text": "Порядок работы\n\nКонтрольная фраза договор № 42. Сумма 1 000,50 ₽.\n\n- Первый пункт\n\nПоле | Значение\n\nСрок | 14 дней\n\nПосле таблицы."}
-{"case": "preview.odt", "status": 200, "engine": "odfpy", "characters": 130, "normalized_text": "Порядок работы\n\nКонтрольная фраза договор № 42. Сумма 1 000,50 ₽.\n\n- Первый пункт\n\nПоле | Значение\n\nСрок | 14 дней\n\nПосле таблицы."}
-{"case": "preview_access_and_corrupt_file", "unauthorized": 401, "corrupt": 422}
-{"case": "worker_rejects_invalid_package", "status": "error", "error": "Не удалось прочитать документ. Проверьте формат, целостность и отсутствие пароля."}
-{"case": "permanent_corpus_unchanged", "before": {"documents": 75, "publications": 43}, "after": {"documents": 75, "publications": 43}, "own_job_removed": true}
