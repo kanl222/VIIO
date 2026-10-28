@@ -29,6 +29,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src
 COPY --from=builder /app/README.md /app/README.md
 
+RUN mkdir -p /traces && chown 65532:65532 /traces
 USER 65532:65532
 EXPOSE 8000
 

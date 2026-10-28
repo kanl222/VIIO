@@ -2,6 +2,8 @@
 from hmac import compare_digest
 
 import httpx
+import time
+from assistent.services.diagnostics import enabled, record
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
@@ -23,17 +25,21 @@ def create_remote_search_tool(settings, k=5):
         context = (config or {}).get('configurable', {}).get('user_context') or {}
         # Personal notes and conversation data never enter document search.
         context = {key: context[key] for key in ('user_id', 'role', 'departments') if key in context}
+        start = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
                 response = await client.post(settings.documents_url.rstrip('/') + '/api/v1/knowledge/search',
                     headers={'X-Internal-Token': settings.documents_read_key or (settings.internal_api_key if not settings.secure_runtime else '') or ''},
-                    json={'query': query, 'k': k, 'user_context': context or None})
+                    json={'query': query, 'k': k, 'user_context': context or None, **({'diagnostics': True} if enabled() else {})})
                 response.raise_for_status()
                 text = response.json()['context']
                 if not isinstance(text, str) or len(text) > 100000:
                     raise ValueError('Invalid document search response')
+                record('retrieval', query=query, duration_ms=round((time.monotonic()-start)*1000),
+                       context=text, **response.json().get('diagnostics', {}))
                 return text
         except (httpx.HTTPError, ValueError, KeyError):
+            record('retrieval', query=query, status='error', duration_ms=round((time.monotonic()-start)*1000))
             return 'Ошибка при обращении к базе знаний. Повторите попытку позже.'
     return search_knowledge_base
 

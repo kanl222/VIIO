@@ -153,6 +153,7 @@ class PublicationRequest(BaseModel):
 class PublicQuestion(BaseModel):
     model_config = ConfigDict(extra='forbid')
     message: str = Field(min_length=1, max_length=4000)
+    diagnostics: bool = False
 
 
 class PublishedIdsRequest(BaseModel):
@@ -591,7 +592,9 @@ def create_api_router(
         require_catalog()
         if knowledge_data is None:
             raise HTTPException(503, 'Источник публикаций недоступен')
-        return {'items': await knowledge_data.public_search(request.message)}
+        diagnostic = {} if request.diagnostics else None
+        items = await knowledge_data.public_search(request.message, **({'diagnostics': diagnostic} if diagnostic is not None else {}))
+        return {'items': items, **({'diagnostics': diagnostic} if diagnostic is not None else {})}
 
     @router.post('/api/v1/consultant-materials/validate', dependencies=[Depends(verify_publication_key)], tags=['Published materials'])
     async def validate_publications(request: PublishedIdsRequest):

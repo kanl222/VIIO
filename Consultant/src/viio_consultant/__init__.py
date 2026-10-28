@@ -1,5 +1,6 @@
 """Standalone public API, intentionally independent of the assistent package."""
 import logging
+from viio_consultant.diagnostics import capture, record
 from contextlib import asynccontextmanager
 from hmac import compare_digest
 import httpx
@@ -47,12 +48,16 @@ def create_app(settings=None, *, agent=None):
             raise HTTPException(401, 'Необходим ключ внешнего API')
         if not request.message.strip():
             raise HTTPException(400, 'Укажите вопрос')
-        try:
-            return await app.state.agent.chat(request.message.strip())
-        except TimeoutError:
-            raise HTTPException(504, 'Консультант занят. Повторите запрос позже.') from None
-        except Exception:
-            logger.exception('Consultant request failed')
-            raise HTTPException(503, 'Консультант временно недоступен') from None
+        with capture('consultant', request.message):
+            record('route', mode='published_documents', tools=['search_published_documents'])
+            try:
+                result = await app.state.agent.chat(request.message.strip())
+                record('answer', reply=result['reply'], sources=result['sources'])
+                return result
+            except TimeoutError:
+                raise HTTPException(504, 'Консультант занят. Повторите запрос позже.') from None
+            except Exception:
+                logger.exception('Consultant request failed')
+                raise HTTPException(503, 'Консультант временно недоступен') from None
 
     return app

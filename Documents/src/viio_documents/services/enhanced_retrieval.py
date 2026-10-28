@@ -30,7 +30,7 @@ class EnhancedRetrieval:
     def __init__(self, vector_store, data):
         self.vector_store, self.data = vector_store, data
 
-    async def search(self, query, context, k):
+    async def search(self, query, context, k, diagnostics=None):
         searches = [
             anyio.to_thread.run_sync(partial(self.vector_store.similarity_search, query=query, k=max(k * 3, 12), filter=build_access_filter(context))),
             self.data.lexical(query, context)]
@@ -52,7 +52,20 @@ class EnhancedRetrieval:
                     candidates.append(doc)
                     seen.add(key)
         candidates=await self.data.authorized_candidates(candidates,context)
-        return rank_documents(query, candidates, k)
+        selected = rank_documents(query, candidates, k)
+        if diagnostics is not None:
+            def snapshot(doc):
+                return {'document_id': doc.metadata.get('document_id'),
+                        'title': doc.metadata.get('title', ''), 'text': doc.page_content,
+                        'version': doc.metadata.get('version'), 'chunk_id': doc.metadata.get('chunk_id')}
+            # Only current ACL-checked candidates may leave the document service.
+            diagnostics.update(candidates=[snapshot(doc) for doc in candidates],
+                selected=[snapshot(doc) for doc in selected],
+                branches={name: {'status': 'error' if isinstance(result, Exception) else 'ok',
+                                 'count': None if isinstance(result, Exception) else len(result)}
+                          for name, result in zip(['semantic', 'lexical', 'public'], results)},
+                ranking='lexical term score with document diversity', k=k)
+        return selected
 
     def tool(self, original, k):
         async def search_knowledge_base(query: str, config: RunnableConfig):

@@ -1,0 +1,43 @@
+# Local diagnostic website. Each agent can write only its own trace volume.
+services:
+  assistent:
+    image: viio-assistent:diagnostics
+    environment:
+      - VIIO_TRACE_DIR=/traces
+    volumes:
+      - assistant_traces:/traces
+  consultant:
+    image: viio-consultant:diagnostics
+    environment:
+      - VIIO_TRACE_DIR=/traces
+    volumes:
+      - consultant_traces:/traces
+  diagnostics:
+    build: ./Diagnostics
+    container_name: viio_diagnostics
+    ports:
+      - 127.0.0.1:3010:3010
+    volumes:
+      - assistant_traces:/traces/main:ro
+      - consultant_traces:/traces/consultant:ro
+      - diagnostic_reviews:/data/reviews
+    read_only: true
+    user: 65532:65532
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3010/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+  document-worker:
+    image: viio-documents:diagnostics
+  documents:
+    image: viio-documents:diagnostics
+volumes:
+  assistant_traces:
+  consultant_traces:
+  diagnostic_reviews:

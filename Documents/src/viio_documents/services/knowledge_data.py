@@ -204,10 +204,11 @@ class KnowledgeData:
             except Exception:
                 logging.getLogger(__name__).warning('Publication cleanup deferred to reconciliation')
 
-    async def public_search(self, query):
+    async def public_search(self, query, diagnostics=None):
         if self.public_index is not None:
             from viio_documents.services.enhanced_retrieval import rank_documents
-            docs = rank_documents(query, await self.public_vectors(query, 40), 40)
+            candidates = await self.public_vectors(query, 40)
+            docs = rank_documents(query, candidates, 40)
             selected = []
             for doc in docs:
                 identifier = doc.metadata['publication_id']
@@ -223,7 +224,21 @@ class KnowledgeData:
                     WHERE p.id::text=ANY(%s) AND d.is_active AND d.status IN ('ready','indexed')
                     AND d.document_kind<>'code' ''', (selected,))).fetchall()
             by_id = {row['id']: row for row in rows}
-            return [by_id[identifier] for identifier in selected if identifier in by_id]
+            items = [by_id[identifier] for identifier in selected if identifier in by_id]
+            if diagnostics is not None:
+                try:
+                    diagnostic_ids = await self.public_ids(list({doc.metadata.get('publication_id', '') for doc in candidates}))
+                except Exception:
+                    # Optional observation must not turn a successful search into failure.
+                    diagnostics.update(diagnostic_status='unavailable')
+                    return items
+                diagnostics.update(candidates=[{'document_id': doc.metadata.get('publication_id'),
+                    'title': doc.metadata.get('title', ''), 'text': doc.page_content} for doc in candidates
+                    if doc.metadata.get('publication_id') in diagnostic_ids],
+                    selected=[{'document_id': row['id'], 'title': row['title'], 'text': row['content']} for row in items],
+                    candidate_count=len(candidates), ranking='public vector candidates, lexical ranking, first 4 publications', k=4,
+                    note='Candidate text contains only publications approved by a current gateway check.')
+            return items
         expression = tsquery(query)
         if not expression:
             return []

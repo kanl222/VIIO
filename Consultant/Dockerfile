@@ -17,6 +17,7 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=checks /app/src /app/src
+RUN mkdir -p /traces && chown 65532:65532 /traces
 USER 65532:65532
 EXPOSE 8000
 CMD ["uvicorn", "viio_consultant:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

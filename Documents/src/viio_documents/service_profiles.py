@@ -17,6 +17,7 @@ class KnowledgeQuestion(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     k: int = Field(default=5, ge=1, le=8)
     user_context: UserContext | None = None
+    diagnostics: bool = False
 
 
 def configure_service(app, api_router=None):
@@ -86,9 +87,10 @@ def configure_service(app, api_router=None):
         @app.post('/api/v1/knowledge/search', dependencies=[Depends(authorize)])
         async def knowledge_search(question: KnowledgeQuestion):
             context = question.user_context.model_dump() if question.user_context else None
+            diagnostic = {} if question.diagnostics else None
             docs = await EnhancedRetrieval(app.state.vector_store, app.state.knowledge_data).search(
-                question.query, context, question.k)
-            return {'context': format_documents(docs)}
+                question.query, context, question.k, **({'diagnostics': diagnostic} if diagnostic is not None else {}))
+            return {'context': format_documents(docs), **({'diagnostics': diagnostic} if diagnostic is not None else {})}
 
         @app.middleware('http')
         async def delegate_writes(request, call_next):

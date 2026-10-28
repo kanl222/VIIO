@@ -6,6 +6,8 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 import re
+import time
+from viio_consultant.diagnostics import model_call, record
 from viio_consultant.prompts import CONSULTANT_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -53,7 +55,7 @@ class PublicConsultant:
                 messages = [SystemMessage(content=CONSULTANT_PROMPT), HumanMessage(content=message)]
                 documents, calls_used = {}, 0
                 for _ in range(4):
-                    response = await self.model.ainvoke(messages)
+                    response = await model_call(self.model, messages)
                     calls = getattr(response, 'tool_calls', [])
                     if not calls:
                         docs = list(documents.values())
@@ -67,7 +69,9 @@ class PublicConsultant:
                             return {'reply': NO_INFORMATION, 'sources': []}
                         identifiers = list(documents)
                         if await self.data.public_ids(identifiers) != set(identifiers):
+                            record('guard', name='publication_revision', status='blocked')
                             return {'reply': 'Материалы обновились. Повторите вопрос.', 'sources': []}
+                        record('guard', name='publication_revision', status='ok')
                         return {'reply': clean_reply(response.content, docs), 'sources': [
                             {'publication_id': doc['id'], 'title': doc['title']} for doc in docs]}
                     if len(calls) > 8:
@@ -87,12 +91,19 @@ class PublicConsultant:
                                 else:
                                     # Two results per search, at most four snapshots
                                     # per turn; the model may refine its query once.
-                                    docs = (await self.search_tool.ainvoke({'query': query}))[:2]
+                                    start = time.monotonic()
+                                    candidates = await self.search_tool.ainvoke({'query': query})
+                                    docs = candidates[:2]
                                     for doc in docs:
                                         documents[doc['id']] = doc
                                     content = '\n\n'.join('<material title="' + escape(doc['title'], quote=True) + '">\n'
                                         + excerpt(doc['content'], query, 3000)[0].replace('</material>', '&lt;/material&gt;')
                                         + '\n</material>' for doc in docs) or NO_INFORMATION
+                                    record('retrieval', query=query, duration_ms=round((time.monotonic()-start)*1000),
+                                        candidates=[{'document_id': d['id'], 'title': d['title'], 'text': d['content']} for d in candidates],
+                                        selected=[{'document_id': d['id'], 'title': d['title'], 'text': excerpt(d['content'], query, 3000)[0],
+                                                   'line_start': excerpt(d['content'], query, 3000)[1]} for d in docs],
+                                        context=content, ranking='first 2 gateway results, excerpts up to 3000 characters', k=2)
                                     logger.info('Consultant model selected search_published_documents; materials=%d', len(docs))
                         messages.append(ToolMessage(content=content, tool_call_id=call['id']))
                 return {'reply': NO_INFORMATION, 'sources': []}

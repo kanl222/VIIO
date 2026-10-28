@@ -24,6 +24,7 @@ from assistent.prompts import DEFAULT_SYSTEM_PROMPT, GENERAL_SYSTEM_PROMPT, REWR
 from assistent.services.request_policy import calculate, request_mode, is_coding_request
 from assistent.services.answer_sources import clean_answer, readable_reference, sources_from_reference, turn_provenance, cited_sources
 from assistent.services.dialogue_summary import compact_dialogue
+from assistent.services.diagnostics import model_call, record
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,8 @@ def build_agent_graph(
 
     def entry(state):
         question = next(str(m.content) for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
+        record('route', mode=request_mode(question) if task_modes else 'specialist',
+               model_first_tools=model_first_tools, tools=[tool.name for tool in active_tools])
         if task_modes and calculate(question) is not None:
             return "calculate"
         return "prepare_search" if not model_first_tools and has_search and needs_automatic_search(question) else "agent"
@@ -194,7 +197,7 @@ def build_agent_graph(
                 messages = [SystemMessage(content=prompt_for(question))] + messages
             mode = request_mode(question) if task_modes else "knowledge"
             calls = [call for m in turn if isinstance(m, AIMessage) for call in m.tool_calls]
-            response = await (llm if mode != "knowledge" or (model_first_tools and len(calls) >= 3) else llm_with_tools).ainvoke(messages)
+            response = await model_call(llm if mode != "knowledge" or (model_first_tools and len(calls) >= 3) else llm_with_tools, messages)
             if model_first_tools and response.tool_calls:
                 remaining = max(0, 3 - len(calls))
                 response = AIMessage(content=response.content, tool_calls=response.tool_calls[:remaining]) if remaining else AIMessage(
@@ -238,7 +241,7 @@ def build_agent_graph(
             question = next(str(m.content) for m in reversed(history) if isinstance(m, HumanMessage))
             if not any(isinstance(m, SystemMessage) for m in messages):
                 messages = [SystemMessage(content=prompt_for(question))] + messages
-            response = await llm.ainvoke(messages)
+            response = await model_call(llm, messages)
             if reference and isinstance(response, AIMessage):
                 content = response.content
                 sources = sources_from_reference(reference)

@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node & Frontend (Vite, React, TypeScript)
+node_modules/
+dist-ssr/
+*.local
+.vite/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Local traces & runtime data
+traces/
+reviews_data/
+*.trace.json
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# OS Artifacts
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+review
