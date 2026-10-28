@@ -1,0 +1,31 @@
+{
+  "primary_answers": 32,
+  "control_repeats": 2,
+  "agents": {
+    "main": {
+      "requests": 16,
+      "http_200": 16,
+      "workflow_questions": 10,
+      "workflow_average_score": 2.6,
+      "workflow_usable_score_ge_4": 3,
+      "successful_median_seconds": 13.27,
+      "max_request_seconds": 67.76,
+      "answers_with_structured_sources": 10
+    },
+    "consultant": {
+      "requests": 16,
+      "http_200": 15,
+      "workflow_questions": 10,
+      "workflow_average_score": 2.2,
+      "workflow_usable_score_ge_4": 3,
+      "successful_median_seconds": 10.01,
+      "max_request_seconds": 33.66,
+      "answers_with_structured_sources": 15
+    }
+  },
+  "main_tools": {
+    "questions_with_search": 15,
+    "model_initiated_search_calls": 14,
+    "application_fallback_search_calls": 1
+  }
+}
