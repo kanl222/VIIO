@@ -1,3 +1,0 @@
-{"phase": "seed", "status": 200, "reply": "```python\ndef multiply(a, b):\n    return a * b\n```", "active_route": "coder", "coder_user_turns": 1, "last_coder_question": "Напиши только функцию multiply(a,b) на Python, возвращающую произведение."}
-{"phase": "verify", "status": 200, "reply": "```python\ndef multiply(a, b):\n    if a < 0 or b < 0:\n        return None\n    return a * b\n```\n\nТесты:\n```python\nassert multiply(2, 3) == 6\nassert multiply(-1, 5) is None\nassert multiply(0, 10) == 0\nassert multiply(7.5, 4.2) == 31.5\n```", "active_route": "coder", "coder_user_turns": 2, "last_coder_question": "Добавь проверку отрицательных аргументов: возвращай None для них, иначе произведение."}
-{"cleanup": true}
