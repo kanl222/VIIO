@@ -1,0 +1,416 @@
+[
+  {
+    "case": "opening_balances",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 16784,
+      "contains": {
+        "balance_menu": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "balance_menu": false
+      }
+    }
+  },
+  {
+    "case": "opening_balances",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20196,
+      "contains": {
+        "balance_menu": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "balance_menu": false
+      }
+    }
+  },
+  {
+    "case": "opening_balances",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 18879,
+      "contains": {
+        "balance_menu": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "balance_menu": true
+      }
+    }
+  },
+  {
+    "case": "incoming_goods",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 16812,
+      "contains": {
+        "receipt_menu": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "receipt_menu": false
+      }
+    }
+  },
+  {
+    "case": "incoming_goods",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 16815,
+      "contains": {
+        "receipt_menu": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "receipt_menu": false
+      }
+    }
+  },
+  {
+    "case": "incoming_goods",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20337,
+      "contains": {
+        "receipt_menu": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "receipt_menu": false
+      }
+    }
+  },
+  {
+    "case": "inventory",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 16801,
+      "contains": {
+        "inventory_menu": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "inventory_menu": true
+      }
+    }
+  },
+  {
+    "case": "inventory",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 16489,
+      "contains": {
+        "inventory_menu": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "inventory_menu": true
+      }
+    }
+  },
+  {
+    "case": "inventory",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 19197,
+      "contains": {
+        "inventory_menu": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "inventory_menu": true
+      }
+    }
+  },
+  {
+    "case": "report_tree",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20237,
+      "contains": {
+        "report_method": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "report_method": true
+      }
+    }
+  },
+  {
+    "case": "report_tree",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20251,
+      "contains": {
+        "report_method": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "report_method": false
+      }
+    }
+  },
+  {
+    "case": "report_tree",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 13866,
+      "contains": {
+        "report_method": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "report_method": true
+      }
+    }
+  },
+  {
+    "case": "recipe_multiple",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 17209,
+      "contains": {
+        "selection_step": true,
+        "medication_step": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "selection_step": true,
+        "medication_step": true
+      }
+    }
+  },
+  {
+    "case": "recipe_multiple",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 17155,
+      "contains": {
+        "selection_step": true,
+        "medication_step": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "selection_step": false,
+        "medication_step": false
+      }
+    }
+  },
+  {
+    "case": "recipe_multiple",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20371,
+      "contains": {
+        "selection_step": true,
+        "medication_step": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "selection_step": true,
+        "medication_step": true
+      }
+    }
+  },
+  {
+    "case": "department_transfer",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20332,
+      "contains": {
+        "purchase_price": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "purchase_price": true
+      }
+    }
+  },
+  {
+    "case": "department_transfer",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20293,
+      "contains": {
+        "purchase_price": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "purchase_price": true
+      }
+    }
+  },
+  {
+    "case": "department_transfer",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20265,
+      "contains": {
+        "purchase_price": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "purchase_price": true
+      }
+    }
+  },
+  {
+    "case": "pharmacy_initial",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20334,
+      "contains": {
+        "fifo": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "fifo": false
+      }
+    }
+  },
+  {
+    "case": "pharmacy_initial",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20292,
+      "contains": {
+        "fifo": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "fifo": false
+      }
+    }
+  },
+  {
+    "case": "pharmacy_initial",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20287,
+      "contains": {
+        "fifo": true
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "fifo": true
+      }
+    }
+  },
+  {
+    "case": "unknown_project",
+    "variant": "natural",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20237,
+      "contains": {
+        "project_name": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "project_name": false
+      }
+    }
+  },
+  {
+    "case": "unknown_project",
+    "variant": "agent_query",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 20293,
+      "contains": {
+        "project_name": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "project_name": false
+      }
+    }
+  },
+  {
+    "case": "unknown_project",
+    "variant": "control",
+    "configured_rag_context_max_chars": 12000,
+    "model_tool_call": {
+      "characters": 12969,
+      "contains": {
+        "project_name": false
+      }
+    },
+    "application_fallback": {
+      "characters": 12187,
+      "contains": {
+        "project_name": false
+      }
+    }
+  }
+]

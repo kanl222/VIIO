@@ -1,0 +1,697 @@
+[
+  {
+    "case": "opening_balances",
+    "variant": "natural",
+    "private_hits": 0,
+    "lexical_hits": 1,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "balance_menu": false
+    },
+    "main_native_characters": 16784,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "opening_balances",
+    "variant": "agent_query",
+    "private_hits": 0,
+    "lexical_hits": 1,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "balance_menu": false
+    },
+    "main_native_characters": 20196,
+    "public_gateway_top4_matching_ranks": [
+      2
+    ],
+    "consultant_top2_matching_full": [
+      2
+    ],
+    "consultant_top2_matching_windows": [
+      2
+    ],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "opening_balances",
+    "variant": "control",
+    "private_hits": 1,
+    "lexical_hits": 1,
+    "public_hits": 0,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "balance_menu": true
+    },
+    "main_native_characters": 18879,
+    "public_gateway_top4_matching_ranks": [
+      1
+    ],
+    "consultant_top2_matching_full": [
+      1
+    ],
+    "consultant_top2_matching_windows": [
+      1
+    ],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      3,
+      4
+    ],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "incoming_goods",
+    "variant": "natural",
+    "private_hits": 1,
+    "lexical_hits": 0,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "receipt_menu": false
+    },
+    "main_native_characters": 16812,
+    "public_gateway_top4_matching_ranks": [
+      2,
+      3
+    ],
+    "consultant_top2_matching_full": [
+      2
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1,
+      2,
+      3
+    ],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "incoming_goods",
+    "variant": "agent_query",
+    "private_hits": 1,
+    "lexical_hits": 0,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "receipt_menu": false
+    },
+    "main_native_characters": 16815,
+    "public_gateway_top4_matching_ranks": [
+      2,
+      4
+    ],
+    "consultant_top2_matching_full": [
+      2
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1,
+      3,
+      5
+    ],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "incoming_goods",
+    "variant": "control",
+    "private_hits": 1,
+    "lexical_hits": 1,
+    "public_hits": 3,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "receipt_menu": false
+    },
+    "main_native_characters": 20337,
+    "public_gateway_top4_matching_ranks": [
+      2,
+      4
+    ],
+    "consultant_top2_matching_full": [
+      2
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1,
+      2,
+      4
+    ],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "inventory",
+    "variant": "natural",
+    "private_hits": 0,
+    "lexical_hits": 2,
+    "public_hits": 0,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "inventory_menu": true
+    },
+    "main_native_characters": 16801,
+    "public_gateway_top4_matching_ranks": [
+      2
+    ],
+    "consultant_top2_matching_full": [
+      2
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "24-12.04.2019.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 1,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      4
+    ],
+    "main_target_fragment_ranks": [
+      4
+    ]
+  },
+  {
+    "case": "inventory",
+    "variant": "agent_query",
+    "private_hits": 0,
+    "lexical_hits": 2,
+    "public_hits": 0,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "inventory_menu": true
+    },
+    "main_native_characters": 16489,
+    "public_gateway_top4_matching_ranks": [
+      1
+    ],
+    "consultant_top2_matching_full": [
+      1
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "24-12.04.2019.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 1,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1
+    ],
+    "main_target_fragment_ranks": [
+      1
+    ]
+  },
+  {
+    "case": "inventory",
+    "variant": "control",
+    "private_hits": 1,
+    "lexical_hits": 2,
+    "public_hits": 1,
+    "main_top5_hits": 2,
+    "main_native_contains": {
+      "inventory_menu": true
+    },
+    "main_native_characters": 19197,
+    "public_gateway_top4_matching_ranks": [
+      1,
+      2
+    ],
+    "consultant_top2_matching_full": [
+      1,
+      2
+    ],
+    "consultant_top2_matching_windows": [
+      2
+    ],
+    "target_resource": "24-12.04.2019.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 1,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1
+    ],
+    "main_target_fragment_ranks": [
+      1
+    ]
+  },
+  {
+    "case": "report_tree",
+    "variant": "natural",
+    "private_hits": 0,
+    "lexical_hits": 1,
+    "public_hits": 0,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "report_method": true
+    },
+    "main_native_characters": 20237,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "Модуля формирования отчетов ИСЛО 2.0",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 1,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1
+    ],
+    "main_target_fragment_ranks": [
+      1
+    ]
+  },
+  {
+    "case": "report_tree",
+    "variant": "agent_query",
+    "private_hits": 0,
+    "lexical_hits": 1,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "report_method": false
+    },
+    "main_native_characters": 20251,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "Модуля формирования отчетов ИСЛО 2.0",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 1,
+      "public": 0
+    },
+    "main_target_document_ranks": [],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "report_tree",
+    "variant": "control",
+    "private_hits": 0,
+    "lexical_hits": 1,
+    "public_hits": 0,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "report_method": true
+    },
+    "main_native_characters": 13866,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "Модуля формирования отчетов ИСЛО 2.0",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 1,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1
+    ],
+    "main_target_fragment_ranks": [
+      1
+    ]
+  },
+  {
+    "case": "recipe_multiple",
+    "variant": "natural",
+    "private_hits": 1,
+    "lexical_hits": 0,
+    "public_hits": 1,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "selection_step": true,
+      "medication_step": true
+    },
+    "main_native_characters": 17209,
+    "public_gateway_top4_matching_ranks": [
+      2
+    ],
+    "consultant_top2_matching_full": [
+      2
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "05-rukovod.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 0,
+      "public": 1
+    },
+    "main_target_document_ranks": [
+      2
+    ],
+    "main_target_fragment_ranks": [
+      2
+    ]
+  },
+  {
+    "case": "recipe_multiple",
+    "variant": "agent_query",
+    "private_hits": 1,
+    "lexical_hits": 1,
+    "public_hits": 1,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "selection_step": true,
+      "medication_step": true
+    },
+    "main_native_characters": 17155,
+    "public_gateway_top4_matching_ranks": [
+      2
+    ],
+    "consultant_top2_matching_full": [
+      2
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "05-rukovod.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 1,
+      "public": 1
+    },
+    "main_target_document_ranks": [
+      4
+    ],
+    "main_target_fragment_ranks": [
+      4
+    ]
+  },
+  {
+    "case": "recipe_multiple",
+    "variant": "control",
+    "private_hits": 0,
+    "lexical_hits": 1,
+    "public_hits": 0,
+    "main_top5_hits": 1,
+    "main_native_contains": {
+      "selection_step": true,
+      "medication_step": true
+    },
+    "main_native_characters": 20371,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "05-rukovod.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 1,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1
+    ],
+    "main_target_fragment_ranks": [
+      1
+    ]
+  },
+  {
+    "case": "department_transfer",
+    "variant": "natural",
+    "private_hits": 1,
+    "lexical_hits": 2,
+    "public_hits": 0,
+    "main_top5_hits": 2,
+    "main_native_contains": {
+      "purchase_price": true
+    },
+    "main_native_characters": 20332,
+    "public_gateway_top4_matching_ranks": [
+      1
+    ],
+    "consultant_top2_matching_full": [
+      1
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 2,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1,
+      2
+    ],
+    "main_target_fragment_ranks": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": "department_transfer",
+    "variant": "agent_query",
+    "private_hits": 1,
+    "lexical_hits": 2,
+    "public_hits": 1,
+    "main_top5_hits": 2,
+    "main_native_contains": {
+      "purchase_price": true
+    },
+    "main_native_characters": 20293,
+    "public_gateway_top4_matching_ranks": [
+      1
+    ],
+    "consultant_top2_matching_full": [
+      1
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 2,
+      "public": 1
+    },
+    "main_target_document_ranks": [
+      1,
+      4
+    ],
+    "main_target_fragment_ranks": [
+      1,
+      4
+    ]
+  },
+  {
+    "case": "department_transfer",
+    "variant": "control",
+    "private_hits": 1,
+    "lexical_hits": 2,
+    "public_hits": 1,
+    "main_top5_hits": 2,
+    "main_native_contains": {
+      "purchase_price": true
+    },
+    "main_native_characters": 20265,
+    "public_gateway_top4_matching_ranks": [
+      1
+    ],
+    "consultant_top2_matching_full": [
+      1
+    ],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 2,
+      "public": 1
+    },
+    "main_target_document_ranks": [
+      1,
+      2
+    ],
+    "main_target_fragment_ranks": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": "pharmacy_initial",
+    "variant": "natural",
+    "private_hits": 1,
+    "lexical_hits": 0,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "fifo": false
+    },
+    "main_native_characters": 20334,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      3,
+      4,
+      5
+    ],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "pharmacy_initial",
+    "variant": "agent_query",
+    "private_hits": 1,
+    "lexical_hits": 2,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "fifo": false
+    },
+    "main_native_characters": 20292,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 1,
+      "lexical": 2,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1
+    ],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "pharmacy_initial",
+    "variant": "control",
+    "private_hits": 0,
+    "lexical_hits": 2,
+    "public_hits": 0,
+    "main_top5_hits": 2,
+    "main_native_contains": {
+      "fifo": true
+    },
+    "main_native_characters": 20287,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "01-instruct-23.05.22.pdf",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 2,
+      "public": 0
+    },
+    "main_target_document_ranks": [
+      1,
+      2
+    ],
+    "main_target_fragment_ranks": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": "unknown_project",
+    "variant": "natural",
+    "private_hits": 0,
+    "lexical_hits": 0,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "project_name": false
+    },
+    "main_native_characters": 20237,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "NO_EXPECTED_DOCUMENT",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "unknown_project",
+    "variant": "agent_query",
+    "private_hits": 0,
+    "lexical_hits": 0,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "project_name": false
+    },
+    "main_native_characters": 20293,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "NO_EXPECTED_DOCUMENT",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [],
+    "main_target_fragment_ranks": []
+  },
+  {
+    "case": "unknown_project",
+    "variant": "control",
+    "private_hits": 0,
+    "lexical_hits": 0,
+    "public_hits": 0,
+    "main_top5_hits": 0,
+    "main_native_contains": {
+      "project_name": false
+    },
+    "main_native_characters": 12969,
+    "public_gateway_top4_matching_ranks": [],
+    "consultant_top2_matching_full": [],
+    "consultant_top2_matching_windows": [],
+    "target_resource": "NO_EXPECTED_DOCUMENT",
+    "branches_target_fragments": {
+      "private": 0,
+      "lexical": 0,
+      "public": 0
+    },
+    "main_target_document_ranks": [],
+    "main_target_fragment_ranks": []
+  }
+]

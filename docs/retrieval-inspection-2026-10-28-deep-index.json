@@ -1,0 +1,481 @@
+[
+  {
+    "case": "opening_balances",
+    "query": "процедура внесения остатков лекарств на начало работы в аптечном учёте медорганизации",
+    "collections": {
+      "private": {
+        "visible_point_count": 234,
+        "scanned_points": 234,
+        "first_matching_points": [
+          {
+            "rank": 27,
+            "title": "'Учет в отделении': Реорганизация МО_Инструкция по переносу остатков отделений ИС ЛО",
+            "document_id": "doc-229ef14fc6c0564fbbf3d2b72cda86d0",
+            "chunk_index": 0,
+            "score": 0.751888,
+            "contains": {
+              "balance_menu": true
+            }
+          },
+          {
+            "rank": 39,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 5,
+            "score": 0.744646,
+            "contains": {
+              "balance_menu": true
+            }
+          },
+          {
+            "rank": 47,
+            "title": "Инструкция по работе с программой ИС",
+            "document_id": "doc-c7fc6fd4e9945f3bbd60623ccbe44cc4",
+            "chunk_index": 5,
+            "score": 0.740286,
+            "contains": {
+              "balance_menu": true
+            }
+          },
+          {
+            "rank": 105,
+            "title": "Инструкция по работе с программой ИС",
+            "document_id": "doc-c7fc6fd4e9945f3bbd60623ccbe44cc4",
+            "chunk_index": 3,
+            "score": 0.722738,
+            "contains": {
+              "balance_menu": true
+            }
+          },
+          {
+            "rank": 128,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 3,
+            "score": 0.715737,
+            "contains": {
+              "balance_menu": true
+            }
+          }
+        ]
+      },
+      "public": {
+        "visible_point_count": 767,
+        "scanned_points": 767,
+        "first_matching_points": [
+          {
+            "rank": 226,
+            "title": "'Учет в отделении': Реорганизация МО_Инструкция по переносу остатков отделений ИС ЛО",
+            "document_id": "doc-229ef14fc6c0564fbbf3d2b72cda86d0",
+            "chunk_index": 4,
+            "score": 0.774884,
+            "contains": {
+              "balance_menu": true
+            }
+          },
+          {
+            "rank": 365,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 39,
+            "score": 0.761763,
+            "contains": {
+              "balance_menu": true
+            }
+          },
+          {
+            "rank": 404,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 31,
+            "score": 0.758636,
+            "contains": {
+              "balance_menu": true
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "case": "incoming_goods",
+    "query": "процедура ручной регистрации поступления лекарств от поставщика в аптечном учёте медорганизации",
+    "collections": {
+      "private": {
+        "visible_point_count": 234,
+        "scanned_points": 234,
+        "first_matching_points": [
+          {
+            "rank": 5,
+            "title": "1С МДЛП - Инструкция по работе в «1С: Больничная аптека",
+            "document_id": "doc-66f4754363f25eb79ca117d05967fd86",
+            "chunk_index": 3,
+            "score": 0.759549,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 61,
+            "title": "Инструкция по работе с программой ИС",
+            "document_id": "doc-c7fc6fd4e9945f3bbd60623ccbe44cc4",
+            "chunk_index": 5,
+            "score": 0.713094,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 67,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 5,
+            "score": 0.711845,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 80,
+            "title": "1С МДЛП – Инструкция по работе в ИС «Аптечный учёт в МО»",
+            "document_id": "doc-f58f2e46075d5029ae7244b5cc2c3518",
+            "chunk_index": 4,
+            "score": 0.708879,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 102,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 3,
+            "score": 0.702302,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 112,
+            "title": "Инструкция по работе с программой ИС",
+            "document_id": "doc-c7fc6fd4e9945f3bbd60623ccbe44cc4",
+            "chunk_index": 3,
+            "score": 0.699637,
+            "contains": {
+              "receipt_menu": true
+            }
+          }
+        ]
+      },
+      "public": {
+        "visible_point_count": 767,
+        "scanned_points": 767,
+        "first_matching_points": [
+          {
+            "rank": 98,
+            "title": "1С МДЛП - Инструкция по работе в «1С: Больничная аптека",
+            "document_id": "doc-66f4754363f25eb79ca117d05967fd86",
+            "chunk_index": 21,
+            "score": 0.766208,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 136,
+            "title": "1С МДЛП – Инструкция по работе в ИС «Аптечный учёт в МО»",
+            "document_id": "doc-f58f2e46075d5029ae7244b5cc2c3518",
+            "chunk_index": 30,
+            "score": 0.760697,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 255,
+            "title": "1С МДЛП – Инструкция по работе в ИС «Аптечный учёт в МО»",
+            "document_id": "doc-f58f2e46075d5029ae7244b5cc2c3518",
+            "chunk_index": 31,
+            "score": 0.74592,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 372,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 40,
+            "score": 0.737305,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 484,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 28,
+            "score": 0.727247,
+            "contains": {
+              "receipt_menu": true
+            }
+          },
+          {
+            "rank": 656,
+            "title": "Описание версии программы",
+            "document_id": "doc-14c309bceb60555982ec70f3c97fdf0a",
+            "chunk_index": 3,
+            "score": 0.702981,
+            "contains": {
+              "receipt_menu": true
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "case": "inventory",
+    "query": "процедура инвентаризации лекарств в аптечном учёте медорганизации",
+    "collections": {
+      "private": {
+        "visible_point_count": 234,
+        "scanned_points": 234,
+        "first_matching_points": [
+          {
+            "rank": 28,
+            "title": "'Учет в отделении': Инструкция по проведению инвентаризации",
+            "document_id": "doc-0fb73b15879a5acd93f001a5495ee160",
+            "chunk_index": 0,
+            "score": 0.69232,
+            "contains": {
+              "inventory_menu": true
+            }
+          },
+          {
+            "rank": 75,
+            "title": "Инструкция по переносу остатков из одной базы МО в другую",
+            "document_id": "doc-86f05fc0fb265b938ad2afe358540cdc",
+            "chunk_index": 0,
+            "score": 0.670375,
+            "contains": {
+              "inventory_menu": true
+            }
+          }
+        ]
+      },
+      "public": {
+        "visible_point_count": 767,
+        "scanned_points": 767,
+        "first_matching_points": [
+          {
+            "rank": 219,
+            "title": "Инструкция по переносу остатков из одной базы МО в другую",
+            "document_id": "doc-86f05fc0fb265b938ad2afe358540cdc",
+            "chunk_index": 2,
+            "score": 0.726447,
+            "contains": {
+              "inventory_menu": true
+            }
+          },
+          {
+            "rank": 468,
+            "title": "'Учет в отделении': Инструкция по проведению инвентаризации",
+            "document_id": "doc-0fb73b15879a5acd93f001a5495ee160",
+            "chunk_index": 6,
+            "score": 0.702166,
+            "contains": {
+              "inventory_menu": true
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "case": "report_tree",
+    "query": "метод получения дерева отчётов для текущего пользователя",
+    "collections": {
+      "private": {
+        "visible_point_count": 234,
+        "scanned_points": 234,
+        "first_matching_points": [
+          {
+            "rank": 133,
+            "title": "Модуля формирования отчетов ИСЛО 2.0",
+            "document_id": "doc-674b51e5",
+            "chunk_index": 0,
+            "score": 0.689882,
+            "contains": {
+              "report_method": true
+            }
+          }
+        ]
+      },
+      "public": {
+        "visible_point_count": 767,
+        "scanned_points": 767,
+        "first_matching_points": []
+      }
+    }
+  },
+  {
+    "case": "recipe_multiple",
+    "query": "процедура выбора электронного рецепта и перехода к отпуску препарата",
+    "collections": {
+      "private": {
+        "visible_point_count": 234,
+        "scanned_points": 234,
+        "first_matching_points": [
+          {
+            "rank": 5,
+            "title": "Руководство по поиску электронных рецептов в программе «Аптека льготный отпуск» по номеру СНИЛС или ИД социальной карты оренбуржца",
+            "document_id": "doc-d9cc5c653fd35e0d88c5933e51fe1803",
+            "chunk_index": 0,
+            "score": 0.761043,
+            "contains": {
+              "selection_step": true,
+              "medication_step": true
+            }
+          }
+        ]
+      },
+      "public": {
+        "visible_point_count": 767,
+        "scanned_points": 767,
+        "first_matching_points": [
+          {
+            "rank": 2,
+            "title": "Руководство по поиску электронных рецептов в программе «Аптека льготный отпуск» по номеру СНИЛС или ИД социальной карты оренбуржца",
+            "document_id": "doc-d9cc5c653fd35e0d88c5933e51fe1803",
+            "chunk_index": 6,
+            "score": 0.818844,
+            "contains": {
+              "selection_step": true,
+              "medication_step": true
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "case": "department_transfer",
+    "query": "процедуры оформления отпуска лекарств со склада в отделение без требования отделения в аптечном учёте",
+    "collections": {
+      "private": {
+        "visible_point_count": 234,
+        "scanned_points": 234,
+        "first_matching_points": [
+          {
+            "rank": 6,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 9,
+            "score": 0.797397,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 21,
+            "title": "Инструкция по работе с программой ИС",
+            "document_id": "doc-c7fc6fd4e9945f3bbd60623ccbe44cc4",
+            "chunk_index": 2,
+            "score": 0.78499,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 31,
+            "title": "Инструкция по работе с программой ИС",
+            "document_id": "doc-c7fc6fd4e9945f3bbd60623ccbe44cc4",
+            "chunk_index": 9,
+            "score": 0.775554,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 34,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 2,
+            "score": 0.7738,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 37,
+            "title": "Инструкция по работе с программой ИС",
+            "document_id": "doc-c7fc6fd4e9945f3bbd60623ccbe44cc4",
+            "chunk_index": 10,
+            "score": 0.772201,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 46,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 10,
+            "score": 0.769316,
+            "contains": {
+              "purchase_price": true
+            }
+          }
+        ]
+      },
+      "public": {
+        "visible_point_count": 767,
+        "scanned_points": 767,
+        "first_matching_points": [
+          {
+            "rank": 15,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 64,
+            "score": 0.828958,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 46,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 59,
+            "score": 0.809794,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 318,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 26,
+            "score": 0.774363,
+            "contains": {
+              "purchase_price": true
+            }
+          },
+          {
+            "rank": 503,
+            "title": "Инструкция по работе с программой ИС — часть 1/3",
+            "document_id": "doc-7b095de7f321527c90edb2297a61014a",
+            "chunk_index": 27,
+            "score": 0.757407,
+            "contains": {
+              "purchase_price": true
+            }
+          }
+        ]
+      }
+    }
+  }
+]

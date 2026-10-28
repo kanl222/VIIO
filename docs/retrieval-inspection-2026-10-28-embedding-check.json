@@ -1,0 +1,34 @@
+[
+  {
+    "collection": "knowledge_base_big_rag_20261025",
+    "point_id": "01692caf-ceef-59f6-a5dc-bed8efbedfc3",
+    "characters": 3933,
+    "dimensions": 768,
+    "recomputed_dimensions": 768,
+    "stored_vs_current_cosine": 1.0
+  },
+  {
+    "collection": "knowledge_base_big_rag_20261025",
+    "point_id": "01c2c27d-0611-5521-86fd-0ea4b0a50362",
+    "characters": 3868,
+    "dimensions": 768,
+    "recomputed_dimensions": 768,
+    "stored_vs_current_cosine": 1.0
+  },
+  {
+    "collection": "knowledge_public",
+    "point_id": "0057c410-0d91-5d38-9bac-4d44d79de352",
+    "characters": 793,
+    "dimensions": 768,
+    "recomputed_dimensions": 768,
+    "stored_vs_current_cosine": 1.0
+  },
+  {
+    "collection": "knowledge_public",
+    "point_id": "00865366-0355-583d-8226-4c9c91aeb940",
+    "characters": 777,
+    "dimensions": 768,
+    "recomputed_dimensions": 768,
+    "stored_vs_current_cosine": 1.0
+  }
+]
