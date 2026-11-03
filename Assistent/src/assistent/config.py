@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     )
 
     coding_agent_enabled: bool = True
+    assistant_rag_backend: Literal['local', 'yandex'] = 'local'
+    chat_provider: Literal['lmstudio', 'ollama'] | None = None
+    chat_model: str | None = None
+    coding_provider: Literal['lmstudio', 'ollama'] | None = None
+    database_provider: Literal['lmstudio', 'ollama'] | None = None
+    database_model: str | None = None
     coding_model: str | None = None
     coding_allowed_roles: list[str] = Field(default_factory=lambda: ["programmer", "admin"])
     coding_context_max_chars: int = Field(default=6000, ge=1000, le=24000)

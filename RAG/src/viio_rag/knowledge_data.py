@@ -72,10 +72,21 @@ def excerpt(content, query, limit=4000):
 
 
 class KnowledgeData:
+    async def cloud_corpus_is_public(self, files):
+        expected = {item['document_id']: item['sha256'] for item in files}
+        if not expected:
+            return False
+        async with self.catalog.pool.connection() as conn:
+            conn.row_factory = dict_row
+            rows = await (await conn.execute('''SELECT id,sha256 FROM documents
+                WHERE id=ANY(%s) AND is_public AND is_active
+                AND status IN ('ready','indexed') AND document_kind<>'code' ''', (list(expected),))).fetchall()
+        return len(rows) == len(expected) and all(expected[row['id']] == row['sha256'] for row in rows)
+
     async def authorized_candidates(self,documents,context):
         """The catalog remains authoritative even when vector ACL payloads lag."""
-        from viio_documents.services.document_catalog import DocumentRecord
-        from viio_documents.services.document_access import can_read_document
+        from viio_rag.records import DocumentRecord
+        from viio_rag.access import can_read_document
         ids=list({doc.metadata.get('document_id') for doc in documents if not doc.metadata.get('publication_id')})
         publications=list({doc.metadata.get('publication_id') for doc in documents if doc.metadata.get('publication_id')})
         async with self.catalog.pool.connection() as conn:
@@ -206,10 +217,12 @@ class KnowledgeData:
 
     async def public_search(self, query, diagnostics=None):
         if self.public_index is not None:
-            from viio_documents.services.enhanced_retrieval import rank_documents
+            from viio_rag.retrieval import rank_documents
             candidates = await self.public_vectors(query, 40)
             docs = rank_documents(query, candidates, 40)
-            selected = []
+            # Exact wording in titles must survive a semantic candidate miss.
+            lexical = await self.public_lexical(query)
+            selected = [row['id'] for row in lexical[:2]]
             for doc in docs:
                 identifier = doc.metadata['publication_id']
                 if identifier not in selected and len(selected) < 4:
@@ -219,7 +232,8 @@ class KnowledgeData:
             # can omit a prerequisite or join unrelated sections of a long manual.
             async with self.catalog.pool.connection() as conn:
                 conn.row_factory = dict_row
-                rows = await (await conn.execute('''SELECT p.id::text,p.title,p.content
+                rows = await (await conn.execute('''SELECT p.id::text,p.title,p.content,
+                    CASE WHEN d.is_public THEN 'public' ELSE 'restricted' END AS access_class
                     FROM document_publications p JOIN documents d ON d.id=p.document_id
                     WHERE p.id::text=ANY(%s) AND d.is_active AND d.status IN ('ready','indexed')
                     AND d.document_kind<>'code' ''', (selected,))).fetchall()
@@ -239,17 +253,26 @@ class KnowledgeData:
                     candidate_count=len(candidates), ranking='public vector candidates, lexical ranking, first 4 publications', k=4,
                     note='Candidate text contains only publications approved by a current gateway check.')
             return items
+        return await self.public_lexical(query)
+
+    async def public_lexical(self, query):
         expression = tsquery(query)
         if not expression:
             return []
         async with self.catalog.pool.connection() as conn:
             conn.row_factory = dict_row
-            return await (await conn.execute('''SELECT p.id::text,p.title,p.content FROM document_publications p
+            return await (await conn.execute('''SELECT p.id::text,p.title,p.content,
+                CASE WHEN d.is_public THEN 'public' ELSE 'restricted' END AS access_class FROM document_publications p
                 JOIN documents d ON d.id=p.document_id WHERE d.is_active AND d.status IN ('ready','indexed')
                 AND d.document_kind<>'code' AND p.search_vector @@ to_tsquery('russian',%s)
-                ORDER BY (8 * ts_rank_cd(to_tsvector('russian',p.title),to_tsquery('russian',%s),32)
+                ORDER BY (SELECT count(*) FROM unnest(%s::text[]) AS term
+                    WHERE to_tsvector('russian',p.title) @@ to_tsquery('russian',term)) DESC,
+                    (SELECT count(*) FROM unnest(%s::text[]) AS term
+                    WHERE p.search_vector @@ to_tsquery('russian',term)) DESC,
+                    (8 * ts_rank_cd(to_tsvector('russian',p.title),to_tsquery('russian',%s),32)
                     + ts_rank_cd(p.search_vector,to_tsquery('russian',%s),32)) DESC LIMIT 4''',
-                (expression, expression, expression))).fetchall()
+                (expression, [term + ':*' for term in query_terms(query)],
+                 [term + ':*' for term in query_terms(query)], expression, expression))).fetchall()
 
     async def public_ids(self, identifiers):
         async with self.catalog.pool.connection() as conn:

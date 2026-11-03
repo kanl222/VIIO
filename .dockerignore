@@ -7,3 +7,15 @@
 !Assistent/src/**
 !Documents/
 !Documents/Dockerfile
+!Documents/pyproject.toml
+!Documents/uv.lock
+!Documents/README.md
+!Documents/src/
+!Documents/src/**
+!RAG/
+!RAG/Dockerfile
+!RAG/pyproject.toml
+!RAG/uv.lock
+!RAG/README.md
+!RAG/src/
+!RAG/src/**

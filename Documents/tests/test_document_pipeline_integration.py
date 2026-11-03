@@ -25,12 +25,12 @@ from viio_documents.router import create_api_router, DocumentCreateRequest
 from viio_documents.services.bulk_queue import BulkUploadTask
 from viio_documents.services.document_catalog import DocumentCatalogService
 from viio_documents.services.document_ingestion import DocumentIngestion
-from viio_documents.services.knowledge_data import KnowledgeData
-from viio_documents.services.publication_index import PublicationIndex
+from viio_rag.knowledge_data import KnowledgeData
+from viio_rag.publication_index import PublicationIndex
 from viio_documents.services.document_service import DocumentService
 from viio_documents.services.file_store import LocalFileStore
 from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
-from viio_documents.utils.vector_store import QdrantVectorStoreAdapter
+from viio_rag.vector_store import QdrantVectorStoreAdapter
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(
     not os.getenv('VIIO_TEST_PG_DSN'), reason='Set VIIO_TEST_PG_DSN to run isolated PostgreSQL integration tests')]
@@ -51,7 +51,7 @@ async def pipeline(tmp_path):
     catalog = DocumentCatalogService(pool)
     await catalog.setup()
     store = LocalFileStore(tmp_path)
-    settings = Settings(internal_api_key='integration-key')
+    settings = Settings(_env_file=None, internal_api_key='integration-key', pdf_engine='pypdf')
     public = PublicationIndex(QdrantVectorStoreAdapter(vectors, DeterministicFakeEmbedding(size=8), 'test_public'))
     ingestion = DocumentIngestion(documents, catalog, store, settings, KnowledgeData(catalog, public))
     queue = PersistentBulkQueue(ingestion, catalog, store, max_workers=2)
@@ -199,7 +199,7 @@ async def test_public_search_prefers_specific_title_over_long_generic_manual(pip
 
 
 async def test_public_vectors_merge_with_authorized_internal_and_redacted_snapshot(pipeline):
-    from viio_documents.services.enhanced_retrieval import EnhancedRetrieval
+    from viio_rag.retrieval import EnhancedRetrieval
     _, _, _, adapter, ingestion, _ = pipeline
     root = await ingestion.index_text(DocumentCreateRequest(title='Private original',
         content='PRIVATE_CANARY payroll details', is_public=False, allowed_roles=['admin'], allowed_departments=[]))
@@ -262,7 +262,7 @@ async def test_failed_public_index_update_keeps_previous_approved_snapshot(pipel
 
 
 async def test_named_code_lookup_survives_large_public_manuals(pipeline):
-    from viio_documents.services.enhanced_retrieval import EnhancedRetrieval
+    from viio_rag.retrieval import EnhancedRetrieval
     _, _, _, adapter, ingestion, _ = pipeline
     for i in range(18):
         result = await ingestion.index_text(DocumentCreateRequest(title=f'Инструкция {i}',
@@ -600,8 +600,8 @@ async def test_invalid_activation_does_not_remove_current_version(pipeline):
 
 
 async def test_code_is_private_even_to_owner_employee_and_has_line_references(pipeline):
-    from viio_documents.services.enhanced_retrieval import EnhancedRetrieval
-    from viio_documents.tools.search_tool import build_access_filter, create_knowledge_search_tool
+    from viio_rag.retrieval import EnhancedRetrieval
+    from viio_rag.search_tool import build_access_filter, create_knowledge_search_tool
     client, queue, catalog, adapter, ingestion, _ = pipeline
     source = b'import os\n\ndef CalculateInvoiceTotal(items):\n    return sum(items)\n'
     response = await client.post('/api/v1/documents/bulk-upload', params={'owner_id': 'former-admin', 'is_public': True, 'allowed_departments': 'general'},
@@ -641,7 +641,7 @@ async def test_identical_code_in_different_files_keeps_both_source_names(pipelin
 
 
 async def test_lexical_search_filters_departments_and_archived_versions(pipeline):
-    from viio_documents.services.enhanced_retrieval import EnhancedRetrieval
+    from viio_rag.retrieval import EnhancedRetrieval
     _, _, _, adapter, ingestion, _ = pipeline
     await ingestion.index_text(DocumentCreateRequest(title='Policy', content='Согласование служебных поездок',
         allowed_roles=[], allowed_departments=['hr']))
@@ -772,3 +772,54 @@ async def test_standalone_consultant_http_gateway_preserves_publication_boundary
         denied = await source_client.post('/api/v1/consultant-materials/search', json={'message': 'Support'},
             headers={'X-Publication-Key': 'a' * 40})
         assert denied.status_code == 401
+
+
+
+async def test_large_pdf_review_retains_parser_structure_but_indexes_edited_sections(pipeline, monkeypatch):
+    from test_pdf_extraction import pdf_bytes
+    from viio_documents.services.pdf_extraction import PdfExtractionService
+    client, queue, catalog, adapter, ingestion, store = pipeline
+    original = pdf_bytes() + b'\n%' + b' ' * (11 * 1024 * 1024)
+    document = {'schema_name': 'DoclingDocument', 'pages': {'1': {'page_no': 1}}}
+    async def extract(self, data):
+        assert data == original
+        return {'content': '# Guide\n\n## Old\n\nWrong extracted text.', 'pages': 1,
+                'engine': 'docling-cpu', 'document': document}
+    monkeypatch.setattr(PdfExtractionService, 'extract', extract)
+    response = await client.post('/api/v1/documents/bulk-upload', files=[('files', ('large.pdf', original, 'application/pdf'))])
+    task_id = response.json()['tasks'][0]['task_id']
+    assert task_id, response.text
+    queue.start()
+    result = await terminal(queue, task_id, ('needs_review', 'error'))
+    assert result.status == 'needs_review', result.error
+    review = (await queue.get_review(task_id))['review']
+    assert review['document'] == document
+    approved = '# Guide\n\n## Balances\n\n1. Open inventory.\n2. Save balances.\n\n## Transfer\n\nUse only for reorganization.'
+    assert await queue.approve(task_id, review['token'], approved, 'reviewer')
+    result = await terminal(queue, task_id)
+    assert result.status == 'ready', result.error
+    record = await catalog.get(result.document_id)
+    assert store.load(record.storage_key) == original
+    async with catalog.pool.connection() as conn:
+        saved = (await (await conn.execute('SELECT content FROM document_contents WHERE document_id=%s', (record.id,))).fetchone())['content']
+        audit = (await (await conn.execute('SELECT review FROM document_upload_jobs WHERE id=%s', (task_id,))).fetchone())['review']
+    assert saved == approved and audit['document'] == document
+    chunks = adapter.similarity_search('balances', k=20)
+    assert any(doc.metadata.get('section_path') == ['Guide', 'Balances'] for doc in chunks)
+    assert all('Wrong extracted text' not in doc.page_content for doc in chunks)
+    assert all('Save balances' not in doc.page_content or '## Balances' in doc.page_content for doc in chunks)
+
+
+async def test_embedding_failure_preserves_existing_public_vectors(pipeline, monkeypatch):
+    _, _, _, _, ingestion, _ = pipeline
+    root = await ingestion.index_text(DocumentCreateRequest(title='Guide', content='Original'))
+    data = ingestion.data
+    await data.publish(root.document_id, 'Guide', 'Approved old revision. ' * 80, 'admin')
+    before = await data.public_index.inventory()
+    def unavailable(self, texts):
+        raise RuntimeError('Embedding service unavailable')
+    monkeypatch.setattr(type(data.public_index.adapter._embeddings), 'embed_documents', unavailable)
+    with pytest.raises(RuntimeError, match='Embedding service unavailable'):
+        await data.publish(root.document_id, 'Guide', 'New shorter revision', 'admin')
+    assert await data.public_index.inventory() == before
+    assert (await data.publication(root.document_id))['content'] == 'Approved old revision. ' * 80

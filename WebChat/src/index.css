@@ -101,6 +101,12 @@ h1, h2, h3 { color: var(--ink); text-wrap: balance; }
 .send-button:disabled { background: var(--subtle); color: var(--muted); opacity: 1; }
 .composer-footer { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--muted); padding: 10px 4px 0; }
 .composer-disclaimer { font-size: 11px; text-align: center; color: var(--muted); margin: 12px 0 0; }
+.knowledge-mode { display: grid; gap: 10px; margin-bottom: 10px; color: var(--muted); font-size: 12px; }
+.knowledge-mode select { margin-left: 8px; padding: 6px 8px; max-width: 100%; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.knowledge-mode select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cloud-confirmation { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
+.cloud-confirmation input { margin-top: 3px; flex-shrink: 0; accent-color: var(--accent); }
+.cloud-confirmation small { display: block; color: var(--muted); }
 .message-scroll { flex: 1; overflow-y: auto; padding: 24px 0; }
 .message-column { max-width: 860px; margin: auto; }
 .message-column .text-xs { font-size: 14px; line-height: 1.7; }

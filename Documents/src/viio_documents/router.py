@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from viio_documents.config import Settings
 from viio_documents.interfaces._protocols import IAgentService, IDocumentService
 from viio_documents.services.pdf_extraction import PdfExtractionService, PdfExtractionError
-from viio_documents.services.document_access import can_read_document
+from viio_rag.access import can_read_document
 from viio_documents.services.code_documents import is_code_file
 from viio_documents.services.document_catalog import DocumentCatalogService
 from viio_documents.services.office_extraction import OFFICE_MIMES, OfficeExtractionService, OfficeExtractionError
@@ -215,7 +215,7 @@ def create_api_router(
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > settings.pdf_max_bytes:
-                raise HTTPException(413, "Размер PDF превышает лимит 10 МБ.")
+                raise HTTPException(413, f"Размер PDF превышает лимит {settings.pdf_max_bytes // 1024 // 1024} МБ.")
             data.extend(chunk)
         try:
             return await pdf_service.extract(bytes(data))
@@ -426,15 +426,16 @@ def create_api_router(
         tasks_info = []
         for upload in files:
             filename = (upload.filename or "document").replace('\\', '/').rsplit('/', 1)[-1][:255]
-            data = await upload.read(settings.bulk_max_file_bytes + 1)
+            limit = settings.pdf_max_bytes if Path(filename).suffix.lower() == '.pdf' else settings.bulk_max_file_bytes
+            data = await upload.read(limit + 1)
             await upload.close()
 
-            if len(data) > settings.bulk_max_file_bytes:
+            if len(data) > limit:
                 tasks_info.append({
                     "task_id": None,
                     "filename": filename,
                     "status": "error",
-                    "error": f"Файл превышает лимит {settings.bulk_max_file_bytes // 1024 // 1024} МБ.",
+                    "error": f"Файл превышает лимит {limit // 1024 // 1024} МБ.",
                 })
                 continue
 
@@ -592,9 +593,8 @@ def create_api_router(
         require_catalog()
         if knowledge_data is None:
             raise HTTPException(503, 'Источник публикаций недоступен')
-        diagnostic = {} if request.diagnostics else None
-        items = await knowledge_data.public_search(request.message, **({'diagnostics': diagnostic} if diagnostic is not None else {}))
-        return {'items': items, **({'diagnostics': diagnostic} if diagnostic is not None else {})}
+        from viio_rag.publication_search import search_publications as search
+        return await search(knowledge_data, request.message, request.diagnostics)
 
     @router.post('/api/v1/consultant-materials/validate', dependencies=[Depends(verify_publication_key)], tags=['Published materials'])
     async def validate_publications(request: PublishedIdsRequest):
@@ -627,6 +627,7 @@ def _catalog_record_to_dict(record: Any) -> dict:
         "original_filename": record.original_filename,
         "status": record.status,
         "is_public": record.is_public,
+        "access_class": 'public' if record.is_public else 'restricted',
         "allowed_roles": record.allowed_roles,
         "allowed_departments": record.allowed_departments,
         "has_original": record.storage_key is not None,

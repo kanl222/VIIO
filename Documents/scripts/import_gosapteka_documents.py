@@ -1,12 +1,14 @@
 """Trusted one-off import of reviewed public originals, preserving files and ACLs.
 
-Run inside assistent with the prepared directory copied to /tmp/gosapteka-import.
+Run inside document-worker with the source directory copied to /tmp/gosapteka-import.
 No source programs execute. Publication parts avoid truncating long documents.
 """
+import argparse
 import asyncio
 import hashlib
 import json
 import mimetypes
+import os
 from pathlib import Path
 import uuid
 
@@ -21,7 +23,7 @@ from viio_documents.config import Settings
 from viio_documents.services.bulk_queue import BulkUploadTask
 from viio_documents.services.text_normalization import normalize_document_text
 
-ROOT=Path('/tmp/gosapteka-import')
+ROOT=Path(os.environ.get('GOSAPTEKA_IMPORT_ROOT', '/tmp/gosapteka-import'))
 OWNER='gosapteka56-public-import-2026-10-27'
 
 
@@ -30,6 +32,10 @@ def emit(row):
 
 
 async def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--prepared', type=Path, default=ROOT/'canonical-docling/prepared.json')
+    args = parser.parse_args()
+    prepared=json.loads(args.prepared.read_text(encoding='utf-8'))
     settings=Settings()
     if settings.service_role != 'document-worker':
         raise RuntimeError('Trusted file import must run in viio_document_worker, not in the assistant container')
@@ -40,7 +46,6 @@ async def main():
     await pool.open(wait=True)
     app.state.catalog_service.set_pool(pool)
     ingestion=app.state.ingestion_service
-    prepared=json.loads((ROOT/'prepared.json').read_text(encoding='utf-8'))
     results=[]
     async def index(data,filename,title,text,metadata,mime):
         task=BulkUploadTask(uuid.uuid4().hex,filename,data,title[:255],OWNER,True,mime,[],[],
@@ -66,7 +71,7 @@ async def main():
                 if hashlib.sha256(text.encode()).hexdigest()!=row['text_sha256']:
                     raise ValueError('Reviewed text hash mismatch')
                 # Verify the reviewed source first; clean before splitting and publishing.
-                if path.suffix.lower() in {'.pdf', '.docx'}:
+                if path.suffix.lower() in {'.pdf', '.docx'} and row['engine'] != 'docling-cpu':
                     text=normalize_document_text(text)
                 metadata={'source_url':row['url'],'source_page':prepared['source_page'],'import_batch':OWNER,
                     'extraction_engine':row['engine'],'pages':row.get('pages'),

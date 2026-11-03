@@ -113,6 +113,70 @@ function deferred() {
 }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
+test('cloud composer requires explicit consent for every question', () => {
+  const slots = []; let cursor = 0; const sent = [];
+  const react = { memo: fn => fn,
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial;
+      return [slots[i], value => { slots[i] = value; }]; },
+    useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
+  };
+  const { ChatInput } = loadSource('../src/components/ChatInput.tsx', { react });
+  const render = () => { cursor = 0; return ChatInput({ onSendMessage: (...args) => sent.push(args) }); };
+  const find = (node, predicate) => {
+    if (!node || typeof node !== 'object') return;
+    if (predicate(node)) return node;
+    for (const child of [node.props?.children].flat()) { const found = find(child, predicate); if (found) return found; }
+  };
+  find(render(), n => n.type === 'select').props.onChange({ target: { value: 'yandex' } });
+  const input = () => find(render(), n => n.type === 'textarea');
+  const send = () => find(render(), n => n.props?.['aria-label'] === 'Отправить сообщение');
+  input().props.onChange({ target: { value: 'Public question', style: {}, scrollHeight: 20 } });
+  assert.equal(send().props.disabled, true);
+  send().props.onClick(); assert.equal(sent.length, 0);
+  find(render(), n => n.props?.type === 'checkbox').props.onChange({ target: { checked: true } });
+  assert.equal(send().props.disabled, false);
+  send().props.onClick();
+  assert.equal(sent[0][1].rag_backend, 'yandex');
+  assert.equal(sent[0][1].confirmed_public_for_external_cloud, true);
+  input().props.onChange({ target: { value: 'Next question', style: {}, scrollHeight: 20 } });
+  assert.equal(send().props.disabled, true);
+});
+
+test('cloud selection survives chat creation and hook forwarding', async () => {
+  let captured;
+  const render = chatHarness({ getConversation: async () => ({ messages: [] }),
+    sendMessage: async (...args) => { captured = args; return { reply: 'Public answer' }; } });
+  const options = { rag_backend: 'yandex', confirmed_public_for_external_cloud: true };
+  await render(null).sendMessage('Public question', 'new-public-chat', options);
+  assert.equal(captured[0], 'new-public-chat');
+  assert.equal(captured[2], options);
+});
+
+test('chat gateway rejects missing cloud consent and forwards explicit RAG selection', async () => {
+  const { createChatRouter } = await import('../dist-server/routes/chatRoutes.js');
+  let forwarded; let queries = 0;
+  const pool = { query: async sql => { queries++; return { rows: sql.includes('SELECT id, agent_thread_id')
+    ? [{ id: 'conv', agent_thread_id: 'stored-thread' }] : [{ id: 'message' }] }; } };
+  const router = createChatRouter(() => pool, () => {}, async (_url, options) => {
+    forwarded = JSON.parse(options.body);
+    return new Response(JSON.stringify({ reply: 'Public answer', sources: [] }), { status: 200 });
+  });
+  const handler = router.stack.find(layer => layer.route?.methods.post).route.stack[0].handle;
+  const res = { statusCode: 200, status(code) { this.statusCode = code; return this; },
+    json(value) { this.body = value; return this; } };
+  const req = { user: { id: 'trusted-user', role: 'employee', departments: [] },
+    body: { conversation_id: 'conv', message: 'Public question', rag_backend: 'yandex' } };
+  await handler(req, res);
+  assert.equal(res.statusCode, 403); assert.equal(queries, 0); assert.equal(forwarded, undefined);
+  req.body.confirmed_public_for_external_cloud = true;
+  res.statusCode = 200;
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(forwarded.rag_backend, 'yandex');
+  assert.equal(forwarded.confirmed_public_for_external_cloud, true);
+  assert.equal(forwarded.user_context.user_id, 'trusted-user');
+});
+
 test('a late history response cannot replace the selected conversation', async () => {
   const a = deferred(), b = deferred();
   const render = chatHarness({ getConversation: id => id === 'a' ? a.promise : b.promise });

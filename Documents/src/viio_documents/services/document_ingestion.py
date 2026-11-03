@@ -12,7 +12,7 @@ import anyio.to_thread
 from viio_documents.services.document_catalog import sha256_of_bytes
 from viio_documents.services.pdf_extraction import PdfExtractionService
 from viio_documents.services.bulk_queue import BulkUploadTask, PreparedReview, DocumentVersionConflict
-from viio_documents.services.knowledge_data import KnowledgeData
+from viio_rag.knowledge_data import KnowledgeData
 from viio_documents.services.office_extraction import OfficeExtractionService, OFFICE_MIMES
 from viio_documents.services.text_normalization import normalize_document_text
 
@@ -28,8 +28,8 @@ class DocumentIngestion:
         self.data = knowledge_data or KnowledgeData(catalog)
 
     async def prepare_pdf(self, task):
-        extracted = await PdfExtractionService(self.settings).extract(task.data)
-        return PreparedReview(extracted['content'], extracted['engine'], extracted['pages'])
+        extracted = await PdfExtractionService(self.settings, filename=task.filename, job_id=task.task_id).extract(task.data)
+        return PreparedReview(extracted['content'], extracted['engine'], extracted['pages'], extracted.get('document'))
 
     @asynccontextmanager
     async def _document_lock(self, identifier):
@@ -103,7 +103,9 @@ class DocumentIngestion:
             content = task.data.decode('utf-8-sig')
             if '\x00' in content:
                 raise ValueError('Двоичный файл нельзя индексировать как текст')
-        if task.kind != 'code' and task.mime_type != 'text/markdown' and task.metadata.get('input_format') != 'manual-text':
+        if (task.kind != 'code' and task.mime_type != 'text/markdown'
+                and task.metadata.get('input_format') != 'manual-text'
+                and task.metadata.get('extraction_engine') != 'docling-cpu'):
             content = normalize_document_text(content)
             task.metadata['text_normalization'] = 'prose-v1'
         if not content.strip() or '\x00' in content or len(content) > self.settings.pdf_max_chars:

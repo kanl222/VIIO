@@ -3,28 +3,30 @@ import hashlib
 from functools import partial
 
 import anyio.to_thread
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from viio_rag.chunks import document_chunks, CHUNKER_VERSION
 
 
 class PublicationIndex:
     def __init__(self, adapter):
         self.adapter = adapter
-        self.splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=120)
 
     @staticmethod
     def digest(row):
-        return hashlib.sha256((row['title'] + '\0' + row['content']).encode()).hexdigest()
+        return hashlib.sha256((CHUNKER_VERSION + '\0' + row['title'] + '\0' + row['content']).encode()).hexdigest()
 
     async def put(self, row):
         def write():
-            chunks = self.splitter.split_text(row['content'])
+            parts = list(document_chunks(row['content'], 800, 120))
+            chunks = [text for text, _ in parts]
             if not chunks:
                 raise ValueError('Пустая публикация')
-            metadata = [dict(document_id=str(row['id']), publication_id=str(row['id']),
+            metadata = [dict(**parts[i][1], document_id=str(row['id']), publication_id=str(row['id']),
                 source_document_id=row['document_id'], title=row['title'], chunk_index=i,
                 snapshot_hash=self.digest(row), expected_chunks=len(chunks), ingestion_ready=False)
                 for i in range(len(chunks))]
             self.adapter.add_texts([row['title'] + '\n' + chunk for chunk in chunks], metadata)
+            # Do not remove the previous index before embeddings succeed.
+            self.adapter.delete_document_tail(str(row['id']), len(chunks))
             self.adapter.publish_document(str(row['id']))
         await anyio.to_thread.run_sync(write)
 

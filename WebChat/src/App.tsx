@@ -57,19 +57,19 @@ export const App: React.FC = () => {
   }, [createConversation]);
 
   const handleSendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, options?: import('./api/chat').RagOptions) => {
       if (!currentId) {
         try {
           const title = text.slice(0, 30) + (text.length > 30 ? '...' : '');
           const newConv = await createConversation(title);
           if (newConv) {
-            await sendMessage(text, newConv.id);
+            await sendMessage(text, newConv.id, options);
           }
         } catch {
           // handled in hook
         }
       } else {
-        await sendMessage(text);
+        await sendMessage(text, currentId, options);
       }
     },
     [currentId, createConversation, sendMessage]

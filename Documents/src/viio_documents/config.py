@@ -98,10 +98,10 @@ class Settings(BaseSettings):
     )
 
     pdf_engine: Literal["auto", "pypdf", "docling"] = "auto"
-    pdf_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
-    pdf_max_pages: int = Field(default=50, ge=1, le=200)
+    pdf_max_bytes: int = Field(default=32 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
+    pdf_max_pages: int = Field(default=200, ge=1, le=200)
     pdf_max_chars: int = Field(default=500000, ge=100, le=500000)
-    pdf_timeout_seconds: int = Field(default=120, ge=10, le=300)
+    pdf_timeout_seconds: int = Field(default=1800, ge=10, le=3600)
     docling_url: str = "http://pdf-worker:8080"
 
     # Настройки LM Studio (OpenAI-compatible)
@@ -192,7 +192,9 @@ class Settings(BaseSettings):
         description="Секретный токен для межсервисной аутентификации (X-Internal-Token).",
     )
 
-    service_role: Literal['documents', 'document-worker'] = 'documents'
+    service_role: Literal['documents', 'document-worker', 'rag'] = 'documents'
+    rag_url: str = 'http://rag:8000'
+    rag_timeout_seconds: int = Field(default=60, ge=5, le=180)
     documents_url: str = 'http://localhost:8002'
     document_worker_url: str = 'http://document-worker:8000'
 
@@ -234,4 +236,6 @@ class Settings(BaseSettings):
             raise ValueError('Previous service keys must be long and distinct')
 
     def runtime_keys(self):
+        if self.service_role == 'rag':
+            return ('documents_read_key', 'consultant_source_key')
         return ('document_worker_key',) if self.service_role=='document-worker' else ('document_worker_key','documents_read_key','documents_admin_key','consultant_source_key')

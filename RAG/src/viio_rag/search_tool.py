@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
 from qdrant_client import models
 
-from viio_documents.interfaces._protocols import IVectorStore
+from viio_rag.interfaces import IVectorStore
 
 logger = logging.getLogger(__name__)
 

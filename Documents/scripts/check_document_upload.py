@@ -167,8 +167,8 @@ async def main(mode):
             for item, expected in zip(versions, [b'Updated version fixture.', 'Тестовый документ загрузки VIIO.'.encode()]):
                 original = await client.get('/api/v1/documents/download/' + item['id'], params={'user_role': 'admin'})
                 assert original.status_code == 200 and original.content == expected
-            from viio_documents.models import create_embeddings
-            from viio_documents.utils.vector_store import QdrantVectorStoreAdapter
+            from viio_rag.embeddings import create_embeddings
+            from viio_rag.vector_store import QdrantVectorStoreAdapter
             vector = QdrantClient(url=settings.qdrant_url,api_key=settings.qdrant_api_key)
             try:
                 adapter = QdrantVectorStoreAdapter(vector, create_embeddings(settings), settings.qdrant_collection_name)

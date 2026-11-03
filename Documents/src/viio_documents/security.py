@@ -14,3 +14,12 @@ def authorize(request,settings):
     token=request.headers.get('X-Internal-Token','').encode()
     if not any(compare_digest(token,value.encode()) for value in expected):
         raise HTTPException(401,'Недостаточно полномочий межсервисного ключа')
+
+
+def authorize_publication(request, settings):
+    expected = settings.consultant_source_key
+    if not expected or len(expected) < 32 or expected in {settings.internal_api_key, settings.consultant_api_key}:
+        raise HTTPException(503, 'Источник публикаций не настроен')
+    token = request.headers.get('X-Publication-Key', '')
+    if not compare_digest(token.encode(), expected.encode()):
+        raise HTTPException(401, 'Необходим служебный ключ публикаций')

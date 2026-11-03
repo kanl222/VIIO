@@ -17,7 +17,7 @@ from assistent.services.coding_agent import (
     create_coding_delegation_tool, is_coding_request,
 )
 from assistent.services.graph_builder import build_agent_graph
-from viio_documents.tools.search_tool import create_knowledge_search_tool
+from viio_rag.search_tool import create_knowledge_search_tool
 
 PROGRAMMER = {"user_id": "programmer-1", "role": "programmer"}
 ADMIN = {"user_id": "admin-1", "role": "admin"}

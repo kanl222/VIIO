@@ -210,7 +210,7 @@ function DocumentVersionsPanel({ docId, onClose, onUpload, onDownload }: {
           {item.has_original && <button className="text-button" type="button" onClick={() => onDownload(item)}><Download size={14} aria-hidden="true" /> Скачать</button>}
         </li>)}
       </ul>
-      {current && <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Загрузить новую версию</strong><small>Один PDF, DOCX, ODT, TXT, Markdown или исходник до 10 МБ. Код доступен только программистам и администраторам.</small></span>
+      {current && <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Загрузить новую версию</strong><small>Один PDF до 32 МБ или DOCX, ODT, TXT, Markdown, исходник до 10 МБ. Код доступен только программистам и администраторам.</small></span>
         <input type="file" accept=".pdf,.docx,.odt,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={uploading} aria-label="Файл новой версии документа" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void upload(file); }} />
       </label>}
       {uploading && <p role="status">Сохраняем файл новой версии…</p>}
@@ -313,8 +313,8 @@ function KnowledgePanel() {
     setError(''); setSuccess(''); setExtractionInfo('');
     const pdf = /\.pdf$/i.test(file.name);
     const office = /\.(docx|odt)$/i.test(file.name);
-    if (!/\.(txt|md|markdown|pdf|docx|odt)$/i.test(file.name) || file.size > ((pdf || office) ? 10 : 2) * 1024 * 1024) {
-      setError('Выберите PDF/DOCX/ODT до 10 МБ или TXT/Markdown до 2 МБ.'); return;
+    if (!/\.(txt|md|markdown|pdf|docx|odt)$/i.test(file.name) || file.size > (pdf ? 32 : office ? 10 : 2) * 1024 * 1024) {
+      setError('Выберите PDF до 32 МБ, DOCX/ODT до 10 МБ или TXT/Markdown до 2 МБ.'); return;
     }
     setExtracting(true);
     try {
@@ -432,7 +432,7 @@ function KnowledgePanel() {
   };
 
   const uploadVersion = async (file: File, current: CatalogDocument) => {
-    if (!/\.(pdf|docx|odt|txt|md|markdown|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(file.name) || file.size > 10 * 1024 * 1024) throw new Error('Выберите PDF, DOCX, ODT, TXT или Markdown до 10 МБ.');
+    if (!/\.(pdf|docx|odt|txt|md|markdown|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(file.name) || file.size > (/\.pdf$/i.test(file.name) ? 32 : 10) * 1024 * 1024) throw new Error('Выберите PDF до 32 МБ или DOCX, ODT, TXT, Markdown до 10 МБ.');
     const result = await adminApi.bulkUpload([file], { is_public: current.is_public,
       allowed_roles: current.allowed_roles, allowed_departments: current.allowed_departments, version_parent_id: current.id });
     const task = result.tasks[0];
@@ -448,11 +448,11 @@ function KnowledgePanel() {
     const newFiles: File[] = [];
     for (let i = 0; i < selected.length; i++) {
       const f = selected[i];
-      if (/\.(txt|md|markdown|pdf|docx|odt|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(f.name) && f.size <= 10 * 1024 * 1024) {
+      if (/\.(txt|md|markdown|pdf|docx|odt|py|js|jsx|ts|tsx|sql|go|java|cs|rb|php|rs|yaml|yml|json|toml|sh|ps1|xml|wsdl|c|cpp|h)$/i.test(f.name) && f.size <= (/\.pdf$/i.test(f.name) ? 32 : 10) * 1024 * 1024) {
         newFiles.push(f);
       }
     }
-    if (newFiles.length !== selected.length || bulkFiles.length + newFiles.length > 50) setBulkError('Часть файлов не выбрана: допустимы PDF, DOCX, ODT, TXT, Markdown до 10 МБ, всего до 50 файлов.');
+    if (newFiles.length !== selected.length || bulkFiles.length + newFiles.length > 50) setBulkError('Часть файлов не выбрана: допустимы PDF до 32 МБ, DOCX, ODT, TXT, Markdown до 10 МБ, всего до 50 файлов.');
     setBulkFiles(prev => [...prev, ...newFiles].slice(0, 50));
   };
 
@@ -507,7 +507,7 @@ function KnowledgePanel() {
                       <td>{doc.chunks_count} чанков</td>
                       <td>
                         <span className="department-text">
-                          {doc.is_public ? 'Всем' : doc.allowed_roles.join(', ') || 'Ограничен'}
+                          {doc.is_public ? 'Публичный' : doc.allowed_roles.join(', ') || 'Ограничен'}
                         </span>
                       </td>
                       <td>
@@ -556,12 +556,12 @@ function KnowledgePanel() {
           <div className="section-heading"><h2>Новый документ</h2><FileText size={19} aria-hidden="true" /></div>
           {error && <Notice>{error}</Notice>}{success && <Notice success><Check size={18} aria-hidden="true" />{success}</Notice>}
           <label className="field">Название<input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Например, регламент работы с клиентами" maxLength={255} disabled={saving || extracting} /></label>
-          <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать файл</strong><small>PDF, DOCX, ODT до 10 МБ · TXT/Markdown до 2 МБ</small></span><input ref={fileInput} type="file" accept=".pdf,.docx,.odt,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={saving || extracting} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать PDF, DOCX, ODT или текстовый файл" /></label>
+          <label className="file-picker"><Upload size={19} aria-hidden="true" /><span><strong>Выбрать файл</strong><small>PDF до 32 МБ · DOCX, ODT до 10 МБ · TXT/Markdown до 2 МБ</small></span><input ref={fileInput} type="file" accept=".pdf,.docx,.odt,.txt,.md,.markdown,.py,.js,.jsx,.ts,.tsx,.sql,.go,.java,.cs,.rb,.php,.rs,.yaml,.yml,.json,.toml,.sh,.ps1,.xml,.wsdl,.c,.cpp,.h" disabled={saving || extracting} onChange={e => void readFile(e.target.files?.[0])} aria-label="Выбрать PDF, DOCX, ODT или текстовый файл" /></label>
           {extracting && <p className="field-help" role="status"><Loader2 size={16} className="animate-spin" /> Извлекаем текст. Для сканов обработка может занять несколько минут.</p>}
           {extractionInfo && <p className="field-help" role="status">{extractionInfo}</p>}
           <label className="field">Содержание<textarea required value={content} onChange={e => setContent(e.target.value)} placeholder="Вставьте текст документа…" rows={10} maxLength={500000} disabled={saving || extracting} /><small className="character-count">{content.length.toLocaleString('ru-RU')} / 500 000 символов</small></label>
           <fieldset disabled={saving || extracting}><legend>Кому доступен документ</legend><div className="access-options">{[
-            ['employees', 'Сотрудникам', 'Сотрудники, руководители и программисты'], ['departments', 'Подразделениям', 'Только выбранные отделы'], ['private', 'Администраторам', 'Ограниченный доступ'], ['public', 'Всем', 'Включая гостевые запросы'],
+            ['employees', 'Сотрудникам', 'Сотрудники, руководители и программисты'], ['departments', 'Подразделениям', 'Только выбранные отделы'], ['private', 'Администраторам', 'Ограниченный доступ'], ['public', 'Публичный', 'Открытые данные для всех, включая гостей'],
           ].map(([value, label, hint]) => <label key={value} className={`access-option ${access === value ? 'access-selected' : ''}`}><input type="radio" name="document-access" checked={access === value} onChange={() => setAccess(value)} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</div></fieldset>
           {access === 'departments' && <label className="field">Подразделения<input required value={departments} onChange={e => setDepartments(e.target.value)} placeholder="finance, it" disabled={saving || extracting} maxLength={1950} /><small>Названия через запятую, как в профилях пользователей.</small></label>}
           <div className="form-actions"><button className="button button-primary" type="submit" disabled={saving || extracting || !title.trim() || !content.trim()}>{saving ? <Loader2 className="animate-spin" size={17} /> : <Upload size={17} />}{saving ? 'Добавляем документ…' : 'Добавить в базу знаний'}</button></div>
@@ -587,7 +587,7 @@ function KnowledgePanel() {
             <Upload size={19} aria-hidden="true" />
             <span>
               <strong>Выбрать несколько файлов</strong>
-              <small>PDF, DOCX, ODT, TXT, Markdown и исходный код до 10 МБ каждый (до 50 файлов за раз)</small>
+              <small>PDF до 32 МБ, остальные документы и исходный код до 10 МБ каждый (до 50 файлов за раз)</small>
             </span>
             <input
               ref={bulkInputRef}
@@ -618,7 +618,7 @@ function KnowledgePanel() {
           )}
 
           <fieldset disabled={bulkUploading}><legend>Права доступа для всей партии</legend><div className="access-options">{[
-            ['employees', 'Сотрудникам', 'Сотрудники, руководители и программисты'], ['departments', 'Подразделениям', 'Только выбранные отделы'], ['private', 'Администраторам', 'Ограниченный доступ'], ['public', 'Всем', 'Включая гостевые запросы'],
+            ['employees', 'Сотрудникам', 'Сотрудники, руководители и программисты'], ['departments', 'Подразделениям', 'Только выбранные отделы'], ['private', 'Администраторам', 'Ограниченный доступ'], ['public', 'Публичный', 'Открытые данные для всех, включая гостей'],
           ].map(([value, label, hint]) => <label key={value} className={`access-option ${bulkAccess === value ? 'access-selected' : ''}`}><input type="radio" name="bulk-access" checked={bulkAccess === value} onChange={() => setBulkAccess(value)} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}</div></fieldset>
 
           {bulkAccess === 'departments' && <label className="field">Подразделения<input required value={bulkDepartments} onChange={e => setBulkDepartments(e.target.value)} placeholder="finance, it" disabled={bulkUploading} maxLength={1950} /><small>Названия через запятую.</small></label>}

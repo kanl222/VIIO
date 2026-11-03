@@ -8,8 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from viio_documents.router import UserContext
 from viio_documents.services.documents_client import require_internal, forward_documents
-from viio_documents.services.enhanced_retrieval import EnhancedRetrieval
-from viio_documents.tools.search_tool import format_documents
+from viio_documents.services.rag_client import forward_rag
 
 
 class KnowledgeQuestion(BaseModel):
@@ -58,6 +57,8 @@ def configure_service(app, api_router=None):
         return
 
     app.title = 'VIIO Documents' if role == 'documents' else 'VIIO Document Worker'
+    router.routes = [route for route in router.routes if route.path not in {
+        '/api/v1/consultant-materials/search', '/api/v1/consultant-materials/validate'}]
 
     def authorize(request: Request):
         from viio_documents.security import authorize as check
@@ -80,17 +81,15 @@ def configure_service(app, api_router=None):
             return await call_next(request)
 
     if role == 'documents':
-        @app.get('/api/v1/knowledge/access-revision',dependencies=[Depends(authorize)])
-        async def access_revision():
-            return {'revision':await app.state.knowledge_data.access_revision()}
-
-        @app.post('/api/v1/knowledge/search', dependencies=[Depends(authorize)])
-        async def knowledge_search(question: KnowledgeQuestion):
-            context = question.user_context.model_dump() if question.user_context else None
-            diagnostic = {} if question.diagnostics else None
-            docs = await EnhancedRetrieval(app.state.vector_store, app.state.knowledge_data).search(
-                question.query, context, question.k, **({'diagnostics': diagnostic} if diagnostic is not None else {}))
-            return {'context': format_documents(docs), **({'diagnostics': diagnostic} if diagnostic is not None else {})}
+        # Existing callers keep the same URLs, but retrieval runs only in RAG.
+        @app.get('/api/v1/knowledge/access-revision')
+        @app.post('/api/v1/knowledge/search')
+        @app.post('/api/v1/knowledge/yandex/chat')
+        @app.post('/api/v1/consultant-materials/yandex/chat')
+        @app.post('/api/v1/consultant-materials/search')
+        @app.post('/api/v1/consultant-materials/validate')
+        async def rag_gateway(request: Request):
+            return await forward_rag(request, settings)
 
         @app.middleware('http')
         async def delegate_writes(request, call_next):

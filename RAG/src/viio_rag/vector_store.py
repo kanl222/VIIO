@@ -12,7 +12,7 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-from viio_documents.interfaces._protocols import IVectorStore
+from viio_rag.interfaces import IVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +197,13 @@ class QdrantVectorStoreAdapter(IVectorStore):
         self._client.set_payload(self._collection_name, payload={'ingestion_ready': True},
             points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
             key='metadata', wait=True)
+
+    def delete_document_tail(self, identifier: str, chunks_count: int) -> None:
+        """Remove obsolete chunk indices only after the replacement was written."""
+        self._client.delete(self._collection_name, models.FilterSelector(filter=models.Filter(must=[
+            models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier)),
+            models.FieldCondition(key='metadata.chunk_index', range=models.Range(gte=chunks_count)),
+        ])), wait=True)
 
     def set_document_active(self, identifier, active):
         self._client.set_payload(self._collection_name, payload={'is_active': active},

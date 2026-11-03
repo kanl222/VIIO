@@ -1,1 +1,1 @@
-from viio_documents.models.embeddings import create_embeddings
+from viio_rag.embeddings import create_embeddings

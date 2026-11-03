@@ -51,3 +51,24 @@ Assistent/tests/scratch_debug.py
 /data/
 Diagnostics/DESIGN-BRIEF.md
 Diagnostics/PRODUCT.md
+
+# Local reports, experiments and research; keep system documentation tracked.
+/docs/*.json
+/docs/*.jsonl
+/docs/*.txt
+/docs/imports/
+/docs/superpowers/
+/docs/*evaluation*.md
+/docs/research-*.md
+/docs/improvement-plan-*.md
+/docs/problems-*.md
+/docs/retrieval-inspection-*.md
+/docs/live-tests-*.md
+/docs/coder-knowledge-role-verification-*.md
+/docs/gosapteka-import-*.md
+/docs/instruction-cleanup-*.md
+/docs/main-agent-fixes-*.md
+/docs/release-a-2026-10-27.md
+/docs/langgraph-tools-mcp-949376.md
+/docs/rag-article-779526.md
+/docs/rag-big-rag-comparison.md

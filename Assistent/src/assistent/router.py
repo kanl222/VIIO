@@ -1,7 +1,9 @@
 from hmac import compare_digest
 from assistent.services.diagnostics import capture, record
 from fastapi import APIRouter,Depends,Header,HTTPException
-from pydantic import BaseModel,Field,ConfigDict
+from pydantic import BaseModel,Field,ConfigDict,StrictBool
+import uuid
+from typing import Literal
 from assistent.services.documents_client import access_revision
 class UserContext(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -13,6 +15,8 @@ class ChatRequest(BaseModel):
     message:str=Field(min_length=1,max_length=24000)
     thread_id:str|None=None
     user_context:UserContext|None=None
+    confirmed_public_for_external_cloud: StrictBool = False
+    rag_backend: Literal['local', 'yandex'] | None = None
 class ChatSource(BaseModel):
     title:str
     document_id:str
@@ -33,6 +37,11 @@ def create_api_router(agent_service,settings,consultant_service=None):
     @router.post('/api/v1/chat',dependencies=[Depends(authorize)],response_model=ChatResponse)
     async def chat(request:ChatRequest):
         if not request.message.strip():raise HTTPException(400,'Пустое сообщение')
+        if (request.rag_backend or settings.assistant_rag_backend) == 'yandex':
+            from assistent.services.managed_rag import answer
+            result = await answer(settings, request.message, request.confirmed_public_for_external_cloud)
+            return ChatResponse(reply=result['reply'], thread_id=request.thread_id or str(uuid.uuid4()),
+                                sources=result['sources'])
         with capture('main', request.message, request.thread_id):
             context=request.user_context.model_dump() if request.user_context else {}
             revision=await access_revision(settings) if settings.secure_runtime else None

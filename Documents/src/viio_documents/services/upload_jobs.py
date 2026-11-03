@@ -89,7 +89,8 @@ class UploadJobs:
 
     async def require_review(self, identifier, token, prepared):
         review = {'content': prepared.content, 'engine': prepared.engine, 'pages': prepared.pages,
-                  'token': uuid.uuid4().hex, 'approved': False}
+                  'token': uuid.uuid4().hex, 'approved': False,
+                  'document': prepared.document}
         async with self.catalog.pool.connection() as conn:
             await conn.execute("""UPDATE document_upload_jobs SET status='needs_review',review=%s,
                 claim_token=NULL,lease_until=NULL,updated_at=now()

@@ -19,7 +19,10 @@ class PersonalFacts:
 
     async def setup(self):
         async with self.catalog.pool.connection() as conn:
-            await conn.execute(MEMORY_DDL)
+            for statement in MEMORY_DDL.strip().split(';'):
+                stmt = statement.strip()
+                if stmt:
+                    await conn.execute(stmt)
 
     async def remember(self, context, thread, content):
         content = content.strip()

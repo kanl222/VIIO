@@ -7,13 +7,16 @@ WORKDIR /app
 COPY --from=uv /uv /bin/uv
 
 # Установка зависимостей проекта
-COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project --no-dev
+COPY RAG/pyproject.toml /RAG/pyproject.toml
+COPY RAG/src /RAG/src
+COPY RAG/README.md /RAG/README.md
+COPY Documents/pyproject.toml Documents/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project --no-dev --no-editable
 
 # Копирование исходного кода и сборка пакета
-COPY src ./src
-COPY README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+COPY Documents/src ./src
+COPY Documents/README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-editable
 
 # Финальный легковесный образ
 FROM python:3.12-slim AS runner
@@ -29,6 +32,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src
 COPY --from=builder /app/README.md /app/README.md
 
+RUN mkdir -p /traces && chown 65532:65532 /traces
 USER 65532:65532
 USER 65532:65532
 EXPOSE 8000

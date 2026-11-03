@@ -64,7 +64,7 @@ export function useChat(
 
   // Отправка сообщения
   const sendMessage = useCallback(
-    async (text: string, targetId: string | null = conversationId) => {
+    async (text: string, targetId: string | null = conversationId, options?: import('../api/chat').RagOptions) => {
       if (!targetId || !text.trim() || pendingSend.current) {
         return;
       }
@@ -95,7 +95,7 @@ export function useChat(
       setError(null);
 
       try {
-        const response = await chatApi.sendMessage(targetId, trimmedText);
+        const response = await chatApi.sendMessage(targetId, trimmedText, options);
         const assistantMessage: Message = {
           id: response.message_id || `asst-${Date.now()}`,
           conversation_id: targetId,

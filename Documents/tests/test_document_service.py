@@ -91,3 +91,34 @@ def test_word_chunks_preserve_overlap_and_line_breaks():
 def test_invalid_chunk_settings_are_rejected(size, overlap):
     with pytest.raises(ValueError):
         split_document_text('Текст', size, overlap, 'words')
+
+
+def test_markdown_sections_are_not_mixed_and_retain_heading_on_continuation():
+    store = MockVectorStore()
+    service = DocumentService(store, chunk_size=120, chunk_overlap=15)
+    content = '# Guide\n\n## Initial balances\n\n' + 'Create inventory and save all balances. ' * 12 + '\n\n## Reorganization\n\nTransfer to another organization.'
+    service.index_document('Guide', content)
+    balance_chunks = [text for text in store.stored_texts if 'Create inventory' in text]
+    assert len(balance_chunks) > 1
+    assert all('## Initial balances' in text for text in balance_chunks)
+    assert not any('balances.' in text and 'Transfer to another' in text for text in store.stored_texts)
+    assert all(meta.get('section_path') for meta in store.stored_metadatas)
+
+
+def test_large_markdown_table_repeats_headers_without_losing_rows():
+    from viio_rag.chunks import document_chunks
+    rows = [f'| Medicine{i} | {i} packages |' for i in range(30)]
+    content = '# Inventory\n\n| Medicine | Quantity |\n| --- | --- |\n' + '\n'.join(rows)
+    parts = list(document_chunks(content, 180, 20))
+    assert len(parts) > 1
+    assert all('| Medicine | Quantity |\n| --- | --- |' in text for text, _ in parts)
+    assert all(any(row in text for text, _ in parts) for row in rows)
+    assert all(len(text) <= 180 for text, _ in parts)
+
+
+def test_fenced_heading_does_not_create_a_section():
+    from viio_rag.chunks import document_chunks
+    parts = list(document_chunks('# Real\n\n```python\n# Comment\nx = 1\n```\n\nEnd.', 300, 10))
+    assert len(parts) == 1
+    assert parts[0][1]['section_path'] == ['Real']
+    assert '# Comment' in parts[0][0]

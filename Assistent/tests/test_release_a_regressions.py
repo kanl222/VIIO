@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from assistent.services.agent_service import AgentService
 from assistent.services.coding_agent import CodingAgentService, MultiAgentService, is_coding_request
 from assistent.services.graph_builder import build_agent_graph
-from viio_documents.tools.search_tool import create_knowledge_search_tool
+from viio_rag.search_tool import create_knowledge_search_tool
 from test_coding_agent import CapturingModel, PROGRAMMER
 from test_required_retrieval import NoToolCallsModel
 from assistent.services.request_policy import calculate

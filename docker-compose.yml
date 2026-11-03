@@ -51,8 +51,8 @@ services:
     cpus: ${DOCUMENT_WORKER_CPUS:-1}
     mem_limit: ${DOCUMENT_WORKER_MEMORY:-2g}
     build:
-      context: ./Documents
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Documents/Dockerfile
     container_name: viio_document_worker
     environment:
     - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
@@ -73,9 +73,10 @@ services:
     - POSTGRES_USER=viio_worker
     - POSTGRES_PASSWORD=${WORKER_DB_PASSWORD:?Configure WORKER_DB_PASSWORD in .env}
     - PDF_ENGINE=${PDF_ENGINE:-auto}
-    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+    - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}
+    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-200}
     - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
-    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-1800}
     - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
     - DOCUMENTS_STORAGE_PATH=/data/documents
     - DOCUMENTS_CATALOG_ENABLED=${DOCUMENTS_CATALOG_ENABLED:-true}
@@ -105,6 +106,8 @@ services:
     volumes:
     - documents_storage:/data/documents
     depends_on:
+      pdf-worker:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       qdrant:
@@ -120,8 +123,73 @@ services:
     - /tmp:size=256m
     pids_limit: 256
     user: 65532:65532
+  rag:
+    image: viio-rag:latest
+    build:
+      context: .
+      dockerfile: RAG/Dockerfile
+    container_name: viio_rag
+    command: [uvicorn, 'viio_rag.app:create_app', --factory, --host, 0.0.0.0, --port, '8000']
+    environment:
+    - SERVICE_ROLE=rag
+    - RAG_YANDEX_API_KEY=${RAG_YANDEX_API_KEY:-${CONSULTANT_YANDEX_API_KEY:-}}
+    - RAG_YANDEX_FOLDER_ID=${RAG_YANDEX_FOLDER_ID:-${CONSULTANT_YANDEX_FOLDER_ID:-}}
+    - RAG_YANDEX_INDEX_ID=${RAG_YANDEX_INDEX_ID:-}
+    - RAG_YANDEX_MODEL=${RAG_YANDEX_MODEL:-aliceai-llm}
+    - RAG_YANDEX_MANIFEST=/data/rag-state/yandex-rag-runtime.json
+    - RAG_YANDEX_ASSISTANT_PROMPT=${RAG_YANDEX_ASSISTANT_PROMPT:-}
+    - RAG_YANDEX_CONSULTANT_PROMPT=${RAG_YANDEX_CONSULTANT_PROMPT:-}
+    - SECURE_RUNTIME=true
+    - DATABASE_MIGRATIONS_ENABLED=false
+    - LLM_PROVIDER=${LLM_PROVIDER:-lmstudio}
+    - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+    - LMSTUDIO_API_KEY=${LMSTUDIO_API_KEY:-lm-studio}
+    - LMSTUDIO_EMBEDDING_MODEL=${LMSTUDIO_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
+    - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    - QDRANT_URL=http://qdrant:6333
+    - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-knowledge_base}
+    - QDRANT_PUBLIC_COLLECTION_NAME=${QDRANT_PUBLIC_COLLECTION_NAME:-knowledge_public}
+    - QDRANT_API_KEY=${QDRANT_READ_KEY:?Configure QDRANT_READ_KEY in .env}
+    - POSTGRES_HOST=postgres
+    - POSTGRES_PORT=5432
+    - POSTGRES_DB=agent_db
+    - POSTGRES_USER=viio_documents
+    - POSTGRES_PASSWORD=${DOCUMENTS_DB_PASSWORD:?Configure DOCUMENTS_DB_PASSWORD in .env}
+    - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
+    - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
+    - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:?Configure CONSULTANT_SOURCE_KEY in .env}
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+    - viio_net
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+    - /tmp:size=128m
+    pids_limit: 128
+    mem_limit: 768m
+    volumes:
+    - ./RAG/state:/data/rag-state:ro
+    user: 65532:65532
   documents:
     image: viio-documents:latest
+    build:
+      context: .
+      dockerfile: Documents/Dockerfile
     container_name: viio_documents
     ports:
     - 127.0.0.1:${DOCUMENTS_PORT:-8002}:8000
@@ -146,9 +214,10 @@ services:
     - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
     - PDF_ENGINE=${PDF_ENGINE:-auto}
-    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+    - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}
+    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-200}
     - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
-    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-1800}
     - DOCLING_URL=${DOCLING_URL:-http://pdf-worker:8080}
     - DOCUMENTS_STORAGE_PATH=/data/documents
     - DOCUMENTS_CATALOG_ENABLED=${DOCUMENTS_CATALOG_ENABLED:-true}
@@ -156,6 +225,8 @@ services:
     - BULK_MAX_FILE_BYTES=${BULK_MAX_FILE_BYTES:-10485760}
     - BULK_MAX_WORKERS=${BULK_MAX_WORKERS:-1}
     - SERVICE_ROLE=documents
+    - RAG_URL=http://rag:8000
+    - RAG_TIMEOUT_SECONDS=${RAG_TIMEOUT_SECONDS:-60}
     - DOCUMENT_WORKER_URL=http://document-worker:8000
     - SECURE_RUNTIME=true
     - DATABASE_MIGRATIONS_ENABLED=false
@@ -182,6 +253,8 @@ services:
     - documents_storage:/data/documents
     depends_on:
       document-worker:
+        condition: service_healthy
+      rag:
         condition: service_healthy
     networks:
     - viio_net
@@ -218,6 +291,12 @@ services:
     - API_HOST=0.0.0.0
     - API_PORT=8000
     - CODING_AGENT_ENABLED=${CODING_AGENT_ENABLED:-true}
+    - ASSISTANT_RAG_BACKEND=${ASSISTANT_RAG_BACKEND:-local}
+    - CHAT_PROVIDER=${CHAT_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
+    - CHAT_MODEL=${CHAT_MODEL:-}
+    - CODING_PROVIDER=${CODING_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
+    - DATABASE_PROVIDER=${DATABASE_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
+    - DATABASE_MODEL=${DATABASE_MODEL:-}
     - CODING_MODEL=${CODING_MODEL:-}
     - CODING_ALLOWED_ROLES=${CODING_ALLOWED_ROLES:-["programmer","admin"]}
     - CODING_CONTEXT_MAX_CHARS=${CODING_CONTEXT_MAX_CHARS:-6000}
@@ -282,6 +361,12 @@ services:
     - ${CONSULTANT_PORT:-8001}:8000
     environment:
     - CONSULTANT_ENABLED=${CONSULTANT_ENABLED:-false}
+    - CONSULTANT_RAG_BACKEND=${CONSULTANT_RAG_BACKEND:-local}
+    - CONSULTANT_YANDEX_ENABLED=${CONSULTANT_YANDEX_ENABLED:-false}
+    - CONSULTANT_YANDEX_API_KEY=${CONSULTANT_YANDEX_API_KEY:-}
+    - CONSULTANT_YANDEX_FOLDER_ID=${CONSULTANT_YANDEX_FOLDER_ID:-}
+    - CONSULTANT_YANDEX_MODEL=${CONSULTANT_YANDEX_MODEL:-aliceai-llm}
+    - CONSULTANT_CLOUD_PUBLIC_MATERIAL_HASHES=${CONSULTANT_CLOUD_PUBLIC_MATERIAL_HASHES:-[]}
     - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
     - CONSULTANT_SOURCE_URL=http://documents:8000
@@ -394,13 +479,12 @@ services:
     - viio_net
   pdf-worker:
     build: ./pdf-worker
-    profiles:
-    - pdf
     environment:
     - INTERNAL_API_KEY=${DOCLING_API_KEY:?Configure DOCLING_API_KEY in .env}
-    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-50}
+    - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}
+    - PDF_MAX_PAGES=${PDF_MAX_PAGES:-200}
     - PDF_MAX_CHARS=${PDF_MAX_CHARS:-500000}
-    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-120}
+    - PDF_TIMEOUT_SECONDS=${PDF_TIMEOUT_SECONDS:-1800}
     - DOCLING_CPU_THREADS=${DOCLING_CPU_THREADS:-2}
     volumes:
     - docling_models:/models

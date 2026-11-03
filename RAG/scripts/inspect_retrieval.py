@@ -41,13 +41,13 @@ async def inspect(output,answers_file):
     from psycopg_pool import AsyncConnectionPool
     from qdrant_client import QdrantClient,models
     from viio_documents.config import Settings
-    from viio_documents.models import create_embeddings
+    from viio_rag.embeddings import create_embeddings
     from viio_documents.services.document_catalog import DocumentCatalogService
-    from viio_documents.services.knowledge_data import KnowledgeData,query_terms
-    from viio_documents.services.publication_index import PublicationIndex
-    from viio_documents.services.enhanced_retrieval import rank_documents
-    from viio_documents.tools.search_tool import build_access_filter,format_documents
-    from viio_documents.utils.vector_store import QdrantVectorStoreAdapter
+    from viio_rag.knowledge_data import KnowledgeData,query_terms
+    from viio_rag.publication_index import PublicationIndex
+    from viio_rag.retrieval import rank_documents
+    from viio_rag.search_tool import build_access_filter,format_documents
+    from viio_rag.vector_store import QdrantVectorStoreAdapter
 
     output=Path(output);output.mkdir(parents=True,exist_ok=True)
     evidence=output/'contexts';evidence.mkdir(exist_ok=True)
@@ -180,8 +180,8 @@ async def inspect(output,answers_file):
 async def deep_index(output):
     from qdrant_client import QdrantClient,models
     from viio_documents.config import Settings
-    from viio_documents.models import create_embeddings
-    from viio_documents.tools.search_tool import build_access_filter
+    from viio_rag.embeddings import create_embeddings
+    from viio_rag.search_tool import build_access_filter
     from functools import partial
     output=Path(output)
     rows=[json.loads(line) for line in (output/'results.jsonl').read_text(encoding='utf-8').splitlines()]

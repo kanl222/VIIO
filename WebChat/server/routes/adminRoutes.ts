@@ -147,7 +147,7 @@ export function createAdminRouter(
     }
   });
 
-  router.post('/documents/extract-pdf', raw({ type: 'application/pdf', limit: '10mb' }), async (req, res) => {
+  router.post('/documents/extract-pdf', raw({ type: 'application/pdf', limit: '32mb' }), async (req, res) => {
     if (!Buffer.isBuffer(req.body) || !req.body.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
       res.status(400).json({ detail: 'Выберите корректный PDF-файл.' });
       return;
@@ -157,8 +157,8 @@ export function createAdminRouter(
         method: 'POST',
         headers: { 'Content-Type': 'application/pdf', 'X-Internal-Token': process.env.DOCUMENTS_ADMIN_KEY || '' },
         body: new Uint8Array(req.body),
-        // Cover the API's configurable 300s conversion limit plus transport time.
-        signal: AbortSignal.timeout(330000),
+        // Cover the API's maximum 3600s conversion limit plus transport time.
+        signal: AbortSignal.timeout(3630000),
       });
       if (!response.ok) {
         const status = [400, 413, 415, 422, 429, 503, 504].includes(response.status) ? response.status : 502;

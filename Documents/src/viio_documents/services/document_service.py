@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Literal
 from typing import Any
 import uuid
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from viio_rag.chunks import document_chunks, split_document_text
 
 from viio_documents.interfaces._protocols import DocumentMetadata, IDocumentService, IVectorStore
 from viio_documents.services.code_documents import split_code
@@ -15,27 +14,6 @@ from viio_documents.services.code_documents import split_code
 logger = logging.getLogger(__name__)
 
 
-def split_document_text(
-    content: str, chunk_size: int = 500, chunk_overlap: int = 50,
-    chunk_unit: Literal["characters", "words"] = "characters",
-) -> list[str]:
-    """Split by characters or word spans, preserving source line breaks."""
-    if chunk_size <= 0 or not 0 <= chunk_overlap < chunk_size:
-        raise ValueError("Размер фрагмента должен быть положительным, перекрытие — меньше размера")
-    if chunk_unit == "characters":
-        return RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size, chunk_overlap=chunk_overlap,
-        ).split_text(content)
-    if chunk_unit != "words":
-        raise ValueError("Неизвестная единица разбиения текста")
-    words = list(re.finditer(r"\S+", content))
-    chunks = []
-    for start in range(0, len(words), chunk_size - chunk_overlap):
-        end = min(start + chunk_size, len(words))
-        chunks.append(content[words[start].start():words[end - 1].end()])
-        if end == len(words):
-            break
-    return chunks
 
 
 class DocumentService(IDocumentService):
@@ -120,7 +98,8 @@ class DocumentService(IDocumentService):
         custom_metadata = metadata or {}
 
         code_parts = split_code(content, str(custom_metadata.get('filename', title))) if custom_metadata.get('kind') == 'code' else None
-        chunks = [part[0] for part in code_parts] if code_parts else split_document_text(clean_content, self._chunk_size, self._chunk_overlap, self._chunk_unit)
+        parts = [] if code_parts else list(document_chunks(clean_content, self._chunk_size, self._chunk_overlap, self._chunk_unit))
+        chunks = [part[0] for part in code_parts] if code_parts else [part[0] for part in parts]
         if not chunks:
             chunks = [clean_content]
 
@@ -130,6 +109,7 @@ class DocumentService(IDocumentService):
         metadatas = [
             {
                 **custom_metadata,
+                **(parts[idx][1] if parts else {}),
                 **({'line_start': code_parts[idx][1], 'line_end': code_parts[idx][2]} if code_parts else {}),
                 "document_id": doc_id,
                 "title": clean_title,

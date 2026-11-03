@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from hmac import compare_digest
 import httpx
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from typing import Literal
 from viio_consultant.config import ConsultantSettings
 from viio_consultant.models import create_model
 from viio_consultant.agent import PublicConsultant
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 class Question(BaseModel):
     model_config = ConfigDict(extra='forbid')
     message: str = Field(min_length=1, max_length=4000)
+    confirmed_public_for_external_cloud: StrictBool = False
+    rag_backend: Literal['local', 'yandex'] | None = None
 
 
 def create_app(settings=None, *, agent=None):
@@ -24,10 +27,12 @@ def create_app(settings=None, *, agent=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        if settings.enabled and app.state.agent is None:
+        if settings.enabled and app.state.agent is None and settings.rag_backend == 'local':
             async with httpx.AsyncClient(base_url=settings.source_url.rstrip('/'), timeout=10, trust_env=False,
                 follow_redirects=False, headers={'X-Publication-Key': settings.source_key}) as client:
-                app.state.agent = PublicConsultant(HttpPublicationSource(client), create_model(settings))
+                app.state.agent = PublicConsultant(HttpPublicationSource(client,
+                    cloud_public_only=settings.provider == 'yandex'), create_model(settings),
+                    search_first=settings.provider == 'yandex')
                 yield
                 app.state.agent = None
         else:
@@ -35,6 +40,8 @@ def create_app(settings=None, *, agent=None):
 
     app = FastAPI(title='VIIO Public Consultant', version='0.1.0', lifespan=lifespan)
     app.state.agent = agent
+    from viio_consultant.yandex import cloud_router
+    app.include_router(cloud_router(settings))
 
     @app.get('/health')
     async def health():
@@ -42,12 +49,19 @@ def create_app(settings=None, *, agent=None):
 
     @app.post('/api/v1/consultant/chat')
     async def chat(request: Question, x_consultant_key: str | None = Header(default=None, alias='X-Consultant-Key')):
-        if not settings.enabled or app.state.agent is None:
+        if not settings.enabled:
             raise HTTPException(503, 'Внешний консультант не настроен')
         if not x_consultant_key or not compare_digest(x_consultant_key.encode(), settings.api_key.encode()):
             raise HTTPException(401, 'Необходим ключ внешнего API')
         if not request.message.strip():
             raise HTTPException(400, 'Укажите вопрос')
+        if (request.rag_backend or settings.rag_backend) == 'yandex':
+            from viio_consultant.managed_rag import answer
+            return await answer(settings, request.message.strip(), request.confirmed_public_for_external_cloud)
+        if app.state.agent is None:
+            raise HTTPException(503, 'Внешний консультант не настроен')
+        if settings.provider == 'yandex' and not request.confirmed_public_for_external_cloud:
+            raise HTTPException(403, 'Подтвердите публичность вопроса для Yandex Cloud')
         with capture('consultant', request.message):
             record('route', mode='published_documents', tools=['search_published_documents'])
             try:

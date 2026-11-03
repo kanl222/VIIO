@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -120,3 +121,70 @@ async def test_each_search_exposes_two_materials_and_validates_all_used_snapshot
     result = await PublicConsultant(data, model).chat('Сравни инструкции')
     assert len(result['sources']) == 4
     data.public_ids.assert_awaited_once_with(['0','1','2','3'])
+
+
+@pytest.mark.asyncio
+async def test_request_executes_langgraph_nodes_before_releasing_answer():
+    agent = PublicConsultant(source(), Model(search(), AIMessage(content='Monday.')))
+    visited = []
+    async for update in agent.graph.astream({
+        'question': 'Hours?', 'messages': [], 'documents': {},
+        'calls_used': 0, 'model_turns': 0,
+    }, stream_mode='updates'):
+        visited.extend(update)
+    assert visited == ['model', 'tools', 'model', 'grounding', 'validate_publications']
+
+
+@pytest.mark.asyncio
+async def test_compiled_graph_does_not_reuse_previous_request_documents_or_messages():
+    data = source()
+    model = Model(search(), AIMessage(content='Monday.'),
+                  *[AIMessage(content='Unsupported answer') for _ in range(4)])
+    agent = PublicConsultant(data, model)
+    assert (await agent.chat('Hours?'))['sources']
+    result = await agent.chat('Different question')
+    assert result == dict(reply=NO_INFORMATION, sources=[])
+    assert [message.type for message in model.messages[2]] == ['system', 'human']
+    assert model.messages[2][-1].content == 'Different question'
+    data.public_ids.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests_keep_publication_state_separate():
+    class ConcurrentModel(Model):
+        async def ainvoke(self, messages):
+            await asyncio.sleep(0)
+            question = messages[1].content
+            return search(question) if len(messages) == 2 else AIMessage(content=question)
+
+    data = source()
+    async def public_search(query):
+        await asyncio.sleep(0)
+        return [dict(id=query, title=query, content=query)]
+    async def public_ids(identifiers):
+        return set(identifiers)
+    data.public_search.side_effect = public_search
+    data.public_ids.side_effect = public_ids
+    agent = PublicConsultant(data, ConcurrentModel())
+    results = await asyncio.gather(agent.chat('First'), agent.chat('Second'))
+    assert results == [dict(reply=q, sources=[dict(publication_id=q, title=q)])
+                       for q in ('First', 'Second')]
+
+
+@pytest.mark.asyncio
+async def test_excessive_tool_batch_ends_without_running_search():
+    response = AIMessage(content='', tool_calls=[
+        dict(name='search_published_documents', args={'query': 'Support'}, id=str(i))
+        for i in range(9)])
+    data = source()
+    result = await PublicConsultant(data, Model(response)).chat('Hours?')
+    assert result == dict(reply=NO_INFORMATION, sources=[])
+    data.public_search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_graph_propagates_source_failure_instead_of_releasing_answer():
+    data = source()
+    data.public_ids.side_effect = ConnectionError('Gateway unavailable')
+    with pytest.raises(ConnectionError):
+        await PublicConsultant(data, Model(search(), AIMessage(content='Monday.'))).chat('Hours?')

@@ -10,7 +10,8 @@ def require_internal(request,settings):
 
 async def forward_documents(request,base_url,settings):
     require_internal(request,settings)
-    client=httpx.AsyncClient(timeout=180,trust_env=False,follow_redirects=False)
+    timeout = settings.pdf_timeout_seconds + 30 if request.url.path.endswith('/extract-pdf') else 180
+    client=httpx.AsyncClient(timeout=timeout,trust_env=False,follow_redirects=False)
     token=settings.document_worker_key or (settings.internal_api_key if not settings.secure_runtime else '')
     headers={'X-Internal-Token':token,'Accept-Encoding':'identity'}
     if request.headers.get('content-type'):headers['Content-Type']=request.headers['content-type']

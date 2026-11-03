@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 STATIC = Path(__file__).parent / 'dist'
-ROOTS = [Path(p) for p in os.getenv('TRACE_ROOTS', '/traces/main,/traces/consultant').split(',')]
+ROOTS = [Path(p) for p in os.getenv('TRACE_ROOTS', '/traces/main,/traces/consultant,/traces/documents,/traces/document-worker,/traces/rag').split(',')]
 REVIEWS = Path(os.getenv('REVIEW_ROOT', '/data/reviews'))
 ID = re.compile(r'^[a-f0-9]{32}$')
 LOCK = threading.RLock()
@@ -85,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if url.path == '/api/traces':
             rows = summaries()
-            self.send_json(200, {'items': rows, 'retention': '7 дней, до 1000 запросов на агента'})
+            self.send_json(200, {'items': rows, 'retention': '7 дней, до 1000 запросов на сервис'})
         elif url.path.startswith('/api/traces/'):
             identifier = url.path.rsplit('/', 1)[-1]
             path = trace_path(identifier)

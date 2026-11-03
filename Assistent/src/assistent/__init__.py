@@ -91,7 +91,9 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
         if coding_service:
             agent_service = MultiAgentService(agent_service, coding_service, model_first=True)
         agent_service = DatabaseAgentService(
-            agent_service, llm, create_postgres_readonly_tool(app_settings),
+            agent_service, create_chat_model(app_settings, agent='database')
+            if app_settings.database_provider or app_settings.database_model else llm,
+            create_postgres_readonly_tool(app_settings),
             enabled=app_settings.pgsql_enabled,
         )
         if catalog_service:

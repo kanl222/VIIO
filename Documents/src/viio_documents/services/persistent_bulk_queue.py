@@ -9,6 +9,7 @@ import anyio.to_thread
 from viio_documents.services.bulk_queue import BulkUploadTask, BulkUploadResult, PreparedReview, DocumentVersionConflict
 from viio_documents.services.upload_jobs import UploadJobs
 from viio_documents.services.office_extraction import OfficeExtractionError
+from viio_documents.services.pdf_extraction import PdfExtractionError
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class PersistentBulkQueue:
             raise
         except Exception as error:
             logger.exception('Ошибка обработки загрузки %s', row['id'])
-            message = str(error) if isinstance(error, (DocumentVersionConflict, OfficeExtractionError)) else 'Обработка не завершена. Повторите загрузку или обратитесь к администратору.'
+            message = str(error) if isinstance(error, (DocumentVersionConflict, OfficeExtractionError, PdfExtractionError)) else 'Обработка не завершена. Повторите загрузку или обратитесь к администратору.'
             await self.jobs.finish(row['id'], row['claim_token'], status='error', error=message)
         finally:
             heartbeat.cancel()

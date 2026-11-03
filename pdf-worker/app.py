@@ -12,10 +12,10 @@ from fastapi import FastAPI, HTTPException, Request
 
 app = FastAPI()
 busy = asyncio.Lock()
-MAX_BYTES = 10 * 1024 * 1024
-MAX_PAGES = int(os.environ.get("PDF_MAX_PAGES", "50"))
+MAX_BYTES = int(os.environ.get("PDF_MAX_BYTES", str(32 * 1024 * 1024)))
+MAX_PAGES = int(os.environ.get("PDF_MAX_PAGES", "200"))
 MAX_CHARS = int(os.environ.get("PDF_MAX_CHARS", "500000"))
-TIMEOUT = int(os.environ.get("PDF_TIMEOUT_SECONDS", "120"))
+TIMEOUT = int(os.environ.get("PDF_TIMEOUT_SECONDS", "1800"))
 
 
 def convert_child(data, output):
@@ -34,6 +34,7 @@ def convert_child(data, output):
             artifacts_path=os.environ.get("DOCLING_ARTIFACTS_PATH", "/models/artifacts"),
             accelerator_options=AcceleratorOptions(device=AcceleratorDevice.CPU, num_threads=int(os.environ.get("DOCLING_CPU_THREADS", "2"))),
             do_ocr=True,
+            do_table_structure=True,
             ocr_options=TesseractCliOcrOptions(lang=["eng", "rus"]),
             enable_remote_services=False,
             allow_external_plugins=False,
@@ -48,7 +49,11 @@ def convert_child(data, output):
         if not content or len(content) > MAX_CHARS:
             output.put({"status": 413 if len(content) > MAX_CHARS else 422})
             return
-        output.put({"content": content, "engine": "docling-cpu"})
+        if len(result.document.pages) != len(reader.pages):
+            output.put({"status": 422})
+            return
+        output.put({"content": content, "engine": "docling-cpu",
+                    "pages": len(reader.pages), "document": result.document.export_to_dict()})
     except Exception as exc:
         print("PDF conversion failed:", type(exc).__name__, flush=True)
         # Document contents, filenames and upstream exceptions are not returned.

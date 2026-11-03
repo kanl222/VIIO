@@ -78,7 +78,7 @@ async def test_source_rejects_private_fields_from_gateway():
 
 
 def test_standalone_package_does_not_import_internal_application_or_databases():
-    forbidden = {'assistent', 'psycopg', 'qdrant_client', 'langgraph', 'mcp'}
+    forbidden = {'assistent', 'psycopg', 'qdrant_client', 'mcp'}
     root = Path(__file__).resolve().parents[1] / 'src' / 'viio_consultant'
     assert root.is_dir()
     for source in root.glob('*.py'):

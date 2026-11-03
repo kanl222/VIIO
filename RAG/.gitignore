@@ -1,0 +1,3 @@
+# Local cloud resource identifiers and generated test outputs.
+/state/
+/reports/*.json

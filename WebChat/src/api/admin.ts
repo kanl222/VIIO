@@ -44,6 +44,7 @@ export interface CatalogDocument {
   original_filename?: string;
   status: string;
   is_public: boolean;
+  access_class?: 'public' | 'restricted';
   allowed_roles: string[];
   allowed_departments: string[];
   has_original: boolean;

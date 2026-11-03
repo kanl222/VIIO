@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 from contextlib import asynccontextmanager
 import pytest
 from langchain_core.documents import Document
-from viio_documents.services.enhanced_retrieval import EnhancedRetrieval
-from viio_documents.services.knowledge_data import KnowledgeData
+from viio_rag.retrieval import EnhancedRetrieval
+from viio_rag.knowledge_data import KnowledgeData
 
 
 @pytest.mark.asyncio

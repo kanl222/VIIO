@@ -71,6 +71,7 @@ def validate_package(data, suffix, max_chars):
 def docx_blocks(container):
     for block in container.iter_inner_content():
         if isinstance(block, Table):
+            rows = []
             for row in block.rows:
                 seen, cells = set(), []
                 for cell in row.cells:
@@ -79,7 +80,8 @@ def docx_blocks(container):
                         continue
                     seen.add(cell._tc)
                     cells.append(' / '.join(docx_blocks(cell)).strip())
-                yield ' | '.join(cells) if any(cell.strip() for cell in cells) else ''
+                rows.append(cells)
+            yield markdown_table(rows)
         else:
             parts = []
             for item in block.iter_inner_content():
@@ -90,7 +92,11 @@ def docx_blocks(container):
             text = ''.join(parts)
             style = block.style.name.lower() if block.style else ''
             numbering = block._p.pPr.numPr if block._p.pPr is not None else None
-            if text.strip() and (numbering is not None or style.startswith('list')):
+            if text.strip() and style.startswith('heading ') and style[8:].isdigit():
+                text = '#' * min(6, max(1, int(style[8:]))) + ' ' + text
+            elif text.strip() and style == 'title':
+                text = '# ' + text
+            elif text.strip() and (numbering is not None or style.startswith('list')):
                 level = numbering.ilvl.val if numbering is not None and numbering.ilvl is not None else 0
                 text = '  ' * min(level, 8) + '- ' + text
             yield text
@@ -104,11 +110,14 @@ def odt_blocks(node, depth=0, max_chars=500000):
         namespace, tag = name
         if namespace == TEXT_NS and tag in {'p', 'h'}:
             text = teletype.extractText(child)
+            if tag == 'h' and text.strip():
+                level = int(child.getAttribute('outlinelevel') or 1)
+                text = '#' * min(6, max(1, level)) + ' ' + text
             links = list(dict.fromkeys(link.getAttribute('href') for link in child.getElementsByType(A)
                 if link.getAttribute('href') and link.getAttribute('href') not in text))
             yield text + (' (' + '; '.join(links) + ')' if links else '')
         elif namespace == TABLE_NS and tag == 'table':
-            yield from odt_table(child, max_chars)
+            yield markdown_table(odt_table(child, max_chars))
         elif namespace == TEXT_NS and tag == 'list':
             for item in child.childNodes:
                 if getattr(item, 'qname', None) != (TEXT_NS, 'list-item'):
@@ -122,6 +131,22 @@ def odt_blocks(node, depth=0, max_chars=500000):
                         yield line
         elif tag not in {'annotation', 'tracked-changes', 'change-info', 'scripts'}:
             yield from odt_blocks(child, depth, max_chars)
+
+
+def markdown_table(rows):
+    """Keep column boundaries and a repeatable header in the extracted Markdown."""
+    rows = list(rows)
+    if not rows or not any(value.strip() for row in rows for value in row):
+        return ''
+    width = max(len(row) for row in rows)
+    lines = []
+    for row in rows:
+        # Literal pipes and line breaks belong to cells, not the table syntax.
+        cells = [value.replace('|', '&#124;').replace('\r', '').replace('\n', '<br>') for value in row]
+        cells.extend([''] * (width - len(cells)))
+        lines.append('| ' + ' | '.join(cells) + ' |')
+    lines.insert(1, '| ' + ' | '.join(['---'] * width) + ' |')
+    return '\n'.join(lines)
 
 
 def odt_table(table, max_chars):
@@ -150,7 +175,8 @@ def odt_table(table, max_chars):
         characters += row_size * repeated_rows
         if emitted > 10000 or characters > max_chars:
             raise OfficeExtractionError('Слишком длинная таблица. Разделите документ.')
-        yield from [(' | '.join(cells) if any(cell.strip() for cell in cells) else '')] * repeated_rows
+        for _ in range(repeated_rows):
+            yield cells
 
 
 class OfficeExtractionService:

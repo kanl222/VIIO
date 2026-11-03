@@ -20,6 +20,9 @@ services:
     volumes:
       - assistant_traces:/traces/main:ro
       - consultant_traces:/traces/consultant:ro
+      - documents_traces:/traces/documents:ro
+      - document_worker_traces:/traces/document-worker:ro
+      - rag_traces:/traces/rag:ro
       - diagnostic_reviews:/data/reviews
     read_only: true
     user: 65532:65532
@@ -35,9 +38,26 @@ services:
       retries: 3
   document-worker:
     image: viio-documents:diagnostics
+    environment:
+      - VIIO_TRACE_DIR=/traces
+    volumes:
+      - document_worker_traces:/traces
+  rag:
+    image: viio-rag:diagnostics
+    environment:
+      - VIIO_TRACE_DIR=/traces
+    volumes:
+      - rag_traces:/traces
   documents:
     image: viio-documents:diagnostics
+    environment:
+      - VIIO_TRACE_DIR=/traces
+    volumes:
+      - documents_traces:/traces
 volumes:
   assistant_traces:
   consultant_traces:
   diagnostic_reviews:
+  documents_traces:
+  document_worker_traces:
+  rag_traces:

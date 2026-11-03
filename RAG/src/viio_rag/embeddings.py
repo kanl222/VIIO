@@ -4,7 +4,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
 from langchain_openai import OpenAIEmbeddings
 
-from viio_documents.config import Settings
+from viio_rag.config import Settings
 
 
 def create_embeddings(settings: Settings) -> Embeddings:

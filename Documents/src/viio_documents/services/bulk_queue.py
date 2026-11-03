@@ -63,6 +63,7 @@ class PreparedReview:
     content: str
     engine: str
     pages: int
+    document: dict | None = None
 
 
 @dataclass

@@ -4,8 +4,9 @@ import logging
 from functools import partial
 import anyio.to_thread
 from langchain_core.runnables import RunnableConfig
-from viio_documents.services.knowledge_data import query_terms
-from viio_documents.tools.search_tool import build_access_filter, format_documents
+from viio_rag.knowledge_data import query_terms
+from viio_rag.search_tool import build_access_filter, format_documents
+from viio_rag.diagnostics import capture, record
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,20 @@ class EnhancedRetrieval:
         self.vector_store, self.data = vector_store, data
 
     async def search(self, query, context, k, diagnostics=None):
+        with capture('search', query) as trace:
+            diagnostic = diagnostics if diagnostics is not None else ({} if trace is not None else None)
+            record('search_request', query=query, k=k, scope='internal')
+            try:
+                selected = await self._search(query, context, k, diagnostic)
+            except Exception as error:
+                record('retrieval', query=query, k=k, scope='internal', status='error', error=type(error).__name__)
+                raise
+            if diagnostic is not None:
+                record('retrieval', query=query, scope='internal', status='ok',
+                       context=format_documents(selected), **diagnostic)
+            return selected
+
+    async def _search(self, query, context, k, diagnostics=None):
         searches = [
             anyio.to_thread.run_sync(partial(self.vector_store.similarity_search, query=query, k=max(k * 3, 12), filter=build_access_filter(context))),
             self.data.lexical(query, context)]

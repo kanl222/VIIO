@@ -427,3 +427,25 @@ test('Publication rejects empty public excerpts without forwarding', async () =>
     assert.equal(calls, 0);
   } finally { await close(); }
 });
+
+test('PDF preview accepts a manual larger than 10 MiB and rejects files above 32 MiB', async () => {
+  let calls = 0;
+  const { request, close } = await setupTestApp(async (url, options) => {
+    calls++;
+    assert.ok(String(url).endsWith('/api/v1/documents/extract-pdf'));
+    assert.ok(options.body.byteLength > 10 * 1024 * 1024);
+    return { ok: true, status: 200, json: async () => ({ content: '# Manual\n\nComplete procedure.', pages: 124, engine: 'docling-cpu' }) };
+  });
+  try {
+    const headers = { Cookie: 'session_id=admin-sess', 'Content-Type': 'application/pdf' };
+    const manual = Buffer.alloc(11 * 1024 * 1024, 32);
+    manual.write('%PDF-1.7');
+    const accepted = await request('/api/admin/documents/extract-pdf', { method: 'POST', headers, body: manual });
+    assert.equal(accepted.status, 200);
+    const oversized = Buffer.alloc(32 * 1024 * 1024 + 1, 32);
+    oversized.write('%PDF-1.7');
+    const rejected = await request('/api/admin/documents/extract-pdf', { method: 'POST', headers, body: oversized });
+    assert.equal(rejected.status, 413);
+    assert.equal(calls, 1);
+  } finally { await close(); }
+});

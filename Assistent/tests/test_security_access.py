@@ -17,7 +17,7 @@ from assistent.router import (
 )
 from viio_documents.router import DocumentCreateRequest
 from viio_documents.services.document_service import DocumentService
-from viio_documents.tools.search_tool import (
+from viio_rag.search_tool import (
     build_access_filter,
     create_knowledge_search_tool,
 )

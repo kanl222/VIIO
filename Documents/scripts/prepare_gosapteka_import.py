@@ -1,52 +1,52 @@
 """Extract reviewable text for the requested public files; preserve every original."""
+import argparse
+import asyncio
 import hashlib
 import json
+import os
 import re
 import sys
 import zipfile
 from pathlib import Path
 
-from pypdf import PdfReader
-from docx import Document
+from viio_documents.config import Settings
+from viio_documents.services.pdf_extraction import PdfExtractionService
 import openpyxl
 
 from viio_documents.services.text_normalization import normalize_document_text
+from viio_documents.services.office_extraction import OfficeExtractionService
 
-ROOT = Path(__file__).resolve().parents[2] / 'data/gosapteka56/2026-10-27'
+ROOT = Path(os.environ.get('GOSAPTEKA_IMPORT_ROOT', str(Path(__file__).resolve().parents[2] / 'data/gosapteka56/2026-10-27')))
 sys.path.insert(0,str(ROOT/'_libs'))
-import xlrd
 
 
-def main():
+async def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--numbers', type=int, nargs='+', help='Prepare only these manifest document numbers')
+    parser.add_argument('--output', type=Path, default=ROOT / 'canonical-docling')
+    args = parser.parse_args()
+    settings = Settings()
+    extractor = PdfExtractionService(settings)
     manifest = json.loads((ROOT/'manifest.json').read_text(encoding='utf-8'))
-    target = ROOT/'canonical'
-    target.mkdir(exist_ok=True)
+    target = args.output
+    target.mkdir(parents=True, exist_ok=True)
     prepared=[]
     for row in manifest['documents']:
+        if args.numbers and row['number'] not in args.numbers:
+            continue
         path=ROOT/row['path']; ext=path.suffix.lower(); details={}; engine=''
         if ext=='.pdf':
-            reader=PdfReader(path)
-            pages=[page.extract_text() or '' for page in reader.pages]
-            details={'pages':len(pages),'empty_pages':sum(len(page.strip())<20 for page in pages)}
-            body='\n\n'.join(f'[Страница {i+1}]\n'+text for i,text in enumerate(pages))
-            engine='pypdf'
-            if sum(len(page.strip()) for page in pages)<50:
-                details['needs_ocr']=True
-                ocr=target/f"{row['number']:02d}-ocr-body.txt"
-                if ocr.exists():
-                    body=ocr.read_text(encoding='utf-8')
-                    # Checked against the rendered first page: handwritten 740, not OCR F40.
-                    body=re.sub(r'(Оренбург\s+№\s*)F40\b',r'\g<1>740',body)
-                    body='Текст получен OCR. Возможны ошибки в цифрах и таблицах; при расхождении используйте оригинал PDF. Реквизиты документа указаны в заголовке по исходной странице сайта.\n\n'+body
-                    details.update(needs_ocr=False,ocr_review='first/last page rendered; tables not cell-by-cell verified')
-                    engine='tesseract-cpu'
+            extracted = await extractor.extract(path.read_bytes())
+            body, engine = extracted['content'], extracted['engine']
+            details = {'pages': extracted['pages'], 'needs_ocr': False}
+            if 'document' in extracted:
+                (target / f"{row['number']:02d}.docling.json").write_text(
+                    json.dumps(extracted['document'], ensure_ascii=False), encoding='utf-8')
         elif ext=='.docx':
-            doc=Document(path)
-            body='\n'.join(p.text for p in doc.paragraphs)
-            for table in doc.tables:
-                body+='\n\n'+'\n'.join(' | '.join(cell.text for cell in cells.cells) for cells in table.rows)
-            engine='python-docx'
+            extracted = await OfficeExtractionService(settings).extract(path.read_bytes(), path.name)
+            body, engine = extracted['content'], extracted['engine']
         elif row['number']==34:
+            import xlrd
             book=xlrd.open_workbook(ROOT/'archive-contents/34_attachment.xls')
             body='\n\n'.join('Лист: '+sheet.name+'\n'+'\n'.join(' | '.join(map(str,sheet.row_values(i))) for i in range(sheet.nrows)) for sheet in book.sheets())
             engine='xlrd; complete archived XLS'
@@ -72,7 +72,7 @@ def main():
         else:
             raise ValueError('Unsupported source '+str(path))
         body=body.replace('\x00','')
-        if ext in {'.pdf', '.docx'}:
+        if ext == '.docx':
             body=normalize_document_text(body)
         text=f"# {row['title']}\n\nИсточник: {row['url']}\nСтраница раздела: {manifest['source_page']}\n\n"+body
         destination=target/f"{row['number']:02d}.txt"
@@ -82,8 +82,8 @@ def main():
               'text_sha256':hashlib.sha256(text.encode()).hexdigest(),**details}
         prepared.append(item)
         print(json.dumps({key:item.get(key) for key in ('number','title','characters','pages','empty_pages','needs_ocr','content_scope')},ensure_ascii=True),flush=True)
-    (ROOT/'prepared.json').write_text(json.dumps({'source_page':manifest['source_page'],'documents':prepared},ensure_ascii=False,indent=2),encoding='utf-8')
+    (target/'prepared.json').write_text(json.dumps({'source_page':manifest['source_page'],'documents':prepared},ensure_ascii=False,indent=2),encoding='utf-8')
 
 
 if __name__=='__main__':
-    main()
+    asyncio.run(main())

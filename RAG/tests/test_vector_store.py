@@ -2,8 +2,8 @@
 
 from langchain_core.embeddings import FakeEmbeddings
 from qdrant_client import QdrantClient
-from viio_documents.utils.vector_store import QdrantVectorStoreAdapter
-from viio_documents.tools.search_tool import build_access_filter
+from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_rag.search_tool import build_access_filter
 from langchain_core.documents import Document
 
 

@@ -10,17 +10,17 @@ from psycopg_pool import AsyncConnectionPool
 from qdrant_client import QdrantClient
 
 from viio_documents.config import Settings
-from viio_documents.models import create_embeddings
+from viio_rag.embeddings import create_embeddings
 from viio_documents.router import create_api_router
 from viio_documents.services.document_catalog import DocumentCatalogService
 from viio_documents.services.document_ingestion import DocumentIngestion
 from viio_documents.services.document_service import DocumentService
 from viio_documents.services.file_store import LocalFileStore
-from viio_documents.services.knowledge_data import KnowledgeData
+from viio_rag.knowledge_data import KnowledgeData
 from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
-from viio_documents.services.publication_index import PublicationIndex
+from viio_rag.publication_index import PublicationIndex
 from viio_documents.service_profiles import configure_service
-from viio_documents.utils.vector_store import QdrantVectorStoreAdapter
+from viio_rag.vector_store import QdrantVectorStoreAdapter
 
 logger=logging.getLogger(__name__)
 

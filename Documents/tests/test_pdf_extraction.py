@@ -30,7 +30,7 @@ def pdf_bytes(text="Approval takes 3 working days.", pages=1, encrypted=False):
 
 @pytest.mark.asyncio
 async def test_real_text_pdf_extraction_is_preview_only():
-    service = PdfExtractionService(Settings(_env_file=None))
+    service = PdfExtractionService(Settings(_env_file=None, pdf_engine='pypdf'))
     result = await service.extract(pdf_bytes())
     assert '3 working days' in result['content']
     assert result['pages'] == 1 and result['engine'] == 'pypdf'
@@ -80,7 +80,7 @@ async def test_docling_cpu_fallback_preserves_pdf_bytes_and_auth(monkeypatch):
 
 def test_pdf_endpoint_requires_internal_token_and_never_indexes():
     documents = MagicMock()
-    client = TestClient(create_app(Settings(_env_file=None, service_role='document-worker', internal_api_key='unit-secret'), MagicMock(), documents))
+    client = TestClient(create_app(Settings(_env_file=None, pdf_engine='pypdf', service_role='document-worker', internal_api_key='unit-secret'), MagicMock(), documents))
     path = '/api/v1/documents/extract-pdf'
     assert client.post(path, content=pdf_bytes(), headers={'Content-Type':'application/pdf'}).status_code == 401
     result = client.post(path, content=pdf_bytes(), headers={'Content-Type':'application/pdf','X-Internal-Token':'unit-secret'})
@@ -93,3 +93,16 @@ def test_pdf_endpoint_validates_content_type_and_stream_size():
     assert client.post('/api/v1/documents/extract-pdf', content=b'x').status_code == 415
     result = client.post('/api/v1/documents/extract-pdf', content=b'%PDF-' + b'x'*1024, headers={'Content-Type':'application/pdf'})
     assert result.status_code == 413
+
+@pytest.mark.asyncio
+async def test_auto_uses_layout_parser_even_when_pdf_has_text(monkeypatch):
+    data = pdf_bytes(pages=124)
+    real_client = httpx.AsyncClient
+    async def handler(request):
+        assert await request.aread() == data
+        return httpx.Response(200, json={'content': '# Guide\n\n## Balances\n\n1. Open inventory.\n2. Save.', 'document': {'schema_name': 'DoclingDocument', 'pages': {}}, 'pages': 124})
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    result = await PdfExtractionService(Settings(_env_file=None)).extract(data)
+    assert result['engine'] == 'docling-cpu'
+    assert '## Balances' in result['content']
+    assert result['document']['schema_name'] == 'DoclingDocument'

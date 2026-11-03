@@ -2,7 +2,7 @@
 import pytest
 from test_document_pipeline_integration import pipeline,pytestmark
 from viio_documents.router import DocumentCreateRequest
-from viio_documents.services.enhanced_retrieval import EnhancedRetrieval
+from viio_rag.retrieval import EnhancedRetrieval
 from viio_documents.services.bulk_queue import BulkUploadTask
 
 async def test_catalog_revocation_overrides_stale_vector_acl(pipeline):

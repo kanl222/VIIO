@@ -7,12 +7,18 @@ from langchain_openai import ChatOpenAI
 from assistent.config import Settings
 
 
-def create_chat_model(settings: Settings, *, model_name: str | None = None, coding: bool = False) -> BaseChatModel:
+def create_chat_model(settings: Settings, *, model_name: str | None = None, coding: bool = False,
+                      agent: str = 'chat') -> BaseChatModel:
     """Create an unbound client using this specialist's generation configuration."""
     temperature = settings.coding_temperature if coding else settings.chat_temperature
     top_p = settings.coding_top_p if coding else settings.chat_top_p
     max_tokens = settings.coding_max_tokens if coding else settings.chat_max_tokens
-    if settings.llm_provider == "lmstudio":
+    role = 'coding' if coding else agent
+    if role not in ('chat', 'coding', 'database'):
+        raise ValueError('Unknown agent model role')
+    provider = getattr(settings, f'{role}_provider') or settings.llm_provider
+    model_name = model_name or getattr(settings, f'{role}_model')
+    if provider == "lmstudio":
         return ChatOpenAI(
             base_url=settings.lmstudio_base_url,
             api_key=settings.lmstudio_api_key,

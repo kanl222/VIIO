@@ -30,6 +30,16 @@ export function createChatRouter(
     }
 
     const { conversation_id, message, attachments } = req.body || {};
+    const { rag_backend, confirmed_public_for_external_cloud } = req.body || {};
+    if ((rag_backend !== undefined && !['local', 'yandex'].includes(rag_backend)) ||
+        (confirmed_public_for_external_cloud !== undefined && typeof confirmed_public_for_external_cloud !== 'boolean')) {
+      res.status(400).json({ detail: 'Некорректный режим базы знаний или подтверждение публичности.' });
+      return;
+    }
+    if (rag_backend === 'yandex' && confirmed_public_for_external_cloud !== true) {
+      res.status(403).json({ detail: 'Подтвердите публичность вопроса для Yandex Cloud.' });
+      return;
+    }
 
     if (!conversation_id || typeof conversation_id !== 'string') {
       res.status(400).json({ detail: 'Не указан идентификатор диалога (conversation_id).' });
@@ -99,6 +109,8 @@ export function createChatRouter(
             message: cleanMessage,
             thread_id: conversation.agent_thread_id,
             user_context: userContext,
+            ...(rag_backend !== undefined ? { rag_backend } : {}),
+            ...(confirmed_public_for_external_cloud !== undefined ? { confirmed_public_for_external_cloud } : {}),
           }),
           signal: AbortSignal.timeout(120_000),
         });
