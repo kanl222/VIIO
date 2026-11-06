@@ -6,6 +6,9 @@ export interface Overview {
   counts: { users: number; conversations: number; messages: number; sessions: number };
   database: boolean;
   agent: { healthy: boolean; model?: string; provider?: string; chunks?: number };
+  documents: { healthy: boolean };
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number;
+    reported_calls: number; unreported_calls: number; started_at: string } | null;
   checked_at: string;
 }
 export const getOverview = (signal?: AbortSignal) => apiFetch<Overview>('/api/admin/overview', { signal });

@@ -66,6 +66,56 @@ async def test_few_large_turns_summarize_before_trimming_user_goal():
 
 
 @pytest.mark.asyncio
+async def test_langmem_extends_existing_checkpoint_summary():
+    from unittest.mock import patch
+    from langmem.short_term import asummarize_messages
+
+    messages = []
+    for i in range(20):
+        messages.extend([HumanMessage(content=f'Goal {i}'), AIMessage(content=f'Answer {i}')])
+    llm = AsyncMock()
+    llm.ainvoke.return_value = AIMessage(content='Extended summary')
+    state = {'history_scope': 'owner', 'dialogue_summary': 'Old decision', 'summary_upto': 4}
+    with patch('assistent.services.dialogue_summary.asummarize_messages', wraps=asummarize_messages) as ready:
+        prepared, update = await compact_dialogue(messages, state, {'history_scope': 'owner'}, llm, 12)
+    ready.assert_awaited_once()
+    assert ready.call_args.kwargs['running_summary'].summary == 'Old decision'
+    assert 'Old decision' in str(llm.ainvoke.call_args)
+    assert 'Goal 0' not in str(llm.ainvoke.call_args)
+    assert update['dialogue_summary'] == 'Extended summary'
+    assert 'Extended summary' in prepared[0].content
+    assert all(message.id is None for message in messages)  # Copies, not checkpoint mutation.
+
+
+@pytest.mark.asyncio
+async def test_summary_failure_keeps_previous_summary_and_complete_tool_turn():
+    messages = []
+    for i in range(15):
+        messages.extend([HumanMessage(content=f'Goal {i}'), AIMessage(content='Answer')])
+    call = AIMessage(content='', tool_calls=[{'name': 'read_code', 'args': {}, 'id': 'c1'}])
+    result = ToolMessage(content='PRIVATE_TOOL_PAYLOAD', tool_call_id='c1')
+    messages.extend([HumanMessage(content='Read file'), call, result])
+    llm = AsyncMock()
+    llm.ainvoke.side_effect = RuntimeError('unavailable')
+    state = {'history_scope': 'owner', 'dialogue_summary': 'Previous goal', 'summary_upto': 2}
+    prepared, update = await compact_dialogue(messages, state, {'history_scope': 'owner'}, llm, 12)
+    assert update['dialogue_summary'] == 'Previous goal' and update['summary_upto'] == 2
+    assert prepared[-2:] == [call, result]
+    assert 'PRIVATE_TOOL_PAYLOAD' not in str(llm.ainvoke.call_args)
+
+
+@pytest.mark.asyncio
+async def test_disabled_summary_never_calls_langmem():
+    from unittest.mock import patch
+
+    messages = [HumanMessage(content='x' * 10000)]
+    with patch('assistent.services.dialogue_summary.asummarize_messages', new_callable=AsyncMock) as ready:
+        prepared, _ = await compact_dialogue(messages, {}, {}, AsyncMock(), 0, 1000)
+    ready.assert_not_awaited()
+    assert prepared == messages
+
+
+@pytest.mark.asyncio
 async def test_memory_commands_are_explicit_and_untrusted_client_notes_are_removed():
     agent, facts = AsyncMock(), AsyncMock()
     facts.remember.return_value = 'id'

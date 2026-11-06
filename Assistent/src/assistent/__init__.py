@@ -8,15 +8,17 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.memory import MemorySaver
 from assistent.config import Settings
-from assistent.models import create_chat_model,create_coding_model
+from assistent.models import create_chat_model
 from assistent.router import create_api_router
 from assistent.services.documents_client import create_remote_search_tool
 from assistent.services.agent_service import AgentService
-from assistent.services.database_agent import DatabaseAgentService
 from assistent.services.personal_memory import PersonalFacts,MemoryAgent
-from assistent.services.coding_agent import CODING_SYSTEM_PROMPT,DELEGATION_PROMPT,CodingAgentService,MultiAgentService,create_coding_delegation_tool
-from assistent.services.graph_builder import DEFAULT_SYSTEM_PROMPT,build_agent_graph
+from assistent.services.graph_builder import build_agent_graph
+from assistent.prompts import UNIFIED_SYSTEM_PROMPT
+from assistent.tools.github_tool import create_github_tool
 from assistent.tools.postgres_tool import create_postgres_readonly_tool
+from assistent.tools.knowledge_write import create_knowledge_write_tool
+from assistent.tools.planning import manage_plan
 from assistent.utils.postgres_saver import init_async_postgres_saver
 logger=logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ async def lifespan(app):
         finally:
             if pool:await pool.close()
         return
-    async with AsyncConnectionPool(conn,open=False,kwargs={'row_factory':dict_row}) as facts:
+    async with AsyncConnectionPool(conn,open=False,kwargs={'row_factory':dict_row,'autocommit':True}) as facts:
         app.state.catalog_service.pool=facts
         if s.database_migrations_enabled:await PersonalFacts(app.state.catalog_service).setup()
         try:yield
@@ -47,7 +49,6 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
     app_settings.validate_runtime()
     if not app_settings.documents_url:raise ValueError('Для Assistent нужен DOCUMENTS_URL')
     catalog_service=SimpleNamespace(pool=None)
-    coding_service=None
     consultant=None
     if agent_service is None:
         llm = create_chat_model(app_settings)
@@ -58,46 +59,30 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
         # Если база PostgreSQL доступна, AsyncPostgresSaver подключится в lifespan.
         initial_checkpointer = checkpointer or MemorySaver()
 
-        active_tools = [search_tool]
-        coding_service = None
-        if app_settings.coding_agent_enabled:
-            coding_llm = create_coding_model(app_settings)
-            coding_graph = build_agent_graph(
-                llm=coding_llm,
-                tools=[],
-                checkpointer=initial_checkpointer,
-                system_prompt=CODING_SYSTEM_PROMPT,
-                summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
-                history_max_chars=app_settings.conversation_history_max_chars,
-            )
-            coding_service = CodingAgentService(
-                coding_graph, app_settings.coding_allowed_roles,
-                knowledge_search=create_remote_search_tool(app_settings, 3),
-                context_max_chars=app_settings.coding_context_max_chars,
-            )
-            active_tools.append(create_coding_delegation_tool(coding_service))
+        active_tools = [search_tool, manage_plan]
+        if app_settings.documents_admin_key:
+            active_tools.append(create_knowledge_write_tool(app_settings))
+        if app_settings.github_mcp_enabled:
+            active_tools.append(create_github_tool(app_settings))
+        if app_settings.pgsql_enabled:
+            active_tools.append(create_postgres_readonly_tool(app_settings))
 
         graph = build_agent_graph(
             llm=llm,
             tools=active_tools,
             checkpointer=initial_checkpointer,
-            system_prompt=DEFAULT_SYSTEM_PROMPT + (DELEGATION_PROMPT if coding_service else ""),
+            system_prompt=UNIFIED_SYSTEM_PROMPT,
+            task_routing=False,
+            max_tool_calls=app_settings.agent_max_tool_calls,
             context_max_chars=app_settings.rag_context_max_chars,
             model_first_tools=True,
             summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
             history_max_chars=app_settings.conversation_history_max_chars,
         )
         agent_service = AgentService(graph=graph)
-        if coding_service:
-            agent_service = MultiAgentService(agent_service, coding_service, model_first=True)
-        agent_service = DatabaseAgentService(
-            agent_service, create_chat_model(app_settings, agent='database')
-            if app_settings.database_provider or app_settings.database_model else llm,
-            create_postgres_readonly_tool(app_settings),
-            enabled=app_settings.pgsql_enabled,
-        )
         if catalog_service:
             agent_service = MemoryAgent(agent_service, PersonalFacts(catalog_service))
+
     app=FastAPI(title='Assistent',lifespan=lifespan)
     app.state.settings=app_settings
     app.state.agent_service=agent_service

@@ -41,6 +41,8 @@ export const App: React.FC = () => {
     messages,
     loading: chatLoading,
     submitting,
+    plan,
+    progressText,
     sendMessage,
     error: chatError,
   } = useChat(currentId, reloadConversations);
@@ -114,7 +116,7 @@ export const App: React.FC = () => {
     );
   }
 
-  const isChatBusy = submitting || (convsLoading && !currentId && conversations.length > 0);
+  const isHistoryLoading = chatLoading || (convsLoading && !currentId && conversations.length > 0);
 
   return (
     <div className="app-shell">
@@ -153,8 +155,10 @@ export const App: React.FC = () => {
             )}
             <ChatView
               messages={messages}
-              loading={chatLoading || isChatBusy}
+              loading={isHistoryLoading}
               submitting={submitting}
+              plan={plan}
+              progressText={progressText}
               conversationTitle={currentConv?.title}
               onQuickPrompt={handleQuickPrompt}
             />

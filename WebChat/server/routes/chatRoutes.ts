@@ -2,6 +2,8 @@ import { Router, type Response } from 'express';
 import type pg from 'pg';
 import { getPool } from '../db.js';
 import { answerSources } from '../answerSources.js';
+import { readEventStream } from '../eventStream.js';
+import { once } from 'node:events';
 import {
   authMiddleware as defaultAuthMiddleware,
   createAuthMiddleware,
@@ -52,6 +54,9 @@ export function createChatRouter(
     }
 
     const cleanMessage = message.trim();
+    const streaming = req.body.stream === true;
+    const controller = new AbortController();
+    res.on?.('close', () => controller.abort());
     const databaseRequest = /^\/db(?:\s|$)/i.test(cleanMessage);
     if (databaseRequest && !['programmer', 'admin'].includes(req.user?.role || '')) {
       res.status(403).json({ detail: 'Доступ к PostgreSQL разрешён только программистам и администраторам.' });
@@ -84,7 +89,7 @@ export function createChatRouter(
 
       // 3. Вызываем сервис диалогового агента assistent
       const agentBaseUrl = agentUrlProvider().replace(/\/+$/, '');
-      const agentChatUrl = `${agentBaseUrl}/api/v1/chat`;
+      const agentChatUrl = `${agentBaseUrl}/api/v1/chat${streaming ? '/stream' : ''}`;
       const internalApiKey = process.env.CHAT_API_KEY || '';
 
       const headers: Record<string, string> = {
@@ -112,7 +117,7 @@ export function createChatRouter(
             ...(rag_backend !== undefined ? { rag_backend } : {}),
             ...(confirmed_public_for_external_cloud !== undefined ? { confirmed_public_for_external_cloud } : {}),
           }),
-          signal: AbortSignal.timeout(120_000),
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(streaming ? 300_000 : 120_000)]),
         });
       } catch (networkErr: any) {
         console.error('[Chat] Network error connecting to assistent:', networkErr.message);
@@ -138,7 +143,25 @@ export function createChatRouter(
         return;
       }
 
-      const data = await agentResponse.json() as { reply?: string; thread_id?: string; sources?: unknown };
+      let data: { reply?: string; thread_id?: string; sources?: unknown } | undefined;
+      if (streaming) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+        for await (const event of readEventStream(agentResponse)) {
+          if (event.type === 'done') { data = event; break; }
+          if (event.type === 'error') throw new Error('Agent stream failed');
+          if (['delta', 'reset', 'status', 'plan'].includes(event.type)) {
+            if (!res.write(`data: ${JSON.stringify(event)}\n\n`)) {
+              await once(res, 'drain', { signal: controller.signal });
+            }
+          }
+        }
+        if (!data) throw new Error('Incomplete agent stream');
+      } else {
+        data = await agentResponse.json() as { reply?: string; thread_id?: string; sources?: unknown };
+      }
       const replyText = typeof data.reply === 'string' ? data.reply : '';
       const sources = databaseRequest ? [] : answerSources(data.sources);
       const sourceAttachments = sources.map(source => ({ type: 'knowledge_source', name: source.title, data: { document_id: source.document_id } }));
@@ -158,14 +181,22 @@ export function createChatRouter(
         [conversation_id]
       );
 
-      res.json({
+      const result = {
         reply: replyText,
         thread_id: replyThreadId,
         message_id: assistantMsgResult.rows[0].id,
         sources,
-      });
+      };
+      if (streaming) {
+        res.write(`data: ${JSON.stringify({ type: 'done', ...result })}\n\n`);
+        res.end();
+      } else res.json(result);
     } catch (err: any) {
       console.error('[Chat] Error processing chat message:', err.message);
+      if (res.headersSent) {
+        if (!res.destroyed) res.end(`data: ${JSON.stringify({ type: 'error', detail: 'Ответ прерван или не сохранён. Повторите запрос.' })}\n\n`);
+        return;
+      }
       res.status(500).json({ detail: 'Внутренняя ошибка сервера при обработке сообщения.' });
     }
   });

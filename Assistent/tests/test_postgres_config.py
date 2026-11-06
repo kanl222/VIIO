@@ -30,7 +30,7 @@ async def test_catalog_starts_when_checkpoint_pool_already_exists():
 
 def test_postgres_default_settings() -> None:
     """Проверка значений конфигурации PostgreSQL по умолчанию."""
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.postgres_host == "localhost"
     assert settings.postgres_port == 5432
@@ -61,7 +61,6 @@ def test_create_app_initializes_with_memory_saver_and_sets_lifespan() -> None:
     settings = Settings(postgres_host="test-db")
 
     with patch("assistent.create_chat_model"), \
-         patch("assistent.create_coding_model"), \
          patch("assistent.build_agent_graph") as mock_build_graph:
 
         mock_graph = MagicMock()
@@ -83,7 +82,6 @@ def test_create_app_preserves_explicit_checkpointer() -> None:
     custom_checkpointer = MemorySaver()
 
     with patch("assistent.create_chat_model"), \
-         patch("assistent.create_coding_model"), \
          patch("assistent.build_agent_graph") as mock_build_graph:
 
         mock_graph = MagicMock()

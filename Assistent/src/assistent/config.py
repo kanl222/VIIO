@@ -39,21 +39,30 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    llm_provider: Literal["lmstudio", "ollama"] = Field(
+    llm_provider: Literal["lmstudio", "ollama", "yandex"] = Field(
         default="lmstudio",
-        description="Активный провайдер языковых моделей: 'lmstudio' или 'ollama'.",
+        description="Общий провайдер агентов: 'lmstudio', 'ollama' или 'yandex'.",
     )
 
     coding_agent_enabled: bool = True
+    github_mcp_enabled: bool = False
+    github_mcp_token: str = Field(default="", repr=False)
+    github_repository: str = ""
+    github_mcp_max_chars: int = Field(default=16000, ge=1000, le=48000)
+    github_mcp_timeout_seconds: int = Field(default=25, ge=5, le=60)
     assistant_rag_backend: Literal['local', 'yandex'] = 'local'
-    chat_provider: Literal['lmstudio', 'ollama'] | None = None
+    chat_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     chat_model: str | None = None
-    coding_provider: Literal['lmstudio', 'ollama'] | None = None
-    database_provider: Literal['lmstudio', 'ollama'] | None = None
+    coding_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
+    database_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     database_model: str | None = None
     coding_model: str | None = None
     coding_allowed_roles: list[str] = Field(default_factory=lambda: ["programmer", "admin"])
     coding_context_max_chars: int = Field(default=6000, ge=1000, le=24000)
+    yandex_api_key: str = Field(default="", repr=False)
+    yandex_folder_id: str = ""
+    yandex_model: str = "aliceai-llm"
+    yandex_timeout_seconds: int = Field(default=60, ge=5, le=120)
     conversation_summary_enabled: bool = True
     conversation_summary_after: int = Field(default=24, ge=12, le=100)
     conversation_history_max_chars: int = Field(default=18000, ge=4000, le=60000)
@@ -155,6 +164,22 @@ class Settings(BaseSettings):
     chat_api_key: str | None = None
     chat_api_key_previous: str | None = None
     documents_read_key: str | None = None
+    documents_admin_key: str | None = Field(default=None, repr=False)
+    agent_max_tool_calls: int = Field(default=24, ge=3, le=64)
+
+    @model_validator(mode="after")
+    def validate_cloud_models(self):
+        providers = {role: getattr(self, f"{role}_provider") or self.llm_provider
+                     for role in ("chat", "coding", "database")}
+        if "yandex" in providers.values():
+            if not self.yandex_api_key.strip() or not self.yandex_folder_id.strip():
+                raise ValueError("Yandex requires YANDEX_API_KEY and YANDEX_FOLDER_ID")
+            for role in ("chat", "coding", "database"):
+                if providers[role] == "yandex":
+                    name = getattr(self, f"{role}_model") or self.yandex_model
+                    if not name.strip():
+                        raise ValueError("Yandex model must not be empty")
+        return self
 
     def validate_runtime(self):
         if not self.secure_runtime:
@@ -165,6 +190,8 @@ class Settings(BaseSettings):
             raise ValueError('Production requires distinct service keys of at least 32 characters')
         if len(set(values))!=len(values):
             raise ValueError('Service keys must have distinct values')
+        if self.documents_admin_key and (len(self.documents_admin_key) < 32 or self.documents_admin_key in values):
+            raise ValueError('Document write key must be long and distinct')
         if self.chat_api_key_previous and (len(self.chat_api_key_previous)<32 or self.chat_api_key_previous in values):
             raise ValueError('Previous chat key must be long and distinct')
 

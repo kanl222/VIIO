@@ -73,6 +73,7 @@ class AgentService(IAgentService):
             "configurable": {
                 "thread_id": effective_thread_id,
                 "user_context": user_context or {},
+                "user_message": clean_message,
             }
         }
 
@@ -83,11 +84,13 @@ class AgentService(IAgentService):
         )
 
         try:
-            result = await self._graph.ainvoke(
-                {"messages": [("user", clean_message)]},
-                config=config,
-                context={"access_scope": scope_key(user_context)+':'+str((user_context or {}).get('_knowledge_epoch','')), 'user_notes': (user_context or {}).get('_user_notes', ''), **({"reference_context": reference_context} if reference_context else {})},
-            )
+            from assistent.services.streaming import event_sink, invoke_streaming
+            inputs = {"messages": [("user", clean_message)]}
+            context = {"access_scope": scope_key(user_context)+':'+str((user_context or {}).get('_knowledge_epoch','')), 'user_context': user_context or {}, 'user_notes': (user_context or {}).get('_user_notes', ''), **({"reference_context": reference_context} if reference_context else {})}
+            if sink := event_sink.get():
+                result = await invoke_streaming(self._graph, inputs, config, context, sink)
+            else:
+                result = await self._graph.ainvoke(inputs, config=config, context=context)
         except Exception as exc:
             exc_msg = str(exc) or repr(exc) or type(exc).__name__
             logger.error(
@@ -117,4 +120,5 @@ class AgentService(IAgentService):
 
         sources = getattr(last_message, "response_metadata", {}).get("sources", [])
         active = getattr(last_message, "response_metadata", {}).get("active_specialist")
-        return AgentReply(clean_answer(reply, sources), sources, active), effective_thread_id
+        saved = getattr(last_message, 'response_metadata', {}).get('saved_documents', [])
+        return AgentReply(clean_answer(reply, sources), sources, active, saved_documents=saved), effective_thread_id
