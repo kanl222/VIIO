@@ -20,6 +20,28 @@ function loadSource(path, mocks) {
   return exports;
 }
 
+test('admin overview keeps healthy agent status consistent and displays provider token usage', () => {
+  const overview = {
+    counts: { users: 1, conversations: 2, messages: 3, sessions: 1 },
+    database: true, agent: { healthy: true, chunks: 0 }, documents: { healthy: false },
+    usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120, reported_calls: 2,
+      unreported_calls: 1, started_at: '2026-11-06T00:00:00Z' },
+    checked_at: '2026-11-06T00:00:00Z',
+  };
+  const { AdminView } = loadSource('../src/components/AdminView.tsx', {
+    react: { ...React, useState: initial => [initial === null ? overview : initial === true ? false : initial, () => {}] },
+    '../api/admin': {},
+  });
+  const html = renderToStaticMarkup(React.createElement(AdminView, { user: { id: 'admin', role: 'admin' } }));
+  assert(html.includes('Сервис работает · модель не указана'));
+  assert(!html.includes('Нет подключения к сервису'));
+  assert(html.includes('Недоступен'));
+  assert(html.includes('Расход токенов'));
+  assert(html.includes('Входящие') && html.includes('Исходящие') && html.includes('120'));
+  assert(html.includes('Счётчики сбрасываются при перезапуске'));
+  assert(html.includes('Вызовы без данных о токенах: 1'));
+});
+
 test('saved assistant messages show one source list rather than model and attachment duplicates', () => {
   const { ChatMessage } = loadSource('../src/components/ChatMessage.tsx', {});
   const title = 'Плюсы ИС ЛО по сравнению с ЕЦП';
@@ -113,7 +135,7 @@ function deferred() {
 }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
-test('cloud composer requires explicit consent for every question', () => {
+test('composer sends messages without a knowledge base selector or cloud consent', () => {
   const slots = []; let cursor = 0; const sent = [];
   const react = { memo: fn => fn,
     useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial;
@@ -127,19 +149,20 @@ test('cloud composer requires explicit consent for every question', () => {
     if (predicate(node)) return node;
     for (const child of [node.props?.children].flat()) { const found = find(child, predicate); if (found) return found; }
   };
-  find(render(), n => n.type === 'select').props.onChange({ target: { value: 'yandex' } });
+  assert.equal(find(render(), n => n.type === 'select'), undefined);
+  assert.equal(find(render(), n => n.props?.type === 'checkbox'), undefined);
   const input = () => find(render(), n => n.type === 'textarea');
   const send = () => find(render(), n => n.props?.['aria-label'] === 'Отправить сообщение');
-  input().props.onChange({ target: { value: 'Public question', style: {}, scrollHeight: 20 } });
   assert.equal(send().props.disabled, true);
   send().props.onClick(); assert.equal(sent.length, 0);
-  find(render(), n => n.props?.type === 'checkbox').props.onChange({ target: { checked: true } });
+  input().props.onChange({ target: { value: 'Question', style: {}, scrollHeight: 20 } });
   assert.equal(send().props.disabled, false);
   send().props.onClick();
-  assert.equal(sent[0][1].rag_backend, 'yandex');
-  assert.equal(sent[0][1].confirmed_public_for_external_cloud, true);
-  input().props.onChange({ target: { value: 'Next question', style: {}, scrollHeight: 20 } });
+  assert.deepEqual(sent[0], ['Question']);
+  assert.equal(input().props.value, '');
   assert.equal(send().props.disabled, true);
+  input().props.onChange({ target: { value: 'Next question', style: {}, scrollHeight: 20 } });
+  assert.equal(send().props.disabled, false);
 });
 
 test('cloud selection survives chat creation and hook forwarding', async () => {
@@ -217,6 +240,29 @@ test('history loaded during a send cannot erase optimistic messages', async () =
   assert.deepEqual(Array.from(render('new').messages, message => message.text), ['first question', 'first answer']);
 });
 
+test('streamed deltas update a single assistant bubble and final reply replaces provisional text', async () => {
+  const reply = deferred();
+  let emit;
+  const render = chatHarness({ getConversation: async () => ({ messages: [] }),
+    sendMessage: (_id, _text, _options, onEvent) => { emit = onEvent; return reply.promise; } });
+  render('chat'); await flush();
+  const sending = render('chat').sendMessage('Question');
+  emit({ type: 'delta', text: 'Part ' });
+  emit({ type: 'delta', text: 'one' });
+  assert.equal(render('chat').messages.at(-1).text, 'Part one');
+  assert.equal(render('chat').messages.length, 2);
+  emit({ type: 'plan', steps: [{ title: 'Read source', status: 'in_progress' }] });
+  assert.equal(render('chat').plan[0].title, 'Read source');
+  emit({ type: 'reset' });
+  assert.equal(render('chat').messages.length, 1);
+  emit({ type: 'delta', text: 'Draft answer' });
+  reply.resolve({ reply: 'Verified final answer', message_id: 'saved' });
+  await sending;
+  assert.equal(render('chat').messages.at(-1).text, 'Verified final answer');
+  assert.equal(render('chat').messages.at(-1).id, 'saved');
+  assert.equal(render('chat').messages.length, 2);
+});
+
 test('returning to an in-flight chat restores its messages, not another chat history', async () => {
   const reply = deferred();
   const render = chatHarness({
@@ -233,6 +279,33 @@ test('returning to an in-flight chat restores its messages, not another chat his
   reply.resolve({ reply: 'answer' });
   await sending;
   assert.equal(render('a').messages.at(-1).text, 'answer');
+});
+
+test('sending a message keeps chat history visible instead of loading the whole conversation', () => {
+  const component = () => null;
+  const { ChatView } = loadSource('../src/components/ChatView.tsx', {
+    './ChatMessage': { ChatMessage: ({ message }) => React.createElement('p', null, message.text) },
+  });
+  const { App } = loadSource('../src/App.tsx', {
+    react: { useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}] },
+    './hooks/useAuth': { useAuth: () => ({ user: { id: 'user' }, loading: false }) },
+    './hooks/useConversations': { useConversations: () => ({
+      conversations: [{ id: 'current', title: 'Conversation' }], currentId: 'current', loading: false,
+    }) },
+    './hooks/useChat': { useChat: () => ({
+      messages: [{ id: 'previous', text: 'Previous answer' }, { id: 'new', text: 'New question' }],
+      loading: false, submitting: true,
+    }) },
+    './components/ChatView': { ChatView },
+    ...Object.fromEntries(['Header', 'Sidebar', 'ChatInput', 'AuthModal', 'AdminView'].map(name => [
+      `./components/${name}`, { [name]: component },
+    ])),
+  });
+  const html = renderToStaticMarkup(App());
+  assert(!html.includes('Загружаем диалог'));
+  assert(html.includes('Previous answer'));
+  assert(html.includes('New question'));
+  assert(html.includes('Ассистент готовит ответ'));
 });
 
 test('the first prompt is sent with the newly created conversation ID', async () => {

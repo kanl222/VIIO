@@ -2,11 +2,14 @@ import React, { useEffect, useRef, memo } from 'react';
 import { ArrowUpRight, BookOpen, FileText, ListChecks, Loader2 } from 'lucide-react';
 import type { Message } from '../types';
 import { ChatMessage } from './ChatMessage';
+import type { TaskStep } from '../api/chat';
 
 interface ChatViewProps {
   messages: Message[];
   loading: boolean;
   submitting: boolean;
+  plan?: TaskStep[];
+  progressText?: string;
   conversationTitle?: string;
   onQuickPrompt?: (text: string) => void;
 }
@@ -21,6 +24,8 @@ export const ChatView: React.FC<ChatViewProps> = memo(({
   messages,
   loading,
   submitting,
+  plan = [],
+  progressText,
   conversationTitle,
   onQuickPrompt,
 }) => {
@@ -29,7 +34,7 @@ export const ChatView: React.FC<ChatViewProps> = memo(({
   useEffect(() => {
     const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     bottom.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth' });
-  }, [messages, submitting]);
+  }, [messages, submitting, plan]);
 
   if (loading) {
     return (
@@ -74,9 +79,16 @@ export const ChatView: React.FC<ChatViewProps> = memo(({
           <ChatMessage key={message.id} message={message} />
         ))}
         {submitting && (
+          <div>
+          {plan.length > 0 && <ol className="task-plan" aria-label="План выполнения задачи">{plan.map((step, index) =>
+            <li key={index} data-status={step.status}>
+              <span aria-hidden="true">{step.status === 'completed' ? '✓' : step.status === 'in_progress' ? '●' : '○'}</span>
+              {step.title}<span className="sr-only">{step.status === 'completed' ? ' — выполнено' : step.status === 'in_progress' ? ' — выполняется' : ' — ожидает'}</span>
+            </li>)}</ol>}
           <div className="assistant-thinking" role="status">
             <Loader2 size={17} className="animate-spin" />
-            <span>Ассистент готовит ответ…</span>
+            <span>{progressText || 'Ассистент готовит ответ…'}</span>
+          </div>
           </div>
         )}
         <div ref={bottom} />

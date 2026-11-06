@@ -18,6 +18,7 @@ import {
 } from '../dist-server/auth.js';
 
 import { createApp } from '../dist-server/index.js';
+import { readEventStream } from '../dist-server/eventStream.js';
 
 class MockPool {
   constructor() {
@@ -445,11 +446,52 @@ test('Admin overview and user search expose counts and safe user fields', async 
   } finally { await fixture.close(); }
 });
 
+test('chat streams upstream fragments and saves only the verified final answer', async () => {
+  let calledUrl;
+  const events = [{ type: 'delta', text: 'Draft' },
+    { type: 'done', reply: 'Verified answer', thread_id: 'thread', sources: [] }];
+  const f = await adminFixture('employee', async url => {
+    calledUrl = String(url);
+    const bytes = new TextEncoder().encode(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(''));
+    return new Response(new ReadableStream({ start(c) { c.enqueue(bytes.slice(0, 13)); c.enqueue(bytes.slice(13)); c.close(); } }),
+      { headers: { 'Content-Type': 'text/event-stream' } });
+  });
+  try {
+    const headers = { Cookie: f.cookie, 'Content-Type': 'application/json' };
+    const created = await f.request('/api/conversations', { method: 'POST', headers, body: { title: 'Stream' } });
+    const conversation = (await created.json()).conversation;
+    const response = await f.request('/api/chat', { method: 'POST', headers,
+      body: { conversation_id: conversation.id, message: 'Question', stream: true } });
+    assert.equal(response.status, 200);
+    assert(response.headers.get('content-type').includes('text/event-stream'));
+    const text = await response.text();
+    assert(text.includes('Draft') && text.includes('Verified answer'));
+    assert(calledUrl.endsWith('/api/v1/chat/stream'));
+    const history = await (await f.request(`/api/conversations/${conversation.id}`, { headers })).json();
+    assert.equal(history.messages.length, 2);
+    assert.equal(history.messages[1].text, 'Verified answer');
+  } finally { await f.close(); }
+});
+
+test('SSE decoder handles Cyrillic characters and frame boundaries split into single bytes', async () => {
+  const bytes = new TextEncoder().encode('data: {"type":"delta","text":"Привет"}\r\n\r\ndata: {"type":"done","reply":"Готово"}\n\n');
+  const response = new Response(new ReadableStream({ start(controller) {
+    for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+    controller.close();
+  } }));
+  const events = [];
+  for await (const event of readEventStream(response)) events.push(event);
+  assert.equal(events[0].text, 'Привет');
+  assert.equal(events[1].reply, 'Готово');
+});
+
 test('Admin overview reads the model from assistent and fragment count from Documents', async () => {
   const calls = [];
   const fixture = await adminFixture('admin', async (url) => {
     calls.push(String(url));
-    return { ok: true, json: async () => String(url).startsWith('http://documents.test')
+    return { ok: true, json: async () => String(url).endsWith('/api/v1/usage')
+      ? { input_tokens: 100, output_tokens: 20, total_tokens: 120, reported_calls: 2, unreported_calls: 0, started_at: '2026-11-06T00:00:00Z' }
+      : String(url).startsWith('http://documents.test')
       ? { status: 'healthy', documents_count: 782 }
       : { status: 'healthy', model: 'main-model', documents_count: 999 } };
   }, { agentUrl: 'http://assistent.test', documentsUrl: 'http://documents.test' });
@@ -459,7 +501,9 @@ test('Admin overview reads the model from assistent and fragment count from Docu
     const body = await response.json();
     assert.equal(body.agent.model, 'main-model');
     assert.equal(body.agent.chunks, 782);
-    assert.deepEqual(calls.sort(), ['http://assistent.test/health', 'http://documents.test/health']);
+    assert.equal(body.documents.healthy, true);
+    assert.equal(body.usage.total_tokens, 120);
+    assert.deepEqual(calls.sort(), ['http://assistent.test/api/v1/usage', 'http://assistent.test/health', 'http://documents.test/health']);
   } finally { await fixture.close(); }
 });
 

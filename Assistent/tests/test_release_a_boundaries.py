@@ -52,7 +52,7 @@ def test_production_rejects_missing_or_equal_keys():
 
 def test_legacy_consultant_env_cannot_require_a_consultant_model_or_secret(monkeypatch):
     monkeypatch.setenv('CONSULTANT_ENABLED','true')
-    with patch('assistent.create_chat_model'),patch('assistent.create_coding_model'),patch('assistent.build_agent_graph'):
+    with patch('assistent.create_chat_model'),patch('assistent.build_agent_graph'):
         app=create_app(Settings(_env_file=None,secure_runtime=True,chat_api_key='c'*40,documents_read_key='r'*40))
     assert '/api/v1/consultant/chat' not in app.openapi()['paths']
 

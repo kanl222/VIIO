@@ -102,15 +102,15 @@ async def test_automatic_route():
 
 
 @pytest.mark.parametrize("provider, client", [("lmstudio", "ChatOpenAI"), ("ollama", "ChatOllama")])
-def test_factory_passes_no_tools_to_separate_coder_model(provider, client):
+def test_factory_uses_one_model_without_a_separate_coder(provider, client):
     settings = Settings(_env_file=None, llm_provider=provider, coding_model="dedicated-coder")
     with patch("assistent.models.chat." + client) as models, \
          patch("assistent.build_agent_graph") as graphs:
         create_app(settings=settings)
     general_name = settings.lmstudio_model if provider == "lmstudio" else settings.ollama_model
-    assert [call.kwargs["model"] for call in models.call_args_list] == [general_name, settings.coding_model]
-    assert graphs.call_args_list[0].kwargs["tools"] == []
-    assert {t.name for t in graphs.call_args_list[1].kwargs["tools"]} == {"search_knowledge_base", "coding_agent"}
+    assert [call.kwargs["model"] for call in models.call_args_list] == [general_name]
+    graphs.assert_called_once()
+    assert {t.name for t in graphs.call_args.kwargs["tools"]} == {"search_knowledge_base", "manage_plan"}
 
 
 @pytest.mark.parametrize("message", ["Напиши SQL SELECT", "Создай функцию", "Исправь код", "Перепиши SOAP на REST API"])

@@ -27,7 +27,7 @@ def test_default_model_and_explicit_override():
         assert model.call_args.kwargs['model'] == 'override'
 
 
-def test_internal_agents_cannot_select_yandex():
+def test_yandex_requires_explicit_credentials():
     for field in ('chat_provider', 'coding_provider', 'database_provider'):
         with pytest.raises(ValueError):
             Settings(_env_file=None, **{field: 'yandex'})

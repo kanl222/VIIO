@@ -46,8 +46,8 @@ function OverviewPanel({ onNavigate }: { onNavigate: (section: Section) => void 
         <section className="surface-section"><div className="section-heading"><h2>Состояние сервисов</h2><Activity size={18} aria-hidden="true" /></div>
           <div className="service-list">{[
             { title: 'База пользователей', text: 'Учётные записи, диалоги и история', ok: data.database },
-            { title: 'Диалоговый агент', text: data.agent.model || 'Нет подключения к сервису', ok: data.agent.healthy },
-            { title: 'База знаний', text: data.agent.chunks !== undefined ? `${data.agent.chunks.toLocaleString('ru-RU')} фрагментов документов` : 'Состояние не получено', ok: data.agent.healthy },
+            { title: 'Диалоговый агент', text: data.agent.healthy ? [data.agent.provider, data.agent.model].filter(Boolean).join(' · ') || 'Сервис работает · модель не указана' : 'Нет подключения к сервису', ok: data.agent.healthy },
+            { title: 'База знаний', text: data.agent.chunks !== undefined ? `${data.agent.chunks.toLocaleString('ru-RU')} фрагментов документов` : 'Состояние не получено', ok: data.documents.healthy },
           ].map(service => <div className="service-row" key={service.title}><div><strong>{service.title}</strong><p>{service.text}</p></div>
             <span className={`status-badge ${service.ok ? 'status-good' : 'status-bad'}`}><span className="status-dot" />{service.ok ? 'Доступен' : 'Недоступен'}</span></div>)}</div>
           <p className="section-note">Проверено {new Date(data.checked_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}. Состояние обновляется по запросу.</p>
@@ -58,6 +58,17 @@ function OverviewPanel({ onNavigate }: { onNavigate: (section: Section) => void 
           <div className="admin-guidance"><ShieldCheck size={20} aria-hidden="true" /><p>Новые пользователи получают роль сотрудника. Расширенные права назначаются здесь.</p></div>
         </section>
       </div>
+      <section className="surface-section">
+        <div className="section-heading"><h2>Расход токенов</h2></div>
+        {data.usage && typeof data.usage.total_tokens === 'number' ? <>
+          <dl className="workspace-stats">{[
+            ['Входящие', data.usage.input_tokens], ['Исходящие', data.usage.output_tokens],
+            ['Всего', data.usage.total_tokens], ['Вызовы модели с учётом токенов', data.usage.reported_calls],
+          ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{Number(value).toLocaleString('ru-RU')}</dd></div>)}</dl>
+          <p className="section-note">С запуска агента {new Date(data.usage.started_at).toLocaleString('ru-RU')}. Учитываются данные провайдера для всех пользователей, включая вызовы инструментов и сжатие истории. Счётчики сбрасываются при перезапуске.</p>
+          {data.usage.unreported_calls > 0 && <p className="section-note">Вызовы без данных о токенах: {data.usage.unreported_calls}. Они не включены в сумму.</p>}
+        </> : <p className="section-note">Данные о расходе токенов недоступны.</p>}
+      </section>
     </>}
   </>;
 }

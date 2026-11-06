@@ -282,4 +282,4 @@ docker compose up -d
 
 `INTERNAL_API_KEY` предназначен для серверного обмена, не для входа пользователей. Запросы напрямую в assistent к `/api/v1/chat` и `/api/v1/documents` требуют заголовка `X-Internal-Token`. Для обычной работы используйте веб-интерфейс.
 
-Дополнительно: [настройка coder](coding-agent.md), [WebChat](../WebChat/README.md), [assistent](../Assistent/README.md).
+Дополнительно: [настройка coder](mcp-integrations.md), [WebChat](../WebChat/README.md), [assistent](../Assistent/README.md).

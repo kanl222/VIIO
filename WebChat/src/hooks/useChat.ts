@@ -13,6 +13,8 @@ export function useChat(
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<chatApi.TaskStep[]>([]);
+  const [progressText, setProgressText] = useState('');
   const activeId = useRef(conversationId);
   const loadVersion = useRef(0);
   const pendingSend = useRef<{ id: string; messages: Message[] } | null>(null);
@@ -25,6 +27,8 @@ export function useChat(
 
   // Загрузка сообщений выбранного диалога
   const loadMessages = useCallback(async () => {
+    setPlan([]);
+    setProgressText('');
     const version = ++loadVersion.current;
     const isCurrent = () => activeId.current === conversationId && loadVersion.current === version;
     if (!conversationId) {
@@ -95,7 +99,27 @@ export function useChat(
       setError(null);
 
       try {
-        const response = await chatApi.sendMessage(targetId, trimmedText, options);
+        setPlan([]);
+        setProgressText('Обрабатываем запрос…');
+        let partial = '';
+        const streamingId = `stream-${Date.now()}`;
+        const response = await chatApi.sendMessage(targetId, trimmedText, options, event => {
+          if (!isCurrent()) return;
+          if (event.type === 'plan') setPlan(event.steps);
+          if (event.type === 'status') setProgressText(event.message);
+          if (event.type === 'reset') {
+            partial = '';
+            setHistory(pending);
+          }
+          if (event.type === 'delta') {
+            partial += event.text;
+            setProgressText('Формируем ответ…');
+            setHistory({ id: targetId, messages: [...pending.messages, {
+              id: streamingId, conversation_id: targetId, sender: 'assistant', text: partial,
+              created_at: new Date().toISOString(),
+            }] });
+          }
+        });
         const assistantMessage: Message = {
           id: response.message_id || `asst-${Date.now()}`,
           conversation_id: targetId,
@@ -134,6 +158,8 @@ export function useChat(
     messages: history.id === conversationId ? history.messages : [],
     loading,
     submitting,
+    plan,
+    progressText,
     error,
     sendMessage,
     reloadMessages: loadMessages,
