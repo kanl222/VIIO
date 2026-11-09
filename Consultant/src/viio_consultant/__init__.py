@@ -32,7 +32,7 @@ def create_app(settings=None, *, agent=None):
                 follow_redirects=False, headers={'X-Publication-Key': settings.source_key}) as client:
                 app.state.agent = PublicConsultant(HttpPublicationSource(client,
                     cloud_public_only=settings.provider == 'yandex'), create_model(settings),
-                    search_first=settings.provider == 'yandex')
+                    search_first=settings.search_first or settings.provider == 'yandex')
                 yield
                 app.state.agent = None
         else:

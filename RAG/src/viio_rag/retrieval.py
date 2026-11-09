@@ -3,6 +3,9 @@ import asyncio
 import logging
 from functools import partial
 import anyio.to_thread
+from collections.abc import Sequence
+from typing import Any
+from langchain_core.documents import Document
 from langchain_core.runnables import RunnableConfig
 from viio_rag.knowledge_data import query_terms
 from viio_rag.search_tool import build_access_filter, format_documents
@@ -11,16 +14,23 @@ from viio_rag.diagnostics import capture, record
 logger = logging.getLogger(__name__)
 
 
-def rank_documents(query, documents, k):
+def rank_documents(query: str, documents: Sequence[Document], k: int, min_score: int = 0) -> list[Document]:
     terms = query_terms(query)
-    def score(doc):
+    def score(doc: Document) -> int:
         text = doc.page_content.lower()
         title = str(doc.metadata.get('title', '')).lower()
         filename = str(doc.metadata.get('filename', '')).lower()
         return sum(3 * (term in text) + 5 * (term in title or term in filename) for term in terms)
-    ordered = sorted(enumerate(documents), key=lambda item: (-score(item[1]), item[0]))
-    first, rest, seen = [], [], set()
-    for _, doc in ordered:
+    scored = [(score(doc), idx, doc) for idx, doc in enumerate(documents)]
+    if min_score > 0:
+        scored = [item for item in scored if item[0] >= min_score]
+        if not scored:
+            return []
+    ordered = sorted(scored, key=lambda item: (-item[0], item[1]))
+    first: list[Document] = []
+    rest: list[Document] = []
+    seen: set[Any] = set()
+    for _, _, doc in ordered:
         key = doc.metadata.get('document_id', doc.page_content)
         (rest if key in seen else first).append(doc)
         seen.add(key)
@@ -28,10 +38,11 @@ def rank_documents(query, documents, k):
 
 
 class EnhancedRetrieval:
-    def __init__(self, vector_store, data):
-        self.vector_store, self.data = vector_store, data
+    def __init__(self, vector_store: Any, data: Any) -> None:
+        self.vector_store: Any = vector_store
+        self.data: Any = data
 
-    async def search(self, query, context, k, diagnostics=None):
+    async def search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
         with capture('search', query) as trace:
             diagnostic = diagnostics if diagnostics is not None else ({} if trace is not None else None)
             record('search_request', query=query, k=k, scope='internal')
@@ -45,7 +56,7 @@ class EnhancedRetrieval:
                        context=format_documents(selected), **diagnostic)
             return selected
 
-    async def _search(self, query, context, k, diagnostics=None):
+    async def _search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
         searches = [
             anyio.to_thread.run_sync(partial(self.vector_store.similarity_search, query=query, k=max(k * 3, 12), filter=build_access_filter(context))),
             self.data.lexical(query, context)]
@@ -67,13 +78,14 @@ class EnhancedRetrieval:
                     candidates.append(doc)
                     seen.add(key)
         candidates=await self.data.authorized_candidates(candidates,context)
-        selected = rank_documents(query, candidates, k)
+        selected = rank_documents(query, candidates, k, min_score=1)
+        selected = await self._expand_procedural_neighbors(selected, context)
         if diagnostics is not None:
             def snapshot(doc):
                 return {'document_id': doc.metadata.get('document_id'),
                         'title': doc.metadata.get('title', ''), 'text': doc.page_content,
                         'version': doc.metadata.get('version'), 'chunk_id': doc.metadata.get('chunk_id')}
-            # Only current ACL-checked candidates may leave the document service.
+            # Только кандидаты, прошедшие актуальную проверку ACL, могут покидать сервис документов.
             diagnostics.update(candidates=[snapshot(doc) for doc in candidates],
                 selected=[snapshot(doc) for doc in selected],
                 branches={name: {'status': 'error' if isinstance(result, Exception) else 'ok',
@@ -81,6 +93,56 @@ class EnhancedRetrieval:
                           for name, result in zip(['semantic', 'lexical', 'public'], results)},
                 ranking='lexical term score with document diversity', k=k)
         return selected
+
+    async def _expand_procedural_neighbors(self, selected, context, max_chars=8000):
+        if not selected or not hasattr(self.vector_store, 'get_chunks'):
+            return selected
+        total_chars = sum(len(d.page_content) for d in selected)
+        if total_chars >= max_chars:
+            return selected
+        seen_keys = {(d.metadata.get('document_id'), d.metadata.get('chunk_index')) for d in selected}
+        needed_pairs = []
+        doc_sections = {}
+        for doc in selected:
+            doc_id = doc.metadata.get('document_id')
+            idx = doc.metadata.get('chunk_index')
+            section = doc.metadata.get('section_path')
+            if doc_id is None or idx is None or not section or idx < 0:
+                continue
+            doc_sections[(doc_id, idx)] = section
+            for neighbor_idx in (idx - 1, idx + 1):
+                if neighbor_idx >= 0 and (doc_id, neighbor_idx) not in seen_keys:
+                    needed_pairs.append((doc_id, neighbor_idx))
+                    seen_keys.add((doc_id, neighbor_idx))
+        if not needed_pairs:
+            return selected
+        neighbors = await anyio.to_thread.run_sync(partial(self.vector_store.get_chunks, needed_pairs))
+        if not neighbors:
+            return selected
+        valid_neighbors = []
+        for n_doc in neighbors:
+            n_doc_id = n_doc.metadata.get('document_id')
+            n_idx = n_doc.metadata.get('chunk_index')
+            n_section = n_doc.metadata.get('section_path')
+            orig_section = doc_sections.get((n_doc_id, n_idx - 1)) or doc_sections.get((n_doc_id, n_idx + 1))
+            if orig_section and n_section == orig_section:
+                valid_neighbors.append(n_doc)
+        if not valid_neighbors:
+            return selected
+        authorized_neighbors = await self.data.authorized_candidates(valid_neighbors, context)
+        expanded = list(selected)
+        for n_doc in authorized_neighbors:
+            chunk_len = len(n_doc.page_content)
+            if total_chars + chunk_len <= max_chars:
+                expanded.append(n_doc)
+                total_chars += chunk_len
+            else:
+                break
+        expanded.sort(key=lambda d: (
+            str(d.metadata.get('document_id', '')),
+            d.metadata.get('chunk_index', 0)
+        ))
+        return expanded
 
     def tool(self, original, k):
         async def search_knowledge_base(query: str, config: RunnableConfig):

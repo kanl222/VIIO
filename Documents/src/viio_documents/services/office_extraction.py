@@ -75,7 +75,7 @@ def docx_blocks(container):
             for row in block.rows:
                 seen, cells = set(), []
                 for cell in row.cells:
-                    # A merged grid cell can occur several times in row.cells.
+                    # Объединенная ячейка сетки может встречаться несколько раз в row.cells.
                     if cell._tc in seen:
                         continue
                     seen.add(cell._tc)
@@ -141,7 +141,7 @@ def markdown_table(rows):
     width = max(len(row) for row in rows)
     lines = []
     for row in rows:
-        # Literal pipes and line breaks belong to cells, not the table syntax.
+        # Символы | и переводы строк принадлежат ячейкам, а не синтаксису таблицы.
         cells = [value.replace('|', '&#124;').replace('\r', '').replace('\n', '<br>') for value in row]
         cells.extend([''] * (width - len(cells)))
         lines.append('| ' + ' | '.join(cells) + ' |')

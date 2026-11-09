@@ -36,7 +36,18 @@ const EventBody = memo(function EventBody({ event }: { event: TraceEvent }) {
   if (event.stage === 'context') return <><p className="hint">Модель: {event.model || 'Не записана'}. Это фактические сообщения, переданные при данном вызове.</p>{event.prompt_sha256 ? <p className="fragment-meta">SHA-256 системного промпта: {event.prompt_sha256}</p> : null}
     {event.messages?.map((message, index) => <div className="model-message" key={index}><h3>{roleNames[message.role] || message.role}</h3><div className="text">{text(message.content)}</div>{message.tool_calls?.length ? <pre>{text(message.tool_calls)}</pre> : null}</div>)}
   </>;
-  if (event.stage === 'generation') return <>{event.error ? <p className="bad">Ошибка: {event.error}</p> : <div className="text">{text(event.content)}</div>}{event.tool_calls?.length ? <><h3 className="section-title">Запрошенные инструменты</h3><pre>{text(event.tool_calls)}</pre></> : null}<p className="hint">Показан видимый результат вызова. Внутренние рассуждения модели не записываются.</p></>;
+  if (event.stage === 'generation') {
+    const usage = event.usage;
+    const promptTokens = usage?.input_tokens ?? usage?.prompt_tokens;
+    const completionTokens = usage?.output_tokens ?? usage?.completion_tokens;
+    const totalTokens = usage?.total_tokens ?? ((promptTokens ?? 0) + (completionTokens ?? 0) || undefined);
+    return <>
+      {event.error ? <p className="bad">Ошибка: {event.error}</p> : <div className="text">{text(event.content)}</div>}
+      {event.tool_calls?.length ? <><h3 className="section-title">Запрошенные инструменты</h3><pre>{text(event.tool_calls)}</pre></> : null}
+      {totalTokens !== undefined ? <p className="hint">Использовано токенов: {totalTokens.toLocaleString('ru-RU')}{promptTokens !== undefined && completionTokens !== undefined ? ` (вход: ${promptTokens.toLocaleString('ru-RU')}, выход: ${completionTokens.toLocaleString('ru-RU')})` : ''}</p> : null}
+      <p className="hint">Показан видимый результат вызова. Внутренние рассуждения модели не записываются.</p>
+    </>;
+  }
   if (event.stage === 'answer') return <><div className="text">{event.reply}</div><SourceList event={event} /></>;
   if (event.stage === 'route') return <dl className="route-data"><dt>Режим</dt><dd>{event.mode}</dd><dt>Доступные инструменты</dt><dd>{event.tools?.join(', ') || 'Без инструментов'}</dd>{event.model_first_tools !== undefined ? <><dt>Выбор инструмента</dt><dd>{event.model_first_tools ? 'Сначала модель' : 'По правилам приложения'}</dd></> : null}</dl>;
   if (event.stage === 'guard') return <p className={event.status === 'blocked' ? 'bad' : 'good'}>{event.name}: {event.status === 'blocked' ? 'ответ заблокирован' : 'проверка пройдена'}</p>;
@@ -144,9 +155,14 @@ export const TraceDetail = memo(function TraceDetail({ trace, items, onSaved, ta
       {events.length ? events.map((event, index) => <section className="operation-event" key={index}><h3>{event.stage === 'ocr_request' ? 'Параметры запроса' : event.stage === 'ocr_result' ? 'Ответ обработки PDF' : event.stage === 'search_request' ? 'Обращение к поиску' : event.stage === 'retrieval' ? 'Результат поиска' : 'Ограничение журнала'}</h3><p className="hint">От начала обращения: {seconds(event.elapsed_ms)}</p><EventBody event={event} /></section>) : <p className="hint">Данные этого этапа в журнале отсутствуют.</p>}
     </>;
   }
+  const totalTokens = trace.events.reduce((sum, e) => {
+    const u = e.usage;
+    const t = u?.total_tokens ?? ((u?.input_tokens ?? u?.prompt_tokens ?? 0) + (u?.output_tokens ?? u?.completion_tokens ?? 0));
+    return sum + (t || 0);
+  }, 0);
   return <>
     <div className="detail-head"><h2>{trace.question}</h2><button onClick={exportTrace} title="Скачать выбранную трассу в JSON"><Download size={16} aria-hidden="true" />JSON</button></div>
-    <div className="metadata">{agentName(trace.agent)} · {dateTime(trace.started_at)} · {seconds(trace.duration_ms)}<br />Трасса {trace.id}{trace.thread_id ? <> · Диалог {trace.thread_id}</> : null}</div>
+    <div className="metadata">{agentName(trace.agent)} · {dateTime(trace.started_at)} · {seconds(trace.duration_ms)}{totalTokens > 0 ? ` · ${totalTokens.toLocaleString('ru-RU')} токенов` : ''}<br />Трасса {trace.id}{trace.thread_id ? <> · Диалог {trace.thread_id}</> : null}</div>
     {trace.configuration && Object.keys(trace.configuration).length ? <LazyDetails summary="Параметры запуска">{() => <pre>{text(trace.configuration)}</pre>}</LazyDetails> : null}
     {trace.status === 'error' ? <div className="error" role="status">Запрос завершился ошибкой: {trace.error || 'тип не записан'}. Сохранены этапы, выполненные до сбоя.</div> : null}
     <h2>Цепочка ответа</h2><p className="hint">Время отсчитывается от начала запроса. Откройте этап, чтобы увидеть его данные.</p>

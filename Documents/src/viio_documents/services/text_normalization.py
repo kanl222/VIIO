@@ -26,7 +26,7 @@ def normalize_document_text(content: str) -> str:
         expanded = raw.expandtabs(2)
         indent = len(expanded) - len(expanded.lstrip())
         line = re.sub(r'[^\S\n]+', ' ', expanded).strip()
-        # Keep nesting of real list items, remove layout indentation elsewhere.
+        # Сохраняем вложенность настоящих элементов списка, удаляем отступы верстки в остальных местах.
         if re.match(r'^(?:[-*•]|\d+[.)])\s', line):
             line = ' ' * min(indent, 16) + line
         if line or (lines and lines[-1] != ''):

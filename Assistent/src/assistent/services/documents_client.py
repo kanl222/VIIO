@@ -3,7 +3,9 @@ from hmac import compare_digest
 
 import httpx
 import time
+import json
 from assistent.services.diagnostics import enabled, record
+from assistent.services.answer_sources import readable_reference
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
@@ -18,23 +20,31 @@ def require_internal(request, settings):
         raise HTTPException(401, 'Необходим межсервисный ключ')
 
 
-def create_remote_search_tool(settings, k=5):
-    @tool('search_knowledge_base')
-    async def search_knowledge_base(query: str, config: RunnableConfig) -> str:
-        """Поиск разрешённых инструкций, документов и кода организации в общей базе знаний."""
+def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base'):
+    @tool(tool_name)
+    async def search_knowledge_base(query: str, config: RunnableConfig, document_ids: list[str] | None = None) -> str:
+        """Поиск ответа по содержимому документов. Для перечня и поиска названий используйте list_documents.
+
+        document_ids: Идентификаторы выбранных документов из каталога, до 8. При указании поиск ограничен ими.
+        """
         context = (config or {}).get('configurable', {}).get('user_context') or {}
-        # Personal notes and conversation data never enter document search.
+        # Личные заметки и данные диалогов никогда не попадают в поиск документов.
         context = {key: context[key] for key in ('user_id', 'role', 'departments') if key in context}
         start = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
                 response = await client.post(settings.documents_url.rstrip('/') + '/api/v1/knowledge/search',
                     headers={'X-Internal-Token': settings.documents_read_key or (settings.internal_api_key if not settings.secure_runtime else '') or ''},
-                    json={'query': query, 'k': k, 'user_context': context or None, **({'diagnostics': True} if enabled() else {})})
+                    json={'query': query, 'k': k, 'user_context': context or None,
+                          **({'document_ids': document_ids} if document_ids is not None else {}),
+                          **({'diagnostics': True} if enabled() else {})})
                 response.raise_for_status()
                 text = response.json()['context']
                 if not isinstance(text, str) or len(text) > 100000:
                     raise ValueError('Invalid document search response')
+                max_chars = getattr(settings, 'rag_context_max_chars', None)
+                if max_chars and tool_name == 'search_knowledge_base':
+                    text = readable_reference(text, max_chars=max_chars)
                 record('retrieval', query=query, duration_ms=round((time.monotonic()-start)*1000),
                        context=text, **response.json().get('diagnostics', {}))
                 return text
@@ -42,6 +52,39 @@ def create_remote_search_tool(settings, k=5):
             record('retrieval', query=query, status='error', duration_ms=round((time.monotonic()-start)*1000))
             return 'Ошибка при обращении к базе знаний. Повторите попытку позже.'
     return search_knowledge_base
+
+
+def create_document_list_tool(settings):
+    @tool('list_documents', response_format='content_and_artifact')
+    async def list_documents(config: RunnableConfig, query: str = '', tags: list[str] | None = None,
+                             offset: int = 0) -> tuple[str, dict]:
+        """Каталог доступных документов, без чтения содержимого.
+
+        Для вопросов о доступных документах, инструкциях и руководствах, поиска названий и ссылок.
+        query: Подстрока названия или описания, пустая строка для полного перечня.
+        tags: Все требуемые теги, например инструкция, ис ло. Теги могут быть не заполнены.
+        offset: Начало страницы. Продолжение по next_offset только по просьбе пользователя.
+        Возвращает одну страницу, total, next_offset и untagged_count. Один вызов за ход.
+        """
+        context = (config or {}).get('configurable', {}).get('user_context') or {}
+        context = {key: context[key] for key in ('user_id', 'role', 'departments') if key in context}
+        try:
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+                response = await client.post(settings.documents_url.rstrip('/') + '/api/v1/knowledge/documents',
+                    headers={'X-Internal-Token': settings.documents_read_key or
+                             (settings.internal_api_key if not settings.secure_runtime else '') or ''},
+                    json={'query': query, 'tags': tags or [], 'offset': offset, 'limit': 20,
+                          'user_context': context or None})
+                response.raise_for_status()
+                result = response.json()
+        except (httpx.HTTPError, ValueError):
+            record('document_catalog', status='error')
+            return 'Каталог недоступен. Не удалось проверить список документов. Повторите запрос позже.', {'sources': []}
+        sources = [{'title': item['title'], 'document_id': item['document_id']}
+                   for item in result['items']]
+        record('document_catalog', total=result['total'], count=len(result['items']), offset=offset)
+        return json.dumps(result, ensure_ascii=False), {'sources': sources}
+    return list_documents
 
 
 async def access_revision(settings):

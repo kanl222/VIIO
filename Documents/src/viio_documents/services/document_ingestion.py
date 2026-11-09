@@ -73,11 +73,12 @@ class DocumentIngestion:
             if parent is None or not parent.is_active or parent.status not in {'ready', 'indexed'}:
                 raise DocumentVersionConflict('Актуальная версия изменилась. Выберите документ в каталоге заново.')
             versions = await self.catalog.versions(family)
-            # Versions inherit access and ownership even if a queued payload is altered.
+            # Версии наследуют права доступа и владельца, даже если полезная нагрузка в очереди изменена.
             task.owner_id, task.is_public = parent.owner_id, parent.is_public
             task.title = parent.title
             task.allowed_roles = parent.allowed_roles
             task.allowed_departments = parent.allowed_departments
+            task.metadata = {**getattr(parent, 'catalog_metadata', {}), **task.metadata}
             if task.kind == 'code' or parent.document_kind == 'code':
                 task.kind = 'code'
                 task.is_public, task.allowed_roles, task.allowed_departments = False, ['programmer', 'admin'], []
@@ -124,7 +125,7 @@ class DocumentIngestion:
                 allowed_departments=task.allowed_departments, storage_key=storage_key, status='processing',
                 family_id=(parent.family_id or parent.id) if parent else identifier,
                 version=version, parent_id=parent.id if parent else None, is_active=parent is None, document_kind=task.kind,
-                original_filename=task.filename[:255])
+                original_filename=task.filename[:255], catalog_metadata=task.metadata)
             await self.data.save_text(identifier, content, task.filename, task.title)
             await anyio.to_thread.run_sync(self.documents.publish_document, identifier)
             if parent:
@@ -140,13 +141,13 @@ class DocumentIngestion:
                 try:
                     current = await self.catalog.get(identifier)
                 except Exception:
-                    # Commit outcome is unknown. Startup recovery consults PostgreSQL
-                    # before touching either version's search visibility.
+                    # Результат фиксации неизвестен. Восстановление при запуске обращается к PostgreSQL
+                    # перед изменением видимости поиска любой из версий.
                     logger.exception('Не удалось проверить активацию версии %s', identifier)
                     raise error
                 if current and current.is_active and current.status == 'ready':
                     return identifier, current.chunks_count
-            # The same document ID and point IDs are used on retries.
+            # При повторных попытках используются те же ID документа и ID точек.
             try:
                 await anyio.to_thread.run_sync(self.documents.delete_document, identifier)
                 if parent:

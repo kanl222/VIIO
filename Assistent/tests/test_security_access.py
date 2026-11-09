@@ -182,18 +182,18 @@ def test_router_security_dependencies_and_token_validation():
 
 def test_request_schemas_have_security_fields() -> None:
     """Схемы Pydantic содержат все обязательные поля для RBAC и контекста пользователя."""
-    # UserContext
+    # Контекст пользователя (UserContext)
     ctx = UserContext()
     assert ctx.role == "employee"
     assert ctx.departments == ["general"]
     assert ctx.user_id is None
 
-    # ChatRequest
+    # Запрос чата (ChatRequest)
     chat_req = ChatRequest(message="Привет", user_context=ctx)
     assert chat_req.user_context is not None
     assert chat_req.user_context.role == "employee"
 
-    # DocumentCreateRequest
+    # Запрос создания документа (DocumentCreateRequest)
     doc_req = DocumentCreateRequest(title="Заголовок", content="Текст")
     assert doc_req.is_public is False
     assert doc_req.allowed_roles == ["employee"]

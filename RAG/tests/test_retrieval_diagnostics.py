@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 from contextlib import asynccontextmanager
 import pytest
 from langchain_core.documents import Document
-from viio_rag.retrieval import EnhancedRetrieval
+from viio_rag.retrieval import EnhancedRetrieval, rank_documents
 from viio_rag.knowledge_data import KnowledgeData
 
 
@@ -38,3 +38,13 @@ async def test_public_diagnostics_failure_does_not_break_successful_search():
     result = await data.public_search('Guide', diagnostics=diagnostic)
     assert result[0]['content'] == 'approved text'
     assert diagnostic == {'diagnostic_status':'unavailable'}
+
+
+@pytest.mark.asyncio
+async def test_rank_documents_filters_zero_score_candidates():
+    doc1 = Document(page_content="распоряжение 1035 рецепт", metadata={"document_id": "doc1", "title": "Схема"})
+    doc2 = Document(page_content="руководство по аптечному учету", metadata={"document_id": "doc2", "title": "Аптека"})
+    # Поиск по репозиторию или коду не должен возвращать нерелевантные документы
+    result = rank_documents("github repository release commit", [doc1, doc2], 5, min_score=1)
+    assert result == []
+

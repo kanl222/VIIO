@@ -130,7 +130,7 @@ class QdrantVectorStoreAdapter(IVectorStore):
             titles = self._find_acronym_titles(query, k, filter)
             if not titles:
                 return semantic
-            # Exact system names are often lost by embeddings on short acronym questions.
+            # Точные названия систем часто теряются эмбеддингами в коротких вопросах с аббревиатурами.
             combined = []
             seen = set()
             for doc in titles[:max(1, k // 2)] + semantic + titles:
@@ -142,8 +142,8 @@ class QdrantVectorStoreAdapter(IVectorStore):
                     break
             return combined
         except Exception as exc:
-            # Query directly: a missing collection is the cold-start case.
-            # Do not cache existence or swallow network/authentication failures.
+            # Запрашиваем напрямую: отсутствие коллекции — случай холодного старта.
+            # Не кэшируем факт существования и не подавляем ошибки сети/аутентификации.
             if isinstance(exc, UnexpectedResponse) and exc.status_code == 404:
                 return []
             if isinstance(exc, ValueError) and str(exc) == f"Collection {self._collection_name} not found":
@@ -176,7 +176,7 @@ class QdrantVectorStoreAdapter(IVectorStore):
             re.sub(r"[^\w]", "", str(doc.metadata.get("title", ""))).casefold() not in normalized,
             doc.metadata.get("chunk_index", 0), str(doc.metadata.get("title", "")),
         ))
-        # Give distinct source documents a chance before adding subsequent chunks.
+        # Даем шанс отдельным исходным документам перед добавлением последующих чанков.
         first, remaining, seen = [], [], set()
         for doc in documents:
             identity = doc.metadata.get("document_id", doc.metadata.get("title"))
@@ -228,6 +228,32 @@ class QdrantVectorStoreAdapter(IVectorStore):
                 for record in found.values():
                     record['search_text'] = '\n\n'.join(text for _, text in sorted(record.pop('_search_parts')))
                 return list(found.values())
+
+    def get_chunks(self, doc_chunks: list[tuple[str, int]]) -> list[Document]:
+        """Прямое извлечение чанков по парам (document_id, chunk_index) через детерминированные ID."""
+        if not doc_chunks or not self._client.collection_exists(self._collection_name):
+            return []
+        point_ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"{doc_id}:{chunk_idx}"))
+                     for doc_id, chunk_idx in doc_chunks]
+        try:
+            points = self._client.retrieve(
+                collection_name=self._collection_name,
+                ids=point_ids,
+                with_payload=True,
+                with_vectors=False,
+            )
+            ready_docs = []
+            for point in points:
+                if not point.payload or not point.payload.get("page_content"):
+                    continue
+                meta = point.payload.get("metadata", {})
+                if meta.get("ingestion_ready") is False or meta.get("is_active") is False:
+                    continue
+                ready_docs.append(Document(page_content=point.payload["page_content"], metadata=meta))
+            return ready_docs
+        except Exception as exc:
+            logger.warning("Ошибка при получении соседних чанков: %s", exc)
+            return []
 
     def count(self) -> int:
         """Получение общего числа точек в коллекции.

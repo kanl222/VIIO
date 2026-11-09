@@ -311,6 +311,20 @@ def create_api_router(
             "page_size": result.page_size,
         }
 
+    @router.post("/api/v1/documents/catalog/{doc_id}/metadata",
+                 dependencies=[Depends(verify_internal_token)], tags=["Documents"])
+    async def update_catalog_metadata(doc_id: str, metadata: dict) -> dict:
+        require_catalog()
+        if set(metadata) - {'tags', 'description'}:
+            raise HTTPException(422, 'Допустимы только tags и description')
+        try:
+            record = await catalog_service.update_catalog_metadata(doc_id, metadata)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+        if record is None:
+            raise HTTPException(404, 'Документ не найден')
+        return _catalog_record_to_dict(record)
+
     @router.get(
         "/api/v1/documents/catalog/{doc_id}",
         tags=["Documents"],
@@ -624,6 +638,7 @@ def _catalog_record_to_dict(record: Any) -> dict:
         "is_active": record.is_active,
         "parent_id": record.parent_id,
         "document_kind": record.document_kind,
+        "catalog_metadata": getattr(record, 'catalog_metadata', {}),
         "original_filename": record.original_filename,
         "status": record.status,
         "is_public": record.is_public,

@@ -25,7 +25,7 @@ class PublicationIndex:
                 snapshot_hash=self.digest(row), expected_chunks=len(chunks), ingestion_ready=False)
                 for i in range(len(chunks))]
             self.adapter.add_texts([row['title'] + '\n' + chunk for chunk in chunks], metadata)
-            # Do not remove the previous index before embeddings succeed.
+            # Не удаляем предыдущий индекс до успешного создания эмбеддингов.
             self.adapter.delete_document_tail(str(row['id']), len(chunks))
             self.adapter.publish_document(str(row['id']))
         await anyio.to_thread.run_sync(write)

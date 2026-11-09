@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     consultant_api_key: str | None = None
     consultant_source_key: str | None = None
     consultant_url: str = 'http://consultant:8000'
-    # Independent generation budgets for the consultant and text-only coder.
+    # Независимые бюджеты генерации для консультанта и текстового кодера.
     chat_temperature: float = Field(default=0.0, ge=0, le=2)
     chat_top_p: float = Field(default=1.0, gt=0, le=1)
     chat_max_tokens: int = Field(default=2048, ge=128, le=32768)

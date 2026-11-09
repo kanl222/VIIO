@@ -76,7 +76,7 @@ export function createAdminRouter(
     }
     try {
       const pool = poolProvider();
-      // Literal substring search: user input does not become a wildcard expression.
+      // Поиск по точной подстроке: пользовательский ввод не становится выражением с подстановочными знаками.
       const [users, total] = await Promise.all([
         pool.query(`SELECT ${userColumns} FROM users
           WHERE strpos(lower(username), lower($1)) > 0
@@ -101,7 +101,7 @@ export function createAdminRouter(
       client = await poolProvider().connect();
       await client.query('BEGIN');
       await client.query("SET LOCAL statement_timeout = '5s'");
-      // Serialize role changes so two administrators cannot demote each other concurrently.
+      // Сериализуем изменение ролей, чтобы два администратора не могли одновременно понизить друг друга.
       await client.query('SELECT pg_advisory_xact_lock(864210)');
       const actor = await client.query('SELECT role FROM users WHERE id = $1', [req.user!.id]);
       if (actor.rows[0]?.role !== 'admin') {
@@ -162,7 +162,7 @@ export function createAdminRouter(
         method: 'POST',
         headers: { 'Content-Type': 'application/pdf', 'X-Internal-Token': process.env.DOCUMENTS_ADMIN_KEY || '' },
         body: new Uint8Array(req.body),
-        // Cover the API's maximum 3600s conversion limit plus transport time.
+        // Покрываем максимальный лимит конвертации API в 3600 с плюс время передачи данных.
         signal: AbortSignal.timeout(3630000),
       });
       if (!response.ok) {

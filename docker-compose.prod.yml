@@ -1,5 +1,5 @@
-# Use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml ...
-# Expose WebChat/Consultant behind the deployment gateway. Internal APIs stay private.
+# Использовать так: docker compose -f docker-compose.yml -f docker-compose.prod.yml ...
+# Предоставляет доступ к WebChat/Consultant за шлюзом развертывания. Внутренние API остаются приватными.
 services:
   postgres:
     ports: !reset []

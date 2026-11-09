@@ -30,7 +30,7 @@ def main():
             'answer': answer}, ensure_ascii=False))
         return 0 if passed else 1
     except Exception as error:
-        # SDK exception messages may include authentication metadata; do not print them.
+        # Сообщения исключений SDK могут содержать метаданные аутентификации; не выводим их.
         print(json.dumps({'status': 'failed', 'error_type': type(error).__name__}))
         return 1
 

@@ -46,6 +46,19 @@ def summaries():
                         summary['searches'] = sum(e['stage'] == 'retrieval' for e in events)
                         summary['model_calls'] = sum(e['stage'] == 'context' for e in events)
                         summary['event_count'] = len(events)
+                        total_tokens = 0
+                        has_usage = False
+                        for e in events:
+                            usage = e.get('usage')
+                            if isinstance(usage, dict):
+                                tokens = usage.get('total_tokens') or (
+                                    (usage.get('input_tokens') or usage.get('prompt_tokens') or 0) +
+                                    (usage.get('output_tokens') or usage.get('completion_tokens') or 0)
+                                )
+                                if tokens:
+                                    total_tokens += tokens
+                                    has_usage = True
+                        summary['total_tokens'] = total_tokens if has_usage else None
                         CACHE[str(path)] = (stamp, summary)
                 except (OSError, ValueError, KeyError, TypeError): continue
         for key in list(CACHE):
@@ -54,7 +67,7 @@ def summaries():
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *_): pass  # Never put questions or content in access logs.
+    def log_message(self, *_): pass  # Никогда не помещать вопросы или контент в логи доступа.
 
     def allowed(self, write=False):
         host = self.headers.get('Host', '')

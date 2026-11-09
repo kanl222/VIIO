@@ -18,7 +18,7 @@ async def call_read_tool(url, name, arguments, *, allowed, timeout, headers=None
 
     async def invoke(_):
         async with MCPAdapter(transport) as adapter:
-            # Discovery does not expose any additional tool to the model.
+            # Обнаружение (discovery) не раскрывает модели дополнительные инструменты.
             tools = await adapter.list_tools()
             selected = next((item for item in tools if item.name == name), None)
             if selected is None:
@@ -29,7 +29,7 @@ async def call_read_tool(url, name, arguments, *, allowed, timeout, headers=None
             })
             return message
 
-    # Retry only transient transport failures; MCP error results and denials are not retried.
+    # Повторяем только временные сбои транспорта; ошибки результатов MCP и отказы в доступе не повторяются.
     invocation = RunnableLambda(invoke).with_retry(
         retry_if_exception_type=(httpx.TransportError,), stop_after_attempt=2,
         exponential_jitter_params={'multiplier': 0.2, 'max': 1, 'jitter': 0.1})

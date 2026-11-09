@@ -67,7 +67,7 @@ async def pipeline(tmp_path):
             await queue.stop()
             await pool.close()
             vectors.close()
-            # Only the randomly named schema created by this fixture is removed.
+            # Удаляется только схема со случайным именем, созданная этой фикстурой.
             await connection.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
             await connection.close()
 
@@ -97,7 +97,7 @@ async def test_reviewed_binary_original_is_preserved_with_public_search_text(pip
     assert accepted.json()['tasks'][0]['status'] == 'queued'
     queue.start()
     failed = await terminal(queue,accepted.json()['tasks'][0]['task_id'])
-    assert failed.status == 'error'  # Ordinary Office uploads must be real parseable files.
+    assert failed.status == 'error'  # Обычные загрузки Office должны быть реальными читаемыми файлами.
 
 
 @pytest.mark.parametrize('suffix',['.docx','.odt'])
@@ -241,8 +241,8 @@ async def test_public_index_repairs_missing_chunks_and_removes_stale_revisions(p
     with monkeypatch.context() as patch:
         patch.setattr(data.public_index, 'remove', unavailable)
         await data.withdraw(root.document_id)
-    assert await data.public_index.inventory()  # Simulate failed physical cleanup.
-    assert not await data.public_search('Guide')  # PostgreSQL revokes access immediately.
+    assert await data.public_index.inventory()  # Имитируем сбой физической очистки.
+    assert not await data.public_search('Guide')  # PostgreSQL немедленно отзывает доступ.
     await data.sync_public_index()
     assert not await data.public_index.inventory()
 
@@ -288,7 +288,7 @@ async def test_upload_survives_new_worker_and_download_checks_full_acl(pipeline)
         files=[('files', ('Правила.txt', original, 'text/plain'))])
     assert response.status_code == 202
     identifier = response.json()['tasks'][0]['task_id']
-    # Recreate the worker object: queued state and bytes come from durable storage.
+    # Пересоздаем объект воркера: состояние очереди и байты берутся из постоянного хранилища.
     recovered = PersistentBulkQueue(ingestion, catalog, store)
     recovered.start()
     try:
@@ -415,7 +415,7 @@ async def test_pdf_waits_for_review_and_preserves_approved_text_after_restart(pi
     assert (await terminal(queue, identifier, ('needs_review', 'error'))).status == 'needs_review'
     assert adapter.count() == 0 and await catalog.count() == 0
     await queue.stop()
-    # Review and approval survive recreating the queue; raw bytes stay unchanged.
+    # Проверка и утверждение сохраняются при пересоздании очереди; исходные байты не меняются.
     review = (await client.get(f'/api/v1/documents/bulk-review/{identifier}')).json()
     assert 'Uncorrected' in review['content']
     statuses = (await client.get('/api/v1/documents/bulk-status')).json()
@@ -513,7 +513,7 @@ async def test_new_version_is_searchable_and_original_stays_downloadable(pipelin
     stale = await client.post('/api/v1/documents/bulk-upload', params={'version_parent_id': root.document_id},
         files=[('files', ('stale.txt', b'stale', 'text/plain'))])
     assert stale.status_code == 409
-    # Re-uploading an archived file must never overwrite or reactivate it.
+    # Повторная загрузка заархивированного файла никогда не должна перезаписывать или повторно активировать его.
     await ingestion.index_text(DocumentCreateRequest(title='Guide', content='Old version original',
         owner_id='u1', allowed_roles=['admin'], allowed_departments=[]))
     assert {doc.metadata['document_id'] for doc in adapter.similarity_search('version', k=10)} == {record.id}
@@ -648,7 +648,7 @@ async def test_lexical_search_filters_departments_and_archived_versions(pipeline
     allowed = {'user_id': 'hr-user', 'role': 'employee', 'departments': ['hr']}
     assert await ingestion.data.lexical('согласования поездок', allowed)
     assert not await ingestion.data.lexical('поездок', {'role': 'employee', 'departments': ['it']})
-    # Lexical retrieval remains useful if the semantic service is unavailable.
+    # Лексический поиск остается полезным, если семантический сервис недоступен.
     class FailedVector:
         def similarity_search(self, **kwargs):
             raise RuntimeError('offline')

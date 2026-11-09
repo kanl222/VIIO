@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage
-from viio_consultant.agent import PublicConsultant, NO_INFORMATION
+from viio_consultant.agent import PublicConsultant, NO_INFORMATION, excerpt
 
 
 def search(query='Support', **args):
@@ -32,10 +32,39 @@ def source(rows=None):
     return data
 
 
+def test_excerpt_keeps_late_definition_after_common_query_words():
+    content = 'Словарь ГосАптеки. Что означает сокращение?\n' * 100
+    definition = 'МДЛП — мониторинг движения лекарственных препаратов.'
+    content += '## Маркировка\n' + definition
+
+    text, line_start = excerpt(content, 'Что означает МДЛП в инструкциях ГосАптеки?')
+
+    assert definition in text
+    assert len(text) <= 3000
+    assert line_start > 1
+
+
+@pytest.mark.asyncio
+async def test_search_first_passes_sources_to_unbound_model_and_validates_them():
+    data = source()
+    model = Model(AIMessage(content='Support is available Monday.\nИсточники: Support hours'))
+    bound = Model()
+    model.bind_tools = lambda tools: bound
+
+    result = await PublicConsultant(data, model, search_first=True).chat('Когда работает поддержка?')
+
+    assert not bound.messages
+    assert len(model.messages) == 1
+    assert 'Support is available Monday.' in model.messages[0][-1].content
+    data.public_search.assert_awaited_once_with('Когда работает поддержка?')
+    data.public_ids.assert_awaited_once_with(['approved'])
+    assert result['sources'] == [dict(publication_id='approved', title='Support hours')]
+
+
 @pytest.mark.asyncio
 async def test_model_selects_query_and_only_search_is_bound():
     data = source()
-    model = Model(search('support opening hours'), AIMessage(content='Support is available Monday.'))
+    model = Model(search('support opening hours'), AIMessage(content='Support is available Monday.\nИсточники: Support hours'))
     result = await PublicConsultant(data, model).chat('Когда можно обратиться?')
     assert [tool.name for tool in model.tools] == ['search_published_documents']
     assert [message.type for message in model.messages[0]] == ['system', 'human']
@@ -49,7 +78,7 @@ async def test_model_selects_query_and_only_search_is_bound():
 async def test_agent_can_refine_unsuccessful_search():
     data = source()
     data.public_search.side_effect = [[], data.public_search.return_value]
-    model = Model(search('wrong phrase'), search('support hours'), AIMessage(content='Monday.'))
+    model = Model(search('wrong phrase'), search('support hours'), AIMessage(content='Monday.\nИсточники: Support hours'))
     result = await PublicConsultant(data, model).chat('Когда работает поддержка?')
     assert data.public_search.await_count == 2 and result['sources']
 
@@ -117,10 +146,19 @@ async def test_each_search_exposes_two_materials_and_validates_all_used_snapshot
     rows = [dict(id=str(i), title=f'Guide {i}', content=f'Published {i}') for i in range(4)]
     data.public_search.side_effect = [rows, rows[2:]]
     data.public_ids.return_value = {'0','1','2','3'}
-    model = Model(search('first'), search('second'), AIMessage(content='Combined answer'))
+    model = Model(search('first'), search('second'), AIMessage(content='Combined answer\nИсточники:\nGuide 1\nGuide 3'))
     result = await PublicConsultant(data, model).chat('Сравни инструкции')
-    assert len(result['sources']) == 4
+    assert result == {'reply': 'Combined answer', 'sources': [
+        {'publication_id': '1', 'title': 'Guide 1'}, {'publication_id': '3', 'title': 'Guide 3'}]}
     data.public_ids.assert_awaited_once_with(['0','1','2','3'])
+
+
+@pytest.mark.asyncio
+async def test_no_answer_or_unknown_citation_does_not_publish_retrieved_sources():
+    for reply in ('В доступных материалах я этого не нашёл.\nИсточники: Support hours',
+                  'Код отправляют по СМС.\nИсточники: Unknown guide'):
+        agent = PublicConsultant(source(), Model(search(), AIMessage(content=reply)))
+        assert await agent.chat('Где вводить обязательный SMS-код?') == dict(reply=NO_INFORMATION, sources=[])
 
 
 @pytest.mark.asyncio
@@ -138,7 +176,7 @@ async def test_request_executes_langgraph_nodes_before_releasing_answer():
 @pytest.mark.asyncio
 async def test_compiled_graph_does_not_reuse_previous_request_documents_or_messages():
     data = source()
-    model = Model(search(), AIMessage(content='Monday.'),
+    model = Model(search(), AIMessage(content='Monday.\nИсточники: Support hours'),
                   *[AIMessage(content='Unsupported answer') for _ in range(4)])
     agent = PublicConsultant(data, model)
     assert (await agent.chat('Hours?'))['sources']
@@ -155,7 +193,7 @@ async def test_concurrent_requests_keep_publication_state_separate():
         async def ainvoke(self, messages):
             await asyncio.sleep(0)
             question = messages[1].content
-            return search(question) if len(messages) == 2 else AIMessage(content=question)
+            return search(question) if len(messages) == 2 else AIMessage(content=f'{question}\nИсточники: {question}')
 
     data = source()
     async def public_search(query):

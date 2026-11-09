@@ -69,7 +69,7 @@ def test_acronym_title_search_boosts_exact_source_without_bypassing_acl(monkeypa
              "is_public": True, "allowed_roles": [], "allowed_departments": []},
         ],
     )
-    # Reproduce embeddings ranking a generic result first for a short acronym.
+    # Воспроизводим поведение эмбеддингов, когда для короткой аббревиатуры первым ранжируется общий результат.
     generic = Document(page_content="Общий регламент", metadata={"document_id": "general", "chunk_index": 0})
     monkeypatch.setattr(adapter._store, "similarity_search", lambda **kwargs: [generic])
     docs = adapter.similarity_search("Что такое ИСЛО?", k=3, filter=build_access_filter({"role": "employee", "departments": []}))

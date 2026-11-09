@@ -31,9 +31,9 @@ CREATE INDEX IF NOT EXISTS document_publications_search ON document_publications
 
 
 def query_terms(query):
-    # Code names and paths are more specific than surrounding words such as
+    # Имена в коде и пути более специфичны, чем окружающие слова вроде
     # "для чего он нужен". Do not let those words flood lexical candidates
-    # with unrelated manuals before the exact identifier reaches the merger.
+    # нерелевантными руководствами до того, как точный идентификатор дойдет до слияния.
     identifiers = [word.lower() for word in re.findall(r'[A-Za-z_][A-Za-z0-9_.]*', query)
                    if '_' in word or '.' in word.rstrip('.') or re.search(r'[a-z][A-Z]', word)]
     if identifiers:
@@ -44,7 +44,7 @@ def query_terms(query):
 
 
 def tsquery(query):
-    # Only letters/digits/underscores reach the tsquery grammar, never user syntax.
+    # В грамматику tsquery попадают только буквы/цифры/подчеркивания, пользовательский синтаксис исключен.
     return ' | '.join(term + ':*' for term in query_terms(query))
 
 
@@ -59,7 +59,7 @@ def excerpt(content, query, limit=4000):
     terms = list(dict.fromkeys(term[:-2] if len(term) > 5 and re.fullmatch('[а-я]+', term) else term for term in terms))
     positions = [list(match.start() for match in re.finditer(re.escape(term), text)) for term in terms]
     weights = [1 / math.sqrt(len(found)) if found else 0 for found in positions]
-    # Bound candidate count even for very repetitive source documents.
+    # Ограничиваем количество кандидатов даже для документов с повторяющимся содержимым.
     starts = {0}
     for found in positions:
         stride = max(1, len(found) // 100)
@@ -220,16 +220,16 @@ class KnowledgeData:
             from viio_rag.retrieval import rank_documents
             candidates = await self.public_vectors(query, 40)
             docs = rank_documents(query, candidates, 40)
-            # Exact wording in titles must survive a semantic candidate miss.
+            # Точные формулировки в заголовках должны сохраняться даже при пропуске семантическим поиском.
             lexical = await self.public_lexical(query)
             selected = [row['id'] for row in lexical[:2]]
             for doc in docs:
                 identifier = doc.metadata['publication_id']
                 if identifier not in selected and len(selected) < 4:
                     selected.append(identifier)
-            # Retrieve the approved snapshot, never the private source. The consultant
-            # selects a coherent bounded excerpt itself; concatenating vector hits
-            # can omit a prerequisite or join unrelated sections of a long manual.
+            # Извлекаем подтвержденный снапшот, а не приватный исходник. Консультант
+            # сам выбирает связный ограниченный фрагмент; склеивание результатов вектора
+            # может упустить необходимые предпосылки или объединить несвязанные разделы длинного руководства.
             async with self.catalog.pool.connection() as conn:
                 conn.row_factory = dict_row
                 rows = await (await conn.execute('''SELECT p.id::text,p.title,p.content,
@@ -243,7 +243,7 @@ class KnowledgeData:
                 try:
                     diagnostic_ids = await self.public_ids(list({doc.metadata.get('publication_id', '') for doc in candidates}))
                 except Exception:
-                    # Optional observation must not turn a successful search into failure.
+                    # Необязательное наблюдение не должно превращать успешный поиск в ошибку.
                     diagnostics.update(diagnostic_status='unavailable')
                     return items
                 diagnostics.update(candidates=[{'document_id': doc.metadata.get('publication_id'),

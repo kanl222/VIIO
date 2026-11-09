@@ -68,11 +68,11 @@ export function createChatServer({
   }
   const transport = backend.protocol === 'https:' ? https : http;
   const upstreams = new Set();
-  // A fresh keep-alive agent belongs to this server, not to unrelated code.
+  // Новый keep-alive агент принадлежит этому серверу, а не стороннему коду.
   const agent = new transport.Agent({ keepAlive: true, maxSockets: 32, maxFreeSockets: 8 });
 
   function proxy(request, response) {
-    const path = request.url.slice(4); // Strip /api, retain the raw path and query.
+    const path = request.url.slice(4); // Удаляем /api, сохраняем исходный путь и query-параметры.
     if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) {
       problem(response, 400, 'Некорректный путь API.'); return;
     }
@@ -127,7 +127,7 @@ export function createChatServer({
       for (const [name, value] of Object.entries(incoming.headers)) {
         if (!excluded.has(name) && name !== 'set-cookie' && value !== undefined) response.setHeader(name, value);
       }
-      // JSON, authorization failures and PDF bytes retain the backend's status.
+      // JSON, ошибки авторизации и байты PDF сохраняют статус бэкенда.
       response.statusCode = incoming.statusCode || 502;
       response.setHeader('Cache-Control', 'no-store');
       incoming.on('error', () => fail(502, 'Ответ AgentAI прерван. Повторите запрос.'));

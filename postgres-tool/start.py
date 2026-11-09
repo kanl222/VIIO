@@ -28,7 +28,7 @@ def main():
     host = os.environ.get("PGSQL_HOST", "").strip()
     if not database or not host:
         raise SystemExit("Configure PGSQL_HOST and PGSQL_DATABASE before starting postgres-tool.")
-    # Keep secrets out of command arguments and use libpq escaping for special characters.
+    # Хранить секреты вне аргументов командной строки и экранировать спецсимволы средствами libpq.
     os.environ["DATABASE_URI"] = make_conninfo(
         host=host,
         port=os.environ.get("PGSQL_PORT", "5432"),

@@ -23,6 +23,7 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
         name = (model_name or settings.yandex_model).strip()
         folder = settings.yandex_folder_id.strip()
         return ChatOpenAI(
+            metadata={'viio_provider': provider},
             callbacks=[token_usage],
             base_url="https://ai.api.cloud.yandex.net/v1",
             api_key=settings.yandex_api_key.strip(),
@@ -37,6 +38,7 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
         )
     if provider == "lmstudio":
         return ChatOpenAI(
+            metadata={'viio_provider': provider},
             callbacks=[token_usage],
             base_url=settings.lmstudio_base_url,
             api_key=settings.lmstudio_api_key,
@@ -46,6 +48,7 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
             max_tokens=max_tokens,
         )
     return ChatOllama(
+        metadata={'viio_provider': provider},
         callbacks=[token_usage],
         base_url=settings.ollama_base_url,
         model=model_name or settings.ollama_model,

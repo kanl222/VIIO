@@ -46,7 +46,7 @@ async def test_bulk_queue_processes_tasks() -> None:
     assert res1.status == "queued"
     assert res2.status == "queued"
 
-    # Wait for completion
+    # Ожидание завершения
     for _ in range(50):
         s1 = queue.get_status("task-1")
         s2 = queue.get_status("task-2")

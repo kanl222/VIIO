@@ -20,7 +20,7 @@ const aliases={js:'javascript',jsx:'javascript',ts:'typescript',tsx:'typescript'
 export function highlightedCode(source, fence) {
   const input=String(fence || '').trim().toLowerCase().replace(/^language-/, '').split(/\s+/)[0];
   const language=Object.hasOwn(aliases,input)?aliases[input]:input;
-  // No speculative language detection or expensive parsing of huge responses.
+  // Без эвристического автоопределения языка и ресурсоемкого парсинга огромных ответов.
   if (!hljs.getLanguage(language) || source.length>50_000) return null;
   try { return {language,html:hljs.highlight(source,{language,ignoreIllegals:true}).value}; }
   catch { return null; }
@@ -31,7 +31,7 @@ export function colorizeCode(element, source, fence) {
   const result=highlightedCode(source,fence);
   if (!result) return;
   const template=document.createElement('template');
-  // Only trusted, escaping highlighter output is parsed. Model HTML is never parsed.
+  // Парсится только доверенный, экранированный вывод подсветчика. HTML модели никогда не парсится.
   template.innerHTML=result.html;
   const safe=document.createDocumentFragment();
   function copyTokens(node, parent) {

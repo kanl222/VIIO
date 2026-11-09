@@ -1,4 +1,4 @@
-# Local diagnostic website. Each agent can write only its own trace volume.
+# Локальный диагностический веб-сайт. Каждый агент может писать только в свой том трассировки.
 services:
   assistent:
     image: viio-assistent:diagnostics

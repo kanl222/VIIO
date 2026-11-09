@@ -80,10 +80,10 @@ def test_table_of_contents_is_stripped_from_chunks():
 ## 2. Раздел два
 Инструкция по вводу начальных остатков на складе.'''
     parts = list(document_chunks(content, 500, 50))
-    # No chunk should contain TOC dots lines
+    # Ни один фрагмент не должен содержать строк оглавления с точками
     assert not any('................' in text for text, _ in parts)
     assert not any(meta['section_path'] == ['Инструкция ИС ЛО', 'Оглавление'] for _, meta in parts)
-    # The real sections are preserved
+    # Настоящие разделы сохранены
     assert any('Инструкция по вводу начальных остатков' in text for text, _ in parts)
     assert any(meta['section_path'] == ['Инструкция ИС ЛО', '2. Раздел два'] for _, meta in parts)
 

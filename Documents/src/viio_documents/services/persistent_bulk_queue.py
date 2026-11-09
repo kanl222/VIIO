@@ -92,8 +92,8 @@ class PersistentBulkQueue:
         return await self.processor(task, key)
 
     async def _work(self, row):
-        # The lease and processing share a failure boundary: a dead heartbeat
-        # must cancel processing rather than letting a second worker take over.
+        # Аренда (lease) и обработка разделяют границу сбоя: замерший heartbeat
+        # должен отменять обработку, а не позволять второму воркеру перехватить её.
         heartbeat = asyncio.create_task(self._keep_lease(row))
         process = asyncio.create_task(self._process(row))
         try:

@@ -17,7 +17,7 @@ def split_code(content, filename, budget=2000):
             boundaries.update(node.lineno for node in ast.parse(content).body
                               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
         except SyntaxError:
-            pass  # Incomplete source remains searchable by lines.
+            pass  # Неполный исходный код остается доступным для поиска по строкам.
     boundaries = sorted(boundaries)
     pieces = []
     for start, stop in zip(boundaries, boundaries[1:]):

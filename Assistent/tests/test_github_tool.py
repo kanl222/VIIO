@@ -122,11 +122,11 @@ async def test_all_repositories_scope(setup_tool):
     settings, backend, tool = setup_tool
     settings.github_repository = "*"
     await tool.ainvoke({"operation": "search", "query": "Handler"}, config=AUTH)
-    backend.call.assert_awaited_with("search_code", {"query": "Handler", "perPage": 20})
+    backend.call.assert_awaited_with("search_code", {"query": "Handler", "perPage": 20, "page": 1})
     await tool.ainvoke({"operation": "files", "repository": "other/project"}, config=AUTH)
     backend.call.assert_awaited_with("get_file_contents", {"owner": "other", "repo": "project", "path": ""})
     await tool.ainvoke({"operation": "search", "repository": "other/project", "query": "Handler"}, config=AUTH)
-    backend.call.assert_awaited_with("search_code", {"query": "repo:other/project Handler", "perPage": 20})
+    backend.call.assert_awaited_with("search_code", {"query": "repo:other/project Handler", "perPage": 20, "page": 1})
     backend.reset_mock()
     assert "Укажите" in await tool.ainvoke({"operation": "files"}, config=AUTH)
     assert "формате" in await tool.ainvoke({"operation": "files", "repository": "bad/repo/extra"}, config=AUTH)
@@ -205,3 +205,92 @@ async def test_rest_fallback_does_not_follow_external_links(monkeypatch, payload
     assert 'не загружаются' in result
     assert len(requests) == 1 and requests[0].url.host == 'api.github.com'
     assert 'test-only' not in result
+
+
+@pytest.mark.asyncio
+async def test_structure_operation(setup_tool):
+    settings, backend, tool = setup_tool
+    backend.get_tree = AsyncMock(return_value="📁 src\n📄 src/main.py (120 B)")
+    res = await tool.ainvoke({"operation": "structure", "path": "src", "ref": "dev"}, config=AUTH)
+    assert "src/main.py" in res
+    backend.get_tree.assert_awaited_once_with("company", "HandbookBot2", sha="dev", path="src")
+
+
+@pytest.mark.asyncio
+async def test_get_tree_rest_api(monkeypatch):
+    from assistent.tools import github_tool
+    requests = []
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "sha": "main",
+            "truncated": False,
+            "tree": [
+                {"path": "README.md", "type": "blob", "size": 42},
+                {"path": "src", "type": "tree"},
+                {"path": "src/app.py", "type": "blob", "size": 256},
+                {"path": "docs/guide.md", "type": "blob", "size": 512},
+            ]
+        })
+    factory = httpx.AsyncClient
+    monkeypatch.setattr(github_tool.httpx, 'AsyncClient', lambda **kw: factory(transport=httpx.MockTransport(respond), **kw))
+    client = GitHubMCPClient(Settings(_env_file=None, github_mcp_token="test-only"))
+
+    # Дерево всего репозитория
+    res_all = await client.get_tree("my-org", "my-repo")
+    assert "📄 README.md (42 B)" in res_all
+    assert "📁 src" in res_all
+    assert "📄 src/app.py (256 B)" in res_all
+
+    # Фильтрация по подкаталогу path="src"
+    res_subdir = await client.get_tree("my-org", "my-repo", path="src")
+    assert "README.md" not in res_subdir
+    assert "docs/guide.md" not in res_subdir
+    assert "src/app.py" in res_subdir
+
+
+@pytest.mark.asyncio
+async def test_empty_allowed_roles_returns_none():
+    settings = Settings(_env_file=None, coding_allowed_roles=[])
+    assert create_github_tool(settings) is None
+
+
+@pytest.mark.asyncio
+async def test_allowlist_repositories():
+    settings = Settings(
+        _env_file=None,
+        github_mcp_enabled=True,
+        github_repository="*",
+        github_allowed_repositories=["org/repo1", "allowed-org/*"],
+        github_mcp_token="test-only"
+    )
+    backend = AsyncMock()
+    backend.call.return_value = "data"
+    tool = create_github_tool(settings, backend)
+
+    # Разрешённый точный репозиторий
+    res1 = await tool.ainvoke({"operation": "files", "repository": "org/repo1"}, config=AUTH)
+    assert res1 == "data"
+
+    # Разрешённый репозиторий по wildcard
+    res2 = await tool.ainvoke({"operation": "files", "repository": "allowed-org/any-repo"}, config=AUTH)
+    assert res2 == "data"
+
+    # Запрещённый репозиторий
+    res3 = await tool.ainvoke({"operation": "files", "repository": "other-org/secret"}, config=AUTH)
+    assert "не входит в список разрешённых" in res3
+
+
+@pytest.mark.asyncio
+async def test_search_query_allows_double_colon_and_quotes(setup_tool):
+    settings, backend, tool = setup_tool
+    # Запрос с :: и кавычками
+    await tool.ainvoke({"operation": "search", "query": 'std::vector "exact phrase"'}, config=AUTH)
+    backend.call.assert_awaited_with(
+        "search_code",
+        {"query": 'repo:company/HandbookBot2 std::vector "exact phrase"', "perPage": 20, "page": 1}
+    )
+
+    # Запрос с запрещённым квалификатором repo:
+    res = await tool.ainvoke({"operation": "search", "query": "repo:evil/repo test"}, config=AUTH)
+    assert "обычные слова" in res

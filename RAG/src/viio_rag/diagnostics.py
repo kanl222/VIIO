@@ -46,7 +46,8 @@ async def model_call(model, messages):
         record('generation', call_id=call_id, status='error', error=type(error).__name__, duration_ms=round((time.monotonic()-start)*1000))
         raise
     record('generation', call_id=call_id, status='ok', content=response.content,
-           tool_calls=getattr(response, 'tool_calls', []), duration_ms=round((time.monotonic()-start)*1000))
+           tool_calls=getattr(response, 'tool_calls', []), duration_ms=round((time.monotonic()-start)*1000),
+           usage=getattr(response, 'usage_metadata', None) or (getattr(response, 'response_metadata', None) or {}).get('token_usage'))
     return response
 
 
@@ -72,7 +73,7 @@ def capture(agent, question, thread_id=None):
         try:
             root = Path(os.environ['VIIO_TRACE_DIR'])
             root.mkdir(parents=True, exist_ok=True)
-            # Explicitly cap individual text fields, with visible truncation.
+            # Явное ограничение размера отдельных текстовых полей с видимым усечением.
             def bounded(value):
                 if isinstance(value, str) and len(value) > 100000:
                     return value[:100000] + '\n[Обрезано журналом после 100000 символов]'

@@ -16,6 +16,7 @@ from viio_documents.services.document_catalog import DocumentCatalogService
 from viio_documents.services.document_ingestion import DocumentIngestion
 from viio_documents.services.document_service import DocumentService
 from viio_documents.services.file_store import LocalFileStore
+from viio_documents.services.project_memory import COLLECTION as PROJECT_MEMORY_COLLECTION, register_project_memory
 from viio_rag.knowledge_data import KnowledgeData
 from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
 from viio_rag.publication_index import PublicationIndex
@@ -79,7 +80,7 @@ def create_app(settings=None, agent_service=None, document_service=None, checkpo
     app=FastAPI(title='VIIO Documents',lifespan=lifespan,docs_url=None if s.secure_runtime else '/docs',redoc_url=None if s.secure_runtime else '/redoc')
     @app.middleware('http')
     async def service_boundary(request,call_next):
-        if request.url.path.startswith(('/api/v1/documents','/api/v1/knowledge/')):
+        if request.url.path.startswith(('/api/v1/documents','/api/v1/knowledge/','/api/v1/project-memory/')):
             from viio_documents.security import authorize
             from fastapi import HTTPException
             from fastapi.responses import JSONResponse
@@ -93,4 +94,8 @@ def create_app(settings=None, agent_service=None, document_service=None, checkpo
     router=create_api_router(None,document_service,s,catalog,store,queue,ingestion,data)
     configure_service(app,router)
     app.include_router(router)
+    if client and s.service_role != 'documents':
+        if PROJECT_MEMORY_COLLECTION in {s.qdrant_collection_name, s.qdrant_public_collection_name}:
+            raise ValueError('Память проектов требует отдельной коллекции Qdrant')
+        register_project_memory(app,QdrantVectorStoreAdapter(client,embeddings,PROJECT_MEMORY_COLLECTION))
     return app

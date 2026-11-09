@@ -72,6 +72,7 @@ services:
     - POSTGRES_DB=agent_db
     - POSTGRES_USER=viio_worker
     - POSTGRES_PASSWORD=${WORKER_DB_PASSWORD:?Configure WORKER_DB_PASSWORD in .env}
+    - VIIO_TRACE_DIR=/traces
     - PDF_ENGINE=${PDF_ENGINE:-auto}
     - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}
     - PDF_MAX_PAGES=${PDF_MAX_PAGES:-200}
@@ -105,6 +106,7 @@ services:
     restart: unless-stopped
     volumes:
     - documents_storage:/data/documents
+    - document_worker_traces:/traces
     depends_on:
       pdf-worker:
         condition: service_healthy
@@ -159,6 +161,7 @@ services:
     - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
     - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:?Configure CONSULTANT_SOURCE_KEY in .env}
+    - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
     depends_on:
@@ -184,6 +187,7 @@ services:
     mem_limit: 768m
     volumes:
     - ./RAG/state:/data/rag-state:ro
+    - rag_traces:/traces
     user: 65532:65532
   documents:
     image: viio-documents:latest
@@ -236,6 +240,7 @@ services:
     - QDRANT_API_KEY=${QDRANT_READ_KEY:?Configure QDRANT_READ_KEY in .env}
     - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
     - DOCUMENTS_ADMIN_KEY_PREVIOUS=${DOCUMENTS_ADMIN_KEY_PREVIOUS:-}
+    - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
     healthcheck:
@@ -251,6 +256,7 @@ services:
     restart: unless-stopped
     volumes:
     - documents_storage:/data/documents
+    - documents_traces:/traces
     depends_on:
       document-worker:
         condition: service_healthy
@@ -332,6 +338,7 @@ services:
     - DOCUMENTS_ADMIN_KEY=${DOCUMENTS_ADMIN_KEY:?Configure DOCUMENTS_ADMIN_KEY in .env}
     - CHAT_API_KEY_PREVIOUS=${CHAT_API_KEY_PREVIOUS:-}
     - AGENT_MAX_TOOL_CALLS=${AGENT_MAX_TOOL_CALLS:-24}
+    - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
     depends_on:
@@ -339,6 +346,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    volumes:
+    - assistant_traces:/traces
     healthcheck:
       test:
       - CMD
@@ -391,11 +400,14 @@ services:
     - CONSULTANT_TEMPERATURE=${CONSULTANT_TEMPERATURE:-0.0}
     - CONSULTANT_TOP_P=${CONSULTANT_TOP_P:-1.0}
     - CONSULTANT_MAX_TOKENS=${CONSULTANT_MAX_TOKENS:-2048}
+    - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
     depends_on:
       documents:
         condition: service_healthy
+    volumes:
+    - consultant_traces:/traces
     healthcheck:
       test:
       - CMD
@@ -523,6 +535,38 @@ services:
     - /tmp:size=256m
     pids_limit: 256
     user: 65532:65532
+  diagnostics:
+    build: ./Diagnostics
+    container_name: viio_diagnostics
+    ports:
+    - 127.0.0.1:${DIAGNOSTICS_PORT:-3010}:3010
+    volumes:
+    - assistant_traces:/traces/main:ro
+    - consultant_traces:/traces/consultant:ro
+    - documents_traces:/traces/documents:ro
+    - document_worker_traces:/traces/document-worker:ro
+    - rag_traces:/traces/rag:ro
+    - diagnostic_reviews:/data/reviews
+    read_only: true
+    user: 65532:65532
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:3010/health')
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    networks:
+    - viio_net
 networks:
   viio_net:
     driver: bridge
@@ -533,3 +577,9 @@ volumes:
   postgres_data: null
   docling_models: null
   documents_storage: null
+  assistant_traces: null
+  consultant_traces: null
+  documents_traces: null
+  document_worker_traces: null
+  rag_traces: null
+  diagnostic_reviews: null

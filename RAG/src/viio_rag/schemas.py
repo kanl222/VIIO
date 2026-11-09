@@ -1,5 +1,6 @@
 import uuid
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from typing import Annotated
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StringConstraints
 
 
 class UserContext(BaseModel):
@@ -15,6 +16,16 @@ class KnowledgeQuestion(BaseModel):
     k: int = Field(default=5, ge=1, le=8)
     user_context: UserContext | None = None
     diagnostics: bool = False
+    document_ids: list[str] | None = Field(default=None, min_length=1, max_length=8)
+
+
+class DocumentListRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    query: str = Field(default='', max_length=300)
+    tags: list[Annotated[str, StringConstraints(min_length=1, max_length=100)]] = Field(default_factory=list, max_length=20)
+    limit: int = Field(default=20, ge=1, le=30)
+    offset: int = Field(default=0, ge=0, le=100000)
+    user_context: UserContext | None = None
 
 
 class PublicQuestion(BaseModel):

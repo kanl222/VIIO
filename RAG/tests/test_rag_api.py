@@ -78,7 +78,7 @@ def gateway_app():
     app.state.remote_documents = False
     app.state.catalog_service = SimpleNamespace(available=True)
     app.state.document_service = None
-    # A sentinel proves the gateway never invokes local retrieval.
+    # Сторожевой маркер доказывает, что шлюз никогда не вызывает локальный поиск.
     app.state.knowledge_data = MagicMock()
     configure_service(app)
     return app

@@ -29,7 +29,7 @@ class UploadJobs:
 
     async def setup(self):
         async with self.catalog.pool.connection() as conn:
-            # Serialize additive migrations when several application processes start.
+            # Сериализуем аддитивные миграции при одновременном запуске нескольких процессов приложения.
             await conn.execute('SELECT pg_advisory_xact_lock(hashtext(current_schema()), 78231)')
             await conn.execute("SET LOCAL lock_timeout = '5s'")
             await conn.execute(JOBS_DDL)

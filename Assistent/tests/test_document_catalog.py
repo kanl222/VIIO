@@ -77,7 +77,7 @@ async def test_catalog_create_and_get() -> None:
     mock_conn = MagicMock()
     mock_conn.execute = AsyncMock(return_value=mock_cur)
 
-    # Context manager for conn
+    # Контекстный менеджер для conn
     mock_conn_ctx = AsyncMock()
     mock_conn_ctx.__aenter__.return_value = mock_conn
     mock_conn_ctx.__aexit__.return_value = None
@@ -99,7 +99,7 @@ async def test_catalog_create_and_get() -> None:
     assert record.chunks_count == 2
     mock_conn.execute.assert_awaited_once()
 
-    # Test get
+    # Проверка получения
     record_get = await svc.get("doc-test1")
     assert record_get is not None
     assert record_get.id == "doc-test1"

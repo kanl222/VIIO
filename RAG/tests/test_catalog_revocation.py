@@ -15,7 +15,7 @@ async def test_catalog_revocation_overrides_stale_vector_acl(pipeline):
     async with catalog.pool.connection() as conn:
         await conn.execute("UPDATE documents SET is_public=false,allowed_roles=ARRAY['admin'],allowed_departments=ARRAY[]::text[] WHERE id=%s",(item.document_id,))
     assert first!=await data.access_revision()
-    # Qdrant intentionally retains the old public flag.
+    # Qdrant намеренно сохраняет старый флаг public.
     assert not await retrieval.search('PRIVATE_REVOKED_CANARY',{'role':'employee'},5)
     assert await retrieval.search('PRIVATE_REVOKED_CANARY',{'role':'admin'},5)
 

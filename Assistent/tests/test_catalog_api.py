@@ -14,12 +14,12 @@ from viio_documents.services.document_catalog import DocumentListResult, Documen
 def api_client():
     settings = Settings(
         internal_api_key="test-secret-key",
-        documents_catalog_enabled=False,  # don't connect to real postgres in test
+        documents_catalog_enabled=False,  # не подключаемся к реальному postgres в тестах
     )
     mock_agent_svc = MagicMock()
     mock_doc_svc = MagicMock()
 
-    # Create mock catalog and file_store
+    # Создаем mock catalog и file_store
     mock_catalog = MagicMock()
     mock_file_store = MagicMock()
     mock_bulk_queue = MagicMock()
@@ -80,7 +80,7 @@ def test_catalog_download_forbidden_for_disallowed_role(api_client):
         storage_key="secret.pdf", chunks_count=1, created_at=now, updated_at=now,
     ))
 
-    # Employee tries to download admin-only document
+    # Сотрудник пытается скачать документ, доступный только администратору
     resp = client.get(
         "/api/v1/documents/download/doc-secret?user_role=employee",
         headers={"X-Internal-Token": "test-secret-key"},

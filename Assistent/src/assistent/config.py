@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     github_mcp_enabled: bool = False
     github_mcp_token: str = Field(default="", repr=False)
     github_repository: str = ""
+    github_allowed_repositories: list[str] = Field(default_factory=list)
     github_mcp_max_chars: int = Field(default=16000, ge=1000, le=48000)
     github_mcp_timeout_seconds: int = Field(default=25, ge=5, le=60)
     assistant_rag_backend: Literal['local', 'yandex'] = 'local'
@@ -70,7 +71,7 @@ class Settings(BaseSettings):
     consultant_api_key: str | None = None
     consultant_source_key: str | None = None
     consultant_url: str = 'http://consultant:8000'
-    # Independent generation budgets for the consultant and text-only coder.
+    # Независимые бюджеты генерации для консультанта и текстового кодера.
     chat_temperature: float = Field(default=0.0, ge=0, le=2)
     chat_top_p: float = Field(default=1.0, gt=0, le=1)
     chat_max_tokens: int = Field(default=2048, ge=128, le=32768)

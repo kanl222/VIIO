@@ -2,13 +2,16 @@
 
 The services share domain code in one distribution; no duplicate catalog or index.
 """
-from fastapi import Depends, HTTPException, Request
+from typing import Any
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 import anyio.to_thread
 from pydantic import BaseModel, ConfigDict, Field
 
 from viio_documents.router import UserContext
 from viio_documents.services.documents_client import require_internal, forward_documents
 from viio_documents.services.rag_client import forward_rag
+
+PROJECT_MEMORY_PATHS = {'/api/v1/project-memory/save', '/api/v1/project-memory/search'}
 
 
 class KnowledgeQuestion(BaseModel):
@@ -19,12 +22,12 @@ class KnowledgeQuestion(BaseModel):
     diagnostics: bool = False
 
 
-def configure_service(app, api_router=None):
+def configure_service(app: FastAPI, api_router: APIRouter | None = None) -> None:
     settings = app.state.settings
     role = settings.service_role
     remote = app.state.remote_documents
     if not remote and role == 'viio_documents':
-        return  # Explicit injected local adapters used by isolated unit/integration tests.
+        return  # Явно внедренные локальные адаптеры, используемые изолированными юнит/интеграционными тестами.
     router = api_router if api_router is not None else app.router
     if remote:
         retained = {'/api/v1/chat', '/api/v1/consultant/chat'}
@@ -68,7 +71,8 @@ def configure_service(app, api_router=None):
         @app.middleware('http')
         async def limit_processing(request, call_next):
             path = request.url.path
-            heavy = request.method == 'POST' and path in {'/api/v1/documents', '/api/v1/documents/extract-pdf', '/api/v1/documents/extract-office'}
+            heavy = request.method == 'POST' and path in (PROJECT_MEMORY_PATHS | {
+                '/api/v1/documents', '/api/v1/documents/extract-pdf', '/api/v1/documents/extract-office'})
             publication = request.method in {'POST','DELETE'} and path.startswith('/api/v1/documents/publication/')
             if heavy or publication:
                 try:
@@ -81,9 +85,10 @@ def configure_service(app, api_router=None):
             return await call_next(request)
 
     if role == 'documents':
-        # Existing callers keep the same URLs, but retrieval runs only in RAG.
+        # Существующие вызывающие компоненты сохраняют прежние URL, но поиск выполняется только в RAG.
         @app.get('/api/v1/knowledge/access-revision')
         @app.post('/api/v1/knowledge/search')
+        @app.post('/api/v1/knowledge/documents')
         @app.post('/api/v1/knowledge/yandex/chat')
         @app.post('/api/v1/consultant-materials/yandex/chat')
         @app.post('/api/v1/consultant-materials/search')
@@ -93,12 +98,12 @@ def configure_service(app, api_router=None):
 
         @app.middleware('http')
         async def delegate_writes(request, call_next):
-            # Heavy synchronous-style APIs preserve their response contract, but
-            # all processing runs in the worker process. Bulk uploads use the
-            # durable queue directly and immediately return task identifiers.
+            # Тяжелые синхронные API сохраняют свой контракт ответа, но
+            # вся обработка выполняется в процессе воркера. Массовые загрузки используют
+            # персистентную очередь напрямую и сразу возвращают идентификаторы задач.
             path = request.url.path
-            heavy = request.method == 'POST' and path in {
-                '/api/v1/documents', '/api/v1/documents/extract-pdf', '/api/v1/documents/extract-office'}
+            heavy = request.method == 'POST' and path in (PROJECT_MEMORY_PATHS | {
+                '/api/v1/documents', '/api/v1/documents/extract-pdf', '/api/v1/documents/extract-office'})
             publication = request.method in {'POST', 'DELETE'} and path.startswith('/api/v1/documents/publication/')
             if heavy or publication:
                 try:

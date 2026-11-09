@@ -227,8 +227,8 @@ async def main(config_path):
             await ask('memory_after_forget', '/facts', validate=lambda row: {'pass': '2026-09-01' not in row.get('reply','')})
             await ask('calculator', 'Посчитай (240 + 60) * 4', validate=lambda row: {'pass': row['reply']=='1200' and not row.get('model_calls')})
             await ask('unknown', 'Кто согласовал запуск отчёта Орбита-98417 и на какую дату?', validate=lambda row: {'pass': not row.get('sources') and bool(re.search('нет|отсутств|не найден|недостат',row['reply'],re.I))})
-            # Exercise actual summarizer model with known project facts and seeded dialogue,
-            # without sending 30 wasteful filler requests or pretending they were live turns.
+            # Тестируем реальную модель суммаризации с известными фактами проекта и подготовленным диалогом,
+            # не отправляя 30 лишних запросов-пустышек и не имитируя живые реплики.
             summary_model = chat_model(base)
             graph = build_agent_graph(summary_model, [], saver, system_prompt='Ты помощник разработчика. Отвечай кратко.', summary_after=12)
             tid = owner + '-summary'

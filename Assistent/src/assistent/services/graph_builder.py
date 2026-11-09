@@ -1,6 +1,7 @@
 """Compatibility facade for the ready-made LangChain agent runtime."""
 
 from collections.abc import Sequence
+from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -31,6 +32,7 @@ def build_agent_graph(
     model_first_tools: bool = False,
     task_routing: bool | None = None,
     max_tool_calls: int = 3,
+    **extra_kwargs: Any,
 ) -> CompiledStateGraph:
     """Сборка и компиляция StateGraph агента с поддержкой инструментов и сохранением состояния.
 
@@ -53,4 +55,5 @@ def build_agent_graph(
     from assistent.services.agent_runtime import build_runtime
 
     return build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
-                         summary_after, history_max_chars, model_first_tools, task_routing, max_tool_calls)
+                         summary_after, history_max_chars, model_first_tools, task_routing, max_tool_calls,
+                         **extra_kwargs)

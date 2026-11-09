@@ -10,7 +10,7 @@ import { AuthModal } from './components/AuthModal';
 import { Loader2 } from 'lucide-react';
 import { AdminView } from './components/AdminView';
 
-// Safe hooks fallback for lightweight vm test environments (e.g. chat-regressions test runner)
+// Безопасный фолбэк хуков для легковесных тестовых окружений vm (например, раннера chat-regressions)
 const useCallback: <T extends (...args: any[]) => any>(callback: T, deps: any[]) => T =
   React.useCallback ?? ((fn: any) => fn);
 const useMemo: <T>(factory: () => T, deps: any[]) => T =
@@ -54,7 +54,7 @@ export const App: React.FC = () => {
         setSidebarOpen(false);
       }
     } catch {
-      // handled in hook
+      // обрабатывается в хуке
     }
   }, [createConversation]);
 
@@ -68,7 +68,7 @@ export const App: React.FC = () => {
             await sendMessage(text, newConv.id, options);
           }
         } catch {
-          // handled in hook
+          // обрабатывается в хуке
         }
       } else {
         await sendMessage(text, currentId, options);

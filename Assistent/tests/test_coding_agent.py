@@ -29,7 +29,7 @@ class SupervisorModel(GenericFakeChatModel):
 
 
 def specialist(responses, saver=None):
-    # GenericFakeChatModel cannot bind tools: a binding would fail this test.
+    # GenericFakeChatModel не может привязывать инструменты: привязка сломала бы этот тест.
     model = GenericFakeChatModel(messages=iter(responses))
     graph = build_agent_graph(model, tools=[], checkpointer=saver or MemorySaver(), system_prompt=CODING_SYSTEM_PROMPT)
     return CodingAgentService(graph, ["programmer", "admin"])

@@ -1,4 +1,4 @@
-# Temporary fixtures only. Run with a unique project/prefix and generated env file.
+# Только временные фикстуры. Запускать с уникальным project/prefix и сгенерированным env-файлом.
 services:
   tools-eval-postgres:
     image: postgres:16-alpine
