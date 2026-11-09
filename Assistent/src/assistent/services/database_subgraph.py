@@ -91,6 +91,39 @@ FORMAT_ANSWER_PROMPT = """Ты — ассистент аналитики дан�
 - Если строк нет, прямо сообщи об этом.
 - В конце укажи выполненный SQL-запрос в блоке ```sql ... ```."""
 
+OPTIMIZE_DB_PROMPT = """Ты — эксперт по оптимизации баз данных PostgreSQL.
+Пользователь просит оптимизировать запрос или структуру таблицы:
+{question}
+
+Схема структуры таблиц и текущие индексы:
+{schema_info}
+
+План выполнения запроса (EXPLAIN):
+{explain_plan}
+
+Сформулируй профессиональные рекомендации по оптимизации (в соответствии с postgres-patterns):
+1. Разбери узлы плана EXPLAIN (Seq Scan, Hash Join, Nested Loop, Sort) и укажи конкретное место замедления.
+2. Проверь наличие индексов по условиям фильтрации (WHERE) и объединения (JOIN).
+3. Предложи конкретную DDL команду создания индекса (CREATE INDEX ...):
+   - Колонки проверки равенства (=) первыми, колонки диапазона (>, <, BETWEEN) вторыми.
+   - Используй B-tree для общих фильтров, BRIN для логов/таймстемпов, GIN для JSONB.
+4. Если запрос можно переписать эффективнее — приведи исправленный SQL.
+5. Объясни, какой ожидается выигрыш производительности (индексное сканирование Index Scan / Bitmap Index Scan вместо последовательного Seq Scan).
+6. Ответь кратко, понятно и по делу на русском языке."""
+
+DIAGNOSE_DB_ERROR_PROMPT = """Ты — эксперт PostgreSQL по анализу и исправлению ошибок из логов.
+Пользователь сообщил об ошибке из логов:
+{question}
+
+Реальная структура таблиц и колонок в базе данных:
+{schema_info}
+
+Задача:
+1. Определи причину ошибки (например: опечатка в имени колонки, обращение к несуществующему полю, несовместимость типов данных, блокировка строк).
+2. Сравни ошибочное название с реальными колонками из схемы выше и четко назови правильное имя столбца/таблицы.
+3. Предоставь исправленный рабочий SQL-запрос в блоке ```sql ... ```.
+4. Дай краткое и понятное объяснение ошибки и способа её предотвращения на русском языке."""
+
 
 class DatabaseAnalystState(AgentState, total=False):
     question: str
@@ -173,6 +206,27 @@ def build_database_analyst_graph(
                         "is_direct_command": True,
                         "direct_command_result": f"Ошибка выполнения команды БД: {exc}",
                     }
+            elif op in ("explain", "query") or (op.startswith("select")):
+                sql_to_run = rest if op in ("explain", "query") else subcmd
+                op_to_use = op if op in ("explain", "query") else "query"
+                try:
+                    res = await db_tool.ainvoke(
+                        {"operation": op_to_use, "sql": sql_to_run},
+                        config={"configurable": {"user_context": user_context}},
+                    )
+                    return {
+                        **boundary,
+                        "question": question,
+                        "is_direct_command": True,
+                        "direct_command_result": str(res),
+                    }
+                except Exception as exc:
+                    return {
+                        **boundary,
+                        "question": question,
+                        "is_direct_command": True,
+                        "direct_command_result": f"Ошибка выполнения {op_to_use}: {exc}",
+                    }
 
         # Step A: Get list of tables in public
         try:
@@ -185,9 +239,14 @@ def build_database_analyst_graph(
             logger.warning("Failed to fetch tables list: %s", e)
             tables_text = ""
 
-        # Step B: LLM selects relevant table(s)
+        # Step B: Select relevant table(s) (explicitly named in question or picked by LLM)
         selected_tables: list[str] = []
-        if tables_text and "ошибка" not in tables_text.lower():
+        if tables_text:
+            for t_candidate in re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]+\b", question):
+                if t_candidate in tables_text and t_candidate not in selected_tables:
+                    selected_tables.append(t_candidate)
+
+        if not selected_tables and tables_text and "ошибка" not in tables_text.lower():
             try:
                 pick_res = await llm.ainvoke([
                     HumanMessage(content=INSPECT_TABLES_PROMPT.format(question=question, available_tables=tables_text[:3000]))
@@ -214,6 +273,56 @@ def build_database_analyst_graph(
 
         schema_info = "\n\n".join(schema_descriptions) if schema_descriptions else tables_text
         record("db_inspect_schema", tables=selected_tables, length=len(schema_info))
+
+        # Step D: Specialized handling for Optimization requests or Log Error diagnosis
+        is_opt = bool(re.search(r"оптимиз\w*|ускор\w*|план\s+запрос\w*|explain|индекс\w*|медленн", question, re.I))
+        is_err = bool(re.search(r"ошибк\w*|psycopg|traceback|undefined_column|does\s+not\s+exist|lock\s+timeout|не\s+существует", question, re.I))
+
+        if is_opt and schema_info:
+            sql_match = re.search(r"```(?:sql)?\s*([\s\S]*?)\s*```|(?:SELECT\s+[\s\S]+?(?:;|$))", question, re.I)
+            explain_plan = "План запроса не указан пользователем"
+            if sql_match:
+                extracted_sql = clean_sql(sql_match.group(1) if sql_match.group(1) else sql_match.group(0))
+                try:
+                    exp_res = await db_tool.ainvoke(
+                        {"operation": "explain", "sql": extracted_sql},
+                        config={"configurable": {"user_context": user_context}},
+                    )
+                    explain_plan = str(exp_res)
+                except Exception as exc:
+                    explain_plan = f"Ошибка получения плана: {exc}"
+
+            opt_res = await llm.ainvoke([
+                SystemMessage(content=DATABASE_SYSTEM_PROMPT),
+                HumanMessage(content=OPTIMIZE_DB_PROMPT.format(
+                    question=question,
+                    schema_info=schema_info,
+                    explain_plan=explain_plan,
+                )),
+            ])
+            ans = strip_thinking(str(opt_res.content)).strip()
+            return {
+                **boundary,
+                "question": question,
+                "is_direct_command": True,
+                "direct_command_result": ans,
+            }
+
+        if is_err and schema_info:
+            err_res = await llm.ainvoke([
+                SystemMessage(content=DATABASE_SYSTEM_PROMPT),
+                HumanMessage(content=DIAGNOSE_DB_ERROR_PROMPT.format(
+                    question=question,
+                    schema_info=schema_info,
+                )),
+            ])
+            ans = strip_thinking(str(err_res.content)).strip()
+            return {
+                **boundary,
+                "question": question,
+                "is_direct_command": True,
+                "direct_command_result": ans,
+            }
 
         return {
             **boundary,

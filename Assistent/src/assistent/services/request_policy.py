@@ -24,14 +24,14 @@ FOLLOWUP = re.compile(
 # Используется совместно резервным супервизором и явным маршрутизатором кодера.
 CODING_INTENT = re.compile(
     r"\b(?:sql|soap|rest|graphql|wsdl|git|python|javascript|typescript|csharp|java|"
-    r"pytest|npm|docker|langgraph|fastapi|react|api)\b|"
+    r"pytest|npm|docker|langgraph|fastapi|react|api|psycopg\w*)\b|"
     r"```|Traceback \(most recent call last\)|"
     r"\b[\w/-]+\.(?:py|tsx?|jsx?|cs|sql|go|rs|java|wsdl)\b|"
     r"исходник|исходн[а-я]*\s+код|программирован|рефактор|отладк|"
     r"(?:напиш|напис|созда|исправ|перепиш|перепис|проверь|провер|измен|добав)[\s\S]{0,80}"
     r"(?:\bкод\b|функци|метод|юнит.?тест|unit.?test)|"
-    r"(?:оптимиз|ускор)[\s\S]{0,60}(?:\bкод\b|функци|алгоритм)|"
-    r"(?:ошибк|баг)[\s\S]{0,50}(?:\bкод[ае]?\b|сборк|компиля|функци)", re.I,
+    r"(?:оптимиз|ускор)[\s\S]{0,60}(?:\bкод\b|функци|алгоритм|sql|бд\b|баз\w*\s+данн)|"
+    r"(?:ошибк|баг|exception|error)[\s\S]{0,60}(?:\bкод[ае]?\b|сборк|компиля|функци|лог\w*|сервис\w*|воркер\w*|бд\b)", re.I,
 )
 
 

@@ -267,3 +267,36 @@ async def test_missing_named_document_does_not_substitute_neighboring_document()
     result, _ = await coder.chat('Напиши по документу «Нужный документ»', "missing", PROGRAMMER)
     assert "не найден среди доступных результатов" in result
     assert not model.seen
+
+
+@pytest.mark.asyncio
+async def test_coder_resolves_application_log_error():
+    """Проверяет диагностику и исправление ошибки приложения из логов (Traceback)."""
+    error_log = (
+        "Пользователь сообщил об ошибке в логах сервиса:\n"
+        "Traceback (most recent call last):\n"
+        "  File 'document_ingestion_graph.py', line 112, in extract_node\n"
+        "    chunk_idx = metadata['chunk_index']\n"
+        "KeyError: 'chunk_index'\n"
+        "Как решить эту ошибку в коде?"
+    )
+
+    fix_response = (
+        "### Диагностика ошибки из логов\n"
+        "Ошибка `KeyError: 'chunk_index'` возникает из-за прямого обращения по ключу `metadata['chunk_index']`, "
+        "когда поле отсутствует в словаре метаданных (например, для нефрагментированных документов).\n\n"
+        "### Решение:\n"
+        "Используйте безопасное получение с дефолтным значением через `.get()`:\n"
+        "```python\n"
+        "chunk_idx = metadata.get('chunk_index', 0)\n"
+        "```"
+    )
+
+    coder = specialist([AIMessage(content=fix_response)])
+    general = MagicMock()
+    reply, tid = await MultiAgentService(general, coder).chat(error_log, "diag-thread", PROGRAMMER)
+
+    assert "KeyError" in reply
+    assert ".get('chunk_index', 0)" in reply
+    assert "```python" in reply
+    general.chat.assert_not_called()
