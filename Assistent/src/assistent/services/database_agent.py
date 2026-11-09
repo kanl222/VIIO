@@ -13,12 +13,27 @@ from assistent.tools.postgres_tool import can_access_database
 
 
 
+DATABASE_REQUEST_RE = re.compile(
+    r"(?:подключ[её]н\w*|тестов\w*|текущ\w*)\s+(?:\w+\s+){0,2}(?:postgres\w*|баз\w*|бд\b)|"
+    r"(?:какие|покажи|перечисли|найди|проверь|структур\w*|схем\w*)[\s\S]{0,70}(?:таблиц\w*|схем\w*|колонк\w*|поля|баз\w*|бд\b|postgres)|"
+    r"(?:оптимиз\w*|ускор\w*|план\s+запрос\w*|индекс\w*)[\s\S]{0,70}(?:бд\b|баз\w*|запрос\w*|таблиц\w*|postgres\w*|sql)|"
+    r"(?:ошибк\w*|проблем\w*|лог\w*)[\s\S]{0,60}(?:postgres\w*|psycopg\w*|бд\b|баз\w*\s+данн|таблиц\w*)|"
+    r"\b(?:psycopg\w*|pg_[\w]+|undefined_column|undefined_table)\b|"
+    r"\bexplain\s+(?:analyze\s+)?(?:select|\b)",
+    re.I,
+)
+
+
 def is_database_request(message: str) -> bool:
     """Live connection requests, not standalone SQL writing or database theory."""
-    if re.search(r"^(?:напиши|создай|перепиши|объясни|что такое)\b", message.strip(), re.I):
+    msg = message.strip()
+    is_opt_or_diag = bool(re.search(
+        r"(?:оптимиз\w*|ускор\w*|индекс\w*|explain|ошибк\w*|psycopg|план\s+запрос)[\s\S]{0,60}(?:бд\b|баз\w*|запрос|таблиц|postgres)",
+        msg, re.I,
+    ))
+    if not is_opt_or_diag and re.search(r"^(?:напиши|создай|перепиши|объясни|что такое)\b", msg, re.I):
         return False
-    return bool(re.search(r"(?:подключ[её]н\w*|тестов\w*|текущ\w*)\s+(?:\w+\s+){0,2}(?:postgres\w*|баз\w*|бд\b)|"
-                          r"(?:какие|покажи|перечисли)[\s\S]{0,70}(?:таблиц|схем)[\s\S]{0,70}postgres", message, re.I))
+    return bool(is_opt_or_diag or DATABASE_REQUEST_RE.search(msg))
 
 
 class DatabaseAgentService:

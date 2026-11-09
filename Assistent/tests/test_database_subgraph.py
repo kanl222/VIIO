@@ -158,10 +158,12 @@ async def test_supervisor_with_database_analyst():
     settings = Settings(_env_file=None, pgsql_enabled=True)
     db_tool = create_postgres_readonly_tool(settings, client=MockClient())
 
+    # Таблица 'users' уже указана в вопросе, поэтому LLM вызывается для:
+    # 1. generate SQL -> "SELECT count(*) FROM public.users"
+    # 2. format answer -> "В системе зарегистрировано 5 активных пользователей."
     llm = NoToolCallsModel(messages=iter([
-        AIMessage(content="public.users"),
         AIMessage(content="SELECT count(*) FROM public.users"),
-        AIMessage(content="В системе зарегистрировано 5 активных пользователей."),
+        AIMessage(content="В системе зарегистрировано 5 активных пользователей.\n```sql\nSELECT count(*) FROM public.users\n```"),
     ]))
 
     supervisor = build_supervisor_graph(
@@ -178,3 +180,136 @@ async def test_supervisor_with_database_analyst():
 
     final_msg = res["messages"][-1]
     assert "5" in final_msg.content
+
+
+@pytest.mark.asyncio
+async def test_database_optimization_workflow():
+    """Проверяет оптимизацию БД: инспекция схемы, вызов EXPLAIN и рекомендация составного индекса."""
+    called_operations = []
+
+    class MockClient:
+        async def call(self, name: str, arguments: dict) -> str:
+            called_operations.append(name)
+            if name == "list_objects":
+                return "raw_pharmacy_transactions, orders"
+            if name == "get_object_details":
+                return "Columns: id (bigint), pharmacy_id (int), transaction_time (timestamptz), total_amount (numeric)\nIndexes: none"
+            if name == "explain_query":
+                return "Seq Scan on raw_pharmacy_transactions (cost=0.00..4520.00 rows=150 width=64)\nFilter: (pharmacy_id = 5 AND transaction_time > '2024-01-01')"
+            return "ok"
+
+    settings = Settings(_env_file=None, pgsql_enabled=True)
+    db_tool = create_postgres_readonly_tool(settings, client=MockClient())
+
+    llm = NoToolCallsModel(messages=iter([
+        AIMessage(content=(
+            "### Анализ плана запроса\n"
+            "Запрос выполняет **Seq Scan** (последовательное сканирование всей таблицы) из-за отсутствия индексов.\n\n"
+            "### Рекомендация по оптимизации (postgres-patterns)\n"
+            "Создайте составной B-Tree индекс: сначала колонка равенства `pharmacy_id`, затем диапазон `transaction_time`:\n"
+            "```sql\n"
+            "CREATE INDEX idx_raw_pharmacy_tx_pharmacy_time ON public.raw_pharmacy_transactions (pharmacy_id, transaction_time);\n"
+            "```\n"
+            "Это заменит Seq Scan на **Index Scan** и ускорит выборку."
+        )),
+    ]))
+
+    graph = build_database_analyst_graph(
+        llm=llm,
+        tools=[db_tool],
+        checkpointer=MemorySaver(),
+    )
+
+    query = (
+        "Оптимизируй медленный запрос к таблице raw_pharmacy_transactions в базе данных:\n"
+        "```sql\n"
+        "SELECT * FROM raw_pharmacy_transactions WHERE pharmacy_id = 5 AND transaction_time > '2024-01-01';\n"
+        "```"
+    )
+
+    res = await graph.ainvoke(
+        {"messages": [HumanMessage(content=query)]},
+        context={"user_context": {"user_id": "p1", "role": "programmer"}},
+        config={"configurable": {"thread_id": "t-opt-1"}},
+    )
+
+    assert "get_object_details" in called_operations
+    assert "explain_query" in called_operations
+    final_content = res["messages"][-1].content
+    assert "Seq Scan" in final_content
+    assert "CREATE INDEX" in final_content
+    assert "idx_raw_pharmacy_tx_pharmacy_time" in final_content
+
+
+@pytest.mark.asyncio
+async def test_database_resolve_log_error():
+    """Проверяет диагностику и исправление ошибки из логов (UndefinedColumn)."""
+    called_operations = []
+
+    class MockClient:
+        async def call(self, name: str, arguments: dict) -> str:
+            called_operations.append(name)
+            if name == "list_objects":
+                return "raw_pharmacy_transactions"
+            if name == "get_object_details":
+                return "Columns: id (bigint), pharmacy_id (int), transaction_time (timestamptz), total_amount (numeric)"
+            return "ok"
+
+    settings = Settings(_env_file=None, pgsql_enabled=True)
+    db_tool = create_postgres_readonly_tool(settings, client=MockClient())
+
+    llm = NoToolCallsModel(messages=iter([
+        AIMessage(content=(
+            "### Диагностика ошибки из логов\n"
+            "**Причина:** в таблице `raw_pharmacy_transactions` нет колонки `transaction_date`.\n"
+            "Реальное имя поля в схеме базы данных — **`transaction_time`**.\n\n"
+            "### Исправленный SQL-запрос:\n"
+            "```sql\n"
+            "SELECT id, pharmacy_id, transaction_time, total_amount FROM raw_pharmacy_transactions WHERE pharmacy_id = 10;\n"
+            "```"
+        )),
+    ]))
+
+    graph = build_database_analyst_graph(
+        llm=llm,
+        tools=[db_tool],
+        checkpointer=MemorySaver(),
+    )
+
+    log_error_msg = (
+        "В логах вылезла ошибка: psycopg.errors.UndefinedColumn: column \"transaction_date\" does not exist "
+        "at character 38 в таблице raw_pharmacy_transactions. Помоги исправить запрос."
+    )
+
+    res = await graph.ainvoke(
+        {"messages": [HumanMessage(content=log_error_msg)]},
+        context={"user_context": {"user_id": "p1", "role": "programmer"}},
+        config={"configurable": {"thread_id": "t-log-err-1"}},
+    )
+
+    assert "get_object_details" in called_operations
+    final_content = res["messages"][-1].content
+    assert "transaction_time" in final_content
+    assert "transaction_date" in final_content
+    assert "```sql" in final_content
+
+
+@pytest.mark.asyncio
+async def test_supervisor_routes_db_optimization_and_log_error():
+    """Проверяет, что супервизор корректно направляет запросы оптимизации и ошибок логов в Database Specialist."""
+    from assistent.services.supervisor_graph import classify_route
+
+    tools = {"postgresql_readonly", "github_repository"}
+    user_context = {"user_id": "p1", "role": "programmer"}
+
+    # 1. Запрос оптимизации БД
+    q_opt = "Оптимизируй запрос к таблице raw_pharmacy_transactions в базе данных"
+    assert classify_route(q_opt, tools, user_context) == "database"
+
+    # 2. Ошибка БД из логов (psycopg)
+    q_err = 'В логах ошибка: psycopg.errors.UndefinedColumn: column "transaction_date" does not exist в таблице raw_pharmacy_transactions'
+    assert classify_route(q_err, tools, user_context) == "database"
+
+    # 3. Вопрос о плане запроса EXPLAIN
+    q_explain = "Проверь план explain для запроса SELECT count(*) FROM public.orders"
+    assert classify_route(q_explain, tools, user_context) == "database"
