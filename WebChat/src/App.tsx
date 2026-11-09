@@ -8,13 +8,20 @@ import { ChatView } from './components/ChatView';
 import { ChatInput } from './components/ChatInput';
 import { AuthModal } from './components/AuthModal';
 import { Loader2 } from 'lucide-react';
-import { AdminView } from './components/AdminView';
+import { AdminView as StaticAdminView } from './components/AdminView';
 
 // Безопасный фолбэк хуков для легковесных тестовых окружений vm (например, раннера chat-regressions)
 const useCallback: <T extends (...args: any[]) => any>(callback: T, deps: any[]) => T =
   React.useCallback ?? ((fn: any) => fn);
 const useMemo: <T>(factory: () => T, deps: any[]) => T =
   React.useMemo ?? ((fn: any) => fn());
+const Suspense: React.FC<{ fallback?: React.ReactNode; children?: React.ReactNode }> =
+  React.Suspense ?? (({ children }) => <>{children}</>);
+
+// Динамический импорт панели администратора для ускорения начальной загрузки чата (vercel-react-best-practices)
+const LazyAdminView = typeof React.lazy === 'function'
+  ? React.lazy(() => import('./components/AdminView').then((m) => ({ default: m.AdminView })))
+  : StaticAdminView;
 
 export const App: React.FC = () => {
   const { user, loading: authLoading, login, register, logout, checkAuth } = useAuth();
@@ -134,7 +141,14 @@ export const App: React.FC = () => {
 
       {/* Main Content Area */}
       {view === 'admin' && user?.role === 'admin' ? (
-        <AdminView user={user} onAccessChanged={checkAuth} />
+        <Suspense fallback={
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-gray-500 dark:text-zinc-400">
+            <Loader2 className="w-8 h-8 animate-spin text-indigo-500 mb-2" />
+            <span className="text-xs font-medium">Загрузка панели администратора...</span>
+          </div>
+        }>
+          <LazyAdminView user={user} onAccessChanged={checkAuth} />
+        </Suspense>
       ) : (
         <div className="flex-1 flex overflow-hidden relative">
           <Sidebar
