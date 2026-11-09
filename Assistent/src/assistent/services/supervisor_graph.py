@@ -91,6 +91,7 @@ def build_supervisor_graph(
     history_max_chars: int = 18000,
     model_first_tools: bool = True,
     max_tool_calls: int = 6,
+    corrective_rag: bool = False,
     **extra_kwargs: Any,
 ) -> CompiledStateGraph:
     """Constructs a Supervisor StateGraph that orchestrates specialized sub-runtimes."""
@@ -103,18 +104,30 @@ def build_supervisor_graph(
     knowledge_tools = [t for t in active_tools if t.name in (
         "search_knowledge_base", "list_documents", "search_document_content", "manage_plan", "save_knowledge"
     )]
-    knowledge_runtime = build_runtime(
-        llm=llm,
-        tools=knowledge_tools,
-        checkpointer=False,
-        system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
-        context_max_chars=context_max_chars,
-        summary_after=0,  # History compaction handled at supervisor level
-        history_max_chars=history_max_chars,
-        model_first_tools=model_first_tools,
-        task_routing=False,
-        max_tool_calls=max_tool_calls,
-    )
+    if corrective_rag:
+        from assistent.services.corrective_rag import build_corrective_rag_graph
+        knowledge_runtime = build_corrective_rag_graph(
+            llm=llm,
+            tools=knowledge_tools,
+            checkpointer=False,
+            system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
+            context_max_chars=context_max_chars,
+            history_max_chars=history_max_chars,
+            max_rewrites=2,
+        )
+    else:
+        knowledge_runtime = build_runtime(
+            llm=llm,
+            tools=knowledge_tools,
+            checkpointer=False,
+            system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
+            context_max_chars=context_max_chars,
+            summary_after=0,  # History compaction handled at supervisor level
+            history_max_chars=history_max_chars,
+            model_first_tools=model_first_tools,
+            task_routing=False,
+            max_tool_calls=max_tool_calls,
+        )
 
     # 2. Coding Specialist (github_repository, coding_agent, manage_plan)
     coding_tools = [t for t in active_tools if t.name in ("github_repository", "coding_agent", "manage_plan")]
