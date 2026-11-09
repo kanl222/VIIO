@@ -169,14 +169,21 @@ def messages_with_retrieved_context(messages: Sequence[BaseMessage], context_max
         call["id"] for m in messages if isinstance(m, AIMessage)
         for call in m.tool_calls if call.get("id", "").startswith(AUTO_CALL_PREFIX)
     }
-    stale_search_ids = {
+    stale_read_ids = {
         call['id'] for index, message in enumerate(messages) if index < latest
         and isinstance(message, AIMessage)
-        for call in message.tool_calls if call.get('name') in {SEARCH_TOOL, 'search_document_content', 'list_documents'}
+        for call in message.tool_calls
+        if call.get('name') in {SEARCH_TOOL, 'search_document_content', 'list_documents', 'postgresql_readonly'}
     }
-    removed_ids = auto_ids | stale_search_ids
+    removed_ids = auto_ids | stale_read_ids
     context: list[str] = []
     remaining = max(0, context_max_chars)
+    search_results_left = sum(
+        isinstance(message, ToolMessage)
+        and message.tool_call_id not in stale_read_ids
+        and (message.tool_call_id in auto_ids or message.name in {SEARCH_TOOL, 'search_document_content'})
+        for message in messages
+    )
     prepared: list[BaseMessage] = []
     question_position: int | None = None
 
@@ -191,16 +198,23 @@ def messages_with_retrieved_context(messages: Sequence[BaseMessage], context_max
                 # Смешанное сообщение: убираем автоматические вызовы, чтобы не осталось «осиротевших».
                 message = message.model_copy(update={"tool_calls": kept})
         elif isinstance(message, ToolMessage) and message.tool_call_id in removed_ids:
-            if index > latest and remaining > 0:
-                part = readable_reference(str(message.content))[:remaining]
-                context.append(part)
-                remaining -= len(part) + 2
+            if index > latest:
+                allowance = remaining // search_results_left
+                search_results_left -= 1
+                part = readable_reference(str(message.content), max_chars=max(0, allowance - 2))
+                if part:
+                    context.append(part)
+                    remaining -= len(part) + 2
             continue
 
         if index == latest:
             question_position = len(prepared)
         if isinstance(message, ToolMessage) and message.name in {SEARCH_TOOL, 'search_document_content'}:
-            message = message.model_copy(update={"content": readable_reference(str(message.content))})
+            allowance = remaining // search_results_left
+            search_results_left -= 1
+            text = readable_reference(str(message.content), max_chars=allowance, include_ids=True)
+            remaining -= len(text)
+            message = message.model_copy(update={"content": text})
         prepared.append(message)
 
     if context and question_position is not None:

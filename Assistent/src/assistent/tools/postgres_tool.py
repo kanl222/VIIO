@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Literal
 
 from langchain_core.runnables import RunnableConfig
@@ -14,6 +15,13 @@ from assistent.security import has_role_access, require_roles
 
 logger = logging.getLogger(__name__)
 DATABASE_ROLES = frozenset({"programmer", "admin"})
+SQLSTATE_ERRORS = {
+    "42703": ("undefinedcolumn", "не найден столбец"),
+    "42P01": ("undefinedtable", "не найдена таблица"),
+    "42501": ("insufficientprivilege", "недостаточно прав"),
+    "42601": ("syntaxerror", "синтаксическая ошибка"),
+    "57014": ("querycanceled", "запрос отменён"),
+}
 
 
 def can_access_database(context: dict | None) -> bool:
@@ -36,7 +44,15 @@ class PostgresMCPClient:
             timeout=self.settings.pgsql_timeout_seconds, sse=True)
         # Вышестоящий сервис иногда возвращает ошибки как TextContent без флага isError.
         if failed or text.lstrip().lower().startswith("error:"):
-            return "Ошибка PostgreSQL: запрос отклонён или недоступны таблица/подключение. Проверьте SQL и права пользователя БД."
+            match = re.search(r"\bSQLSTATE[\s:=\[]+([0-9A-Z]{5})\b", text, re.I)
+            code = match[1].upper() if match else next(
+                (state for state, (kind, _) in SQLSTATE_ERRORS.items() if kind in text.lower()), None
+            )
+            logger.warning("PostgreSQL MCP rejected operation=%s sqlstate=%s", name, code or "unknown")
+            if code:
+                _, description = SQLSTATE_ERRORS.get(code, ("", "сервер отклонил операцию"))
+                return f"Ошибка PostgreSQL (SQLSTATE {code}): {description}."
+            return "Ошибка PostgreSQL: сервер отклонил операцию без кода причины. Подробности в журнале postgres-tool."
         limit = self.settings.pgsql_max_chars
         return text if len(text) <= limit else text[:limit] + "\n[Результат сокращён до лимита символов]"
 
@@ -81,8 +97,9 @@ def create_postgres_readonly_tool(settings: Settings, client: PostgresMCPClient 
         logger.info("PostgreSQL read: user_id=%s operation=%s", context.get("user_id"), operation)
         try:
             return await backend.call(name, args)
-        except Exception:
+        except Exception as error:
             # Никогда не включать строки подключения или текст исключений вышестоящего сервиса в чат/логи.
+            logger.warning("PostgreSQL MCP operation=%s failed error_type=%s", name, type(error).__name__)
             return "Сервис PostgreSQL недоступен или превышено время ожидания. Проверьте подключение и настройки."
 
     postgresql_readonly.metadata = {'allowed_roles': sorted(DATABASE_ROLES)}

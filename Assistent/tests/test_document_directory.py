@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.services.documents_client import create_document_list_tool, create_remote_search_tool
-from assistent.services.graph_builder import build_agent_graph
+from assistent.services.graph_builder import build_agent_graph, messages_with_retrieved_context
 from assistent.services.agent_service import AgentService
 
 
@@ -73,3 +73,34 @@ async def test_remote_tools_keep_identity_out_of_model_arguments(monkeypatch):
     assert 'doc_id="one"' in result
     assert requests[1][1]['document_ids'] == ['one']
     assert requests[0][1]['user_context'] == {'role': 'employee', 'user_id': 'u'}
+
+    search = create_remote_search_tool(settings)
+    result = await search.ainvoke({
+        'type': 'tool_call', 'id': 'search-1', 'name': 'search_knowledge_base',
+        'args': {'query': 'Steps'},
+    }, config=config)
+    assert 'doc_id: one' in result.content
+    assert result.artifact['sources'] == [{'title': 'Guide', 'document_id': 'one'}]
+
+
+def test_model_context_bounds_search_excerpts_and_drops_previous_db_results():
+    names = ['postgresql_readonly', 'search_knowledge_base', 'search_knowledge_base']
+    calls = [AIMessage(content='', tool_calls=[{'id': f'call-{i}', 'name': name, 'args': {}}])
+             for i, name in enumerate(names)]
+    history = [
+        HumanMessage(content='Сколько записей в БД?'), calls[0],
+        ToolMessage(content='previous rows', name=names[0], tool_call_id='call-0'),
+        AIMessage(content='Краткий итог проверки БД.'),
+        HumanMessage(content='Найди руководство.'),
+    ]
+    for i in (1, 2):
+        history.extend([calls[i], ToolMessage(name=names[i], tool_call_id=f'call-{i}', content=(
+            f'<context source="Guide {i}" doc_id="doc-{i}">{"x" * 1000}</context>'
+        ))])
+
+    prepared = messages_with_retrieved_context(history, context_max_chars=200)
+    results = [message.content for message in prepared if isinstance(message, ToolMessage)]
+    assert len(results) == 2 and sum(map(len, results)) <= 200
+    assert all(f'doc_id: doc-{i}' in result for i, result in enumerate(results, 1))
+    assert any(message.content == 'Краткий итог проверки БД.' for message in prepared)
+    assert not any('previous rows' in str(message.content) for message in prepared)
