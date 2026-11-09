@@ -15,6 +15,7 @@ from viio_documents.services.bulk_queue import BulkUploadTask, PreparedReview, D
 from viio_rag.knowledge_data import KnowledgeData
 from viio_documents.services.office_extraction import OfficeExtractionService, OFFICE_MIMES
 from viio_documents.services.text_normalization import normalize_document_text
+from viio_documents.services.document_ingestion_graph import build_document_ingestion_graph
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,13 @@ class DocumentIngestion:
         self.store = store
         self.settings = settings
         self.data = knowledge_data or KnowledgeData(catalog)
+        self.graph = build_document_ingestion_graph(
+            document_service=self.documents,
+            catalog=self.catalog,
+            store=self.store,
+            settings=self.settings,
+            knowledge_data=self.data,
+        )
 
     async def prepare_pdf(self, task):
         extracted = await PdfExtractionService(self.settings, filename=task.filename, job_id=task.task_id).extract(task.data)
@@ -92,50 +100,34 @@ class DocumentIngestion:
                     await anyio.to_thread.run_sync(self.documents.set_document_active, record.id, record.is_active)
 
     async def _index(self, task, storage_key, identifier, digest, *, parent=None, version=1):
-        if task.reviewed_content is not None:
-            content = task.reviewed_content
-        elif task.mime_type == 'application/pdf':
+        if task.reviewed_content is None and task.mime_type == 'application/pdf':
             raise ValueError('PDF требует проверки текста перед индексацией')
-        elif task.mime_type in OFFICE_MIMES.values():
-            extracted = await OfficeExtractionService(self.settings).extract(task.data, task.filename)
-            content = extracted['content']
-            task.metadata['extraction_engine'] = extracted['engine']
-        else:
-            content = task.data.decode('utf-8-sig')
-            if '\x00' in content:
-                raise ValueError('Двоичный файл нельзя индексировать как текст')
-        if (task.kind != 'code' and task.mime_type != 'text/markdown'
-                and task.metadata.get('input_format') != 'manual-text'
-                and task.metadata.get('extraction_engine') != 'docling-cpu'):
-            content = normalize_document_text(content)
-            task.metadata['text_normalization'] = 'prose-v1'
-        if not content.strip() or '\x00' in content or len(content) > self.settings.pdf_max_chars:
-            raise ValueError('Пустой, двоичный или слишком большой текст')
-        await anyio.to_thread.run_sync(self.documents.delete_document, identifier)
         activation_started = False
         try:
-            result = await anyio.to_thread.run_sync(partial(
-                self.documents.index_document, task.title, content,
-                {**task.metadata, 'kind': task.kind, 'filename': task.filename, 'ingestion_ready': False, 'is_active': parent is None, 'version': version}, task.is_public, task.allowed_roles,
-                task.allowed_departments, task.owner_id, document_id=identifier,
-            ))
-            await self.catalog.create(doc_id=identifier, title=task.title, chunks_count=result.chunks_count,
-                mime_type=task.mime_type, file_size=len(task.data), sha256=digest, owner_id=task.owner_id,
-                is_public=task.is_public, allowed_roles=task.allowed_roles,
-                allowed_departments=task.allowed_departments, storage_key=storage_key, status='processing',
-                family_id=(parent.family_id or parent.id) if parent else identifier,
-                version=version, parent_id=parent.id if parent else None, is_active=parent is None, document_kind=task.kind,
-                original_filename=task.filename[:255], catalog_metadata=task.metadata)
-            await self.data.save_text(identifier, content, task.filename, task.title)
-            await anyio.to_thread.run_sync(self.documents.publish_document, identifier)
-            if parent:
-                activation_started = True
-                await anyio.to_thread.run_sync(self.documents.set_document_active, parent.id, False)
-                await anyio.to_thread.run_sync(self.documents.set_document_active, identifier, True)
-                await self.catalog.activate_version(identifier, parent.id)
-            else:
-                await self.catalog.update_status(identifier, 'ready')
-            return identifier, result.chunks_count
+            state = {
+                "raw_data": task.data,
+                "filename": task.filename,
+                "title": task.title,
+                "mime_type": task.mime_type,
+                "kind": task.kind,
+                "is_public": task.is_public,
+                "allowed_roles": task.allowed_roles,
+                "allowed_departments": task.allowed_departments,
+                "owner_id": task.owner_id,
+                "metadata": task.metadata,
+                "storage_key": storage_key,
+                "document_id": identifier,
+                "reviewed_content": task.reviewed_content,
+                "version": version,
+                "parent": parent,
+                "digest": digest,
+            }
+            res = await self.graph.ainvoke(state)
+            if not res.get("is_valid"):
+                raise ValueError(res.get("validation_error") or "Некорректный документ")
+            if res.get("error"):
+                raise RuntimeError(res.get("error"))
+            return identifier, res.get("chunks_count", 0)
         except BaseException as error:
             if parent and activation_started:
                 try:
