@@ -73,11 +73,12 @@ def clean_answer(text: str, sources: list[AnswerSource]) -> str:
 class AgentReply(str):
     """String-compatible result for existing services; provenance is per-result."""
 
-    def __new__(cls, text: str, sources: list[AnswerSource] | None = None, active_specialist: str | None = None, *, saved_documents: list | None = None):
+    def __new__(cls, text: str, sources: list[AnswerSource] | None = None, active_specialist: str | None = None, *, saved_documents: list | None = None, interrupt: Any = None):
         instance = super().__new__(cls, text)
         instance.sources = list(sources or [])
         instance.active_specialist = active_specialist
         instance.saved_documents = list(saved_documents or [])
+        instance.interrupt = interrupt
         return instance
 
 

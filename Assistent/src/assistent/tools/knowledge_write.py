@@ -16,7 +16,9 @@ SAVE_REQUEST = re.compile(
     r'(?:сохран(?:и|ить|ите)|добав(?:ь|ить|ьте)|запиш(?:и|ите)|записать|save|store)\b', re.I)
 
 
-def create_knowledge_write_tool(settings):
+def create_knowledge_write_tool(settings, hitl_enabled: bool | None = None):
+    hitl = getattr(settings, 'hitl_enabled', False) if hitl_enabled is None else hitl_enabled
+
     @tool('save_knowledge', response_format='content_and_artifact')
     async def save_knowledge(
         title: Annotated[str, 'Краткий заголовок сохраняемого материала, до 255 символов.'],
@@ -40,6 +42,21 @@ def create_knowledge_write_tool(settings):
             return 'Запись не выполнена: нужен заголовок до 255 символов и текст от 1 до 20000 символов.', None
         if not settings.documents_admin_key:
             return 'Сохранение в базу знаний не настроено: отсутствует ключ записи Documents.', None
+
+        if hitl:
+            from assistent.services.human_in_the_loop import request_human_confirmation, is_confirmed
+            confirmation = request_human_confirmation(
+                'save_knowledge',
+                {
+                    'title': title,
+                    'preview': content[:200] + ('...' if len(content) > 200 else ''),
+                    'owner_id': context.get('user_id'),
+                },
+                prompt=f'Подтвердите сохранение документа «{title}» в общую базу знаний.',
+            )
+            if not is_confirmed(confirmation):
+                return 'Запись отменена: пользователь отклонил подтверждение сохранения в базу знаний.', None
+
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5), trust_env=False) as client:
                 response = await client.post(settings.documents_url.rstrip('/') + '/api/v1/documents',

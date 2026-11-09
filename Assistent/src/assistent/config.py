@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     coding_agent_enabled: bool = True
     supervisor_enabled: bool = False
     corrective_rag_enabled: bool = False
+    hitl_enabled: bool = False
     github_mcp_enabled: bool = False
     github_mcp_token: str = Field(default="", repr=False)
     github_repository: str = ""
