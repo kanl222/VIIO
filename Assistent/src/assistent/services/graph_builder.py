@@ -33,6 +33,7 @@ def build_agent_graph(
     task_routing: bool | None = None,
     max_tool_calls: int = 3,
     supervisor: bool = False,
+    corrective_rag: bool = False,
     **extra_kwargs: Any,
 ) -> CompiledStateGraph:
     """Сборка и компиляция StateGraph агента с поддержкой инструментов и сохранением состояния.
@@ -65,6 +66,7 @@ def build_agent_graph(
             history_max_chars=history_max_chars,
             model_first_tools=model_first_tools,
             max_tool_calls=max_tool_calls,
+            corrective_rag=corrective_rag,
             **extra_kwargs,
         )
 
