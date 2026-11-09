@@ -189,7 +189,7 @@ def build_supervisor_graph(
         question = last_question(history)
         user_context = ctx(runtime).get("user_context", {})
         decision = classify_route(question, all_tool_names, user_context)
-        record("route", mode=decision, supervisor=True, tools=sorted(all_tool_names))
+        record("route", mode=decision, supervisor=True, tools=sorted(all_tool_names), branch=decision)
         return {**boundary}
 
     def route_condition(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> Literal["knowledge", "coding", "database", "direct"]:
@@ -200,12 +200,21 @@ def build_supervisor_graph(
 
     # Specialist Nodes
     async def knowledge_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+        history, _ = history_for_turn(state, runtime)
+        question = last_question(history)
+        record("specialist_dispatch", specialist="knowledge", name="Аналитик базы знаний (RAG)", question=question[:200])
         return await knowledge_runtime.ainvoke(state, context=ctx(runtime))
 
     async def coding_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+        history, _ = history_for_turn(state, runtime)
+        question = last_question(history)
+        record("specialist_dispatch", specialist="coding", name="Инженер-программист (Coding Specialist)", question=question[:200])
         return await coding_runtime.ainvoke(state, context=ctx(runtime))
 
     async def database_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+        history, _ = history_for_turn(state, runtime)
+        question = last_question(history)
+        record("specialist_dispatch", specialist="database", name="Аналитик базы данных (Database Analyst)", question=question[:200])
         return await database_runtime.ainvoke(state, context=ctx(runtime))
 
     # Direct Specialist: for arithmetic, answer immediately; for general text, call llm
@@ -214,7 +223,9 @@ def build_supervisor_graph(
         question = last_question(history)
         info = classify(question)
         if info.calc is not None:
+            record("specialist_dispatch", specialist="direct_calc", name="Прямой расчет (Арифметика)", result=info.calc)
             return {"messages": [AIMessage(content=info.calc)]}
+        record("specialist_dispatch", specialist="direct", name="Общий диалог без инструментов", question=question[:200])
         return await direct_runtime.ainvoke(state, context=ctx(runtime))
 
     # Supervisor Review Node: Final response formatting and provenance
@@ -231,6 +242,7 @@ def build_supervisor_graph(
         sources = cited_sources(str(last.content), sources)
         cleaned = clean_answer(last.content, sources)
         finalized = finalize_response(last, sources, active, content=cleaned)
+        record("supervisor_review", active=active, sources=[s.get("title") if isinstance(s, dict) else str(s) for s in sources])
         return {"messages": [finalized]}
 
     # Graph Assembly
