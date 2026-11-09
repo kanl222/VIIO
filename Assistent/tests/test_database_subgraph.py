@@ -3,6 +3,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.config import Settings
+from assistent.services.agent_service import AgentService
+from assistent.services.graph_builder import build_agent_graph
 from assistent.services.database_subgraph import (
     build_database_analyst_graph,
     clean_sql,
@@ -292,6 +294,49 @@ async def test_database_resolve_log_error():
     assert "transaction_time" in final_content
     assert "transaction_date" in final_content
     assert "```sql" in final_content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", ["explain_error", "log_repair"])
+async def test_main_agent_handles_database_diagnostics_with_bounded_checks(scenario):
+    calls = []
+
+    class Backend:
+        async def call(self, name, arguments):
+            calls.append((name, arguments))
+            return {
+                "get_object_details": "Columns: tx_id (text), transaction_date (text). Indexes: none.",
+                "explain_query": "Ошибка PostgreSQL (SQLSTATE 42501): недостаточно прав.",
+                "execute_sql": "[{'count': 5000}]",
+            }[name]
+
+    tool = create_postgres_readonly_tool(Settings(_env_file=None, pgsql_enabled=True), client=Backend())
+    model = NoToolCallsModel(messages=iter([
+        AIMessage(content="SELECT count(transaction_date) FROM public.raw_pharmacy_transactions")
+    ] if scenario == "log_repair" else []))
+    service = AgentService(build_agent_graph(model, [tool], MemorySaver(),
+                                            task_routing=False, database_diagnostics=True))
+    user = {"user_id": "p1", "role": "programmer"}
+
+    if scenario == "log_repair":
+        question = (
+            'В логе ошибка SQLSTATE 42703: column "transaction_time" does not exist.\n'
+            "```sql\nSELECT count(transaction_time) FROM public.raw_pharmacy_transactions;\n```\n"
+            "Исправь запрос и проверь результат."
+        )
+        answer, _ = await service.chat(question, "database", user)
+        assert [name for name, _ in calls] == ["get_object_details", "execute_sql"]
+        assert "count(transaction_date)" in calls[1][1]["sql"]
+        assert "42703" in answer and "5000" in answer
+    else:
+        question = (
+            "Проверь, можно ли ускорить запрос в тестовой PostgreSQL:\n"
+            "```sql\nSELECT tx_id FROM public.raw_pharmacy_transactions WHERE tx_id = 'test-001';\n```\n"
+            "Если EXPLAIN вернёт ошибку, сообщи результат."
+        )
+        answer, _ = await service.chat(question, "database", user)
+        assert [name for name, _ in calls] == ["get_object_details", "explain_query"]
+        assert "42501" in answer and "Оценить эффект оптимизации по плану пока нельзя" in answer
 
 
 @pytest.mark.asyncio

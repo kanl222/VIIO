@@ -85,6 +85,7 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
             supervisor=app_settings.supervisor_enabled,
             corrective_rag=app_settings.corrective_rag_enabled,
             database_analyst=app_settings.text_to_sql_enabled,
+            database_diagnostics=app_settings.text_to_sql_enabled,
         )
         agent_service = AgentService(graph=graph)
         if catalog_service:

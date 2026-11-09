@@ -27,6 +27,8 @@ from assistent.services.agent_policy import (
 from assistent.services.dialogue_summary import compact_dialogue
 from assistent.security import has_role_access
 
+DOCUMENT_SEARCH_LIMIT = 3
+
 
 class VIIOPolicy(AgentMiddleware):
     """Keep ACL-filtered context, forced retrieval/delegation and response provenance."""
@@ -64,6 +66,9 @@ class VIIOPolicy(AgentMiddleware):
                  or has_role_access(user_context, roles)]
         if any(call.get('name') == 'list_documents' for call in calls):
             tools = [item for item in tools if getattr(item, 'name', '') != 'list_documents']
+        for name in (SEARCH_TOOL, 'search_document_content'):
+            if sum(call.get('name') == name for call in calls) >= DOCUMENT_SEARCH_LIMIT:
+                tools = [item for item in tools if getattr(item, 'name', '') != name]
         override = dict(messages=messages[1:], system_message=messages[0], tools=tools)
         if self.routing and mode != 'knowledge':
             override['tools'] = []
@@ -106,13 +111,14 @@ class VIIOPolicy(AgentMiddleware):
             if reference:
                 answer = attach_reference_sources(answer, reference)
                 sources = answer.response_metadata['sources']
+            source_candidates = sources
             if self.model_first:
                 sources = cited_sources(str(answer.content), sources)
             saved = [msg.artifact['saved_document'] for msg in turn
                      if isinstance(msg, ToolMessage) and msg.name == 'save_knowledge'
                      and isinstance(msg.artifact, dict) and 'saved_document' in msg.artifact]
             answer = finalize_response(answer, sources, active,
-                                       content=clean_answer(answer.content, sources), saved_documents=saved)
+                                       content=clean_answer(answer.content, source_candidates), saved_documents=saved)
             response = ModelResponse(result=[*response.result[:-1], answer],
                                      structured_response=response.structured_response)
         return response
@@ -120,12 +126,16 @@ class VIIOPolicy(AgentMiddleware):
 
 def build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
                   summary_after, history_max_chars, model_first_tools, task_routing, max_tool_calls=MAX_TOOL_CALLS,
-                  **extra_kwargs):
+                  *, database_diagnostics=False, **extra_kwargs):
     prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
     routing = (system_prompt is None or system_prompt.startswith(DEFAULT_SYSTEM_PROMPT)
                if task_routing is None else task_routing)
     active_tools = list(tools or [])
     names = {item.name for item in active_tools}
+    database_runtime = None
+    if database_diagnostics and 'postgresql_readonly' in names:
+        from assistent.services.database_subgraph import build_database_analyst_graph
+        database_runtime = build_database_analyst_graph(llm, active_tools, checkpointer=False)
     middleware = [
         VIIOPolicy(prompt, names, model_first_tools, routing, context_max_chars),
         ModelRetryMiddleware(max_retries=2, initial_delay=0.2, max_delay=1,
@@ -139,6 +149,9 @@ def build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
     if 'list_documents' in names:
         middleware.insert(1, ToolCallLimitMiddleware(
             tool_name='list_documents', run_limit=1, exit_behavior='continue'))
+    for name in names & {SEARCH_TOOL, 'search_document_content'}:
+        middleware.insert(1, ToolCallLimitMiddleware(
+            tool_name=name, run_limit=DOCUMENT_SEARCH_LIMIT, exit_behavior='continue'))
     # The outer checkpoint retains the full audit history; the ready-made loop is ephemeral.
     agent = create_agent(llm, active_tools, middleware=middleware,
                          context_schema=AgentRuntimeContext, checkpointer=False)
@@ -146,6 +159,15 @@ def build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
     async def run(state, runtime):
         history, boundary = history_for_turn(state, runtime)
         question = last_question(history)
+        if database_runtime is not None:
+            from assistent.services.database_subgraph import is_database_diagnostic
+            from assistent.tools.postgres_tool import can_access_database
+
+            if is_database_diagnostic(question) and can_access_database(ctx(runtime).get('user_context')):
+                record('route', mode='database', tools=['postgresql_readonly'])
+                result = await database_runtime.ainvoke(
+                    {'messages': history[-1:]}, context=ctx(runtime))
+                return {**boundary, 'messages': result['messages'][-1:]}
         info = classify(question)
         record('route', mode=info.mode if routing else 'model',
                model_first_tools=model_first_tools, tools=sorted(names))

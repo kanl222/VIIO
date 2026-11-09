@@ -27,12 +27,17 @@ def sources_from_reference(reference: str) -> list[AnswerSource]:
     return sources
 
 
-def readable_reference(reference: str, max_chars: int | None = None) -> str:
-    """The model needs facts and titles, not vector IDs or chunk counters."""
+def readable_reference(reference: str, max_chars: int | None = None, *, include_ids: bool = False) -> str:
+    """Format excerpts, optionally exposing document IDs for targeted follow-up."""
     matches = CONTEXT.findall(reference)
     if not matches:
         return reference[:max_chars]
-    fragments = [f'Материал «{html.unescape(title)}»:\n{body.strip()}' for title, _, body in matches]
+    fragments = []
+    for title, identifier, body in matches:
+        label = f'Материал «{html.unescape(title)}»'
+        if include_ids and identifier and identifier != 'unknown':
+            label += f' (doc_id: {html.unescape(identifier)})'
+        fragments.append(f'{label}:\n{body.strip()}')
     if max_chars is None:
         return "\n\n".join(fragments)
     # Длинный первый результат не должен занимать всё место для последующих релевантных источников.
@@ -104,7 +109,9 @@ def turn_provenance(messages):
         if message.type != "tool":
             continue
         if message.name in {"search_knowledge_base", "search_document_content"}:
-            sources.extend(sources_from_reference(str(message.content)))
+            sources.extend(message.artifact.get('sources', [])
+                           if isinstance(message.artifact, dict) and 'sources' in message.artifact
+                           else sources_from_reference(str(message.content)))
         if message.name == 'list_documents' and isinstance(message.artifact, dict):
             sources.extend(message.artifact.get('sources', []))
         if message.name == "coding_agent" and isinstance(message.artifact, dict):

@@ -99,6 +99,18 @@ async def test_mcp_disallows_arbitrary_upstream_tools():
 
 
 @pytest.mark.asyncio
+async def test_mcp_returns_safe_sqlstate_without_exposing_upstream_message(monkeypatch):
+    upstream = AsyncMock(return_value=("Error: SQLSTATE 42703. Private server details.", True))
+    monkeypatch.setattr("assistent.tools.postgres_tool.call_read_tool", upstream)
+    client = PostgresMCPClient(Settings(_env_file=None))
+
+    result = await client.call("execute_sql", {"sql": "SELECT missing_column FROM orders"})
+
+    assert "42703" in result and "не найден столбец" in result
+    assert "Private server details" not in result
+
+
+@pytest.mark.asyncio
 async def test_explain_never_enables_analyze_or_adds_a_row_limit():
     tool, client = tool_fixture()
     await tool.ainvoke({'operation':'explain','sql':'SELECT * FROM orders;'}, config={'configurable':{'user_context':{'user_id':'u','role':'programmer'}}})

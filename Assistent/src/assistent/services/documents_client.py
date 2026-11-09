@@ -5,7 +5,7 @@ import httpx
 import time
 import json
 from assistent.services.diagnostics import enabled, record
-from assistent.services.answer_sources import readable_reference
+from assistent.services.answer_sources import readable_reference, sources_from_reference
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
@@ -21,11 +21,11 @@ def require_internal(request, settings):
 
 
 def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base'):
-    @tool(tool_name)
-    async def search_knowledge_base(query: str, config: RunnableConfig, document_ids: list[str] | None = None) -> str:
+    @tool(tool_name, response_format='content_and_artifact')
+    async def search_knowledge_base(query: str, config: RunnableConfig, document_ids: list[str] | None = None) -> tuple[str, dict]:
         """Поиск ответа по содержимому документов. Для перечня и поиска названий используйте list_documents.
 
-        document_ids: Идентификаторы выбранных документов из каталога, до 8. При указании поиск ограничен ими.
+        document_ids: Точные doc_id из результатов поиска или каталога, до 8. При указании поиск ограничен ими.
         """
         context = (config or {}).get('configurable', {}).get('user_context') or {}
         # Личные заметки и данные диалогов никогда не попадают в поиск документов.
@@ -42,15 +42,16 @@ def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base
                 text = response.json()['context']
                 if not isinstance(text, str) or len(text) > 100000:
                     raise ValueError('Invalid document search response')
+                sources = sources_from_reference(text)
                 max_chars = getattr(settings, 'rag_context_max_chars', None)
                 if max_chars and tool_name == 'search_knowledge_base':
-                    text = readable_reference(text, max_chars=max_chars)
+                    text = readable_reference(text, max_chars=max_chars, include_ids=True)
                 record('retrieval', query=query, duration_ms=round((time.monotonic()-start)*1000),
                        context=text, **response.json().get('diagnostics', {}))
-                return text
+                return text, {'sources': sources}
         except (httpx.HTTPError, ValueError, KeyError):
             record('retrieval', query=query, status='error', duration_ms=round((time.monotonic()-start)*1000))
-            return 'Ошибка при обращении к базе знаний. Повторите попытку позже.'
+            return 'Ошибка при обращении к базе знаний. Повторите попытку позже.', {}
     return search_knowledge_base
 
 
