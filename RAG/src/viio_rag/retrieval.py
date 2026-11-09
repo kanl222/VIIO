@@ -14,13 +14,36 @@ from viio_rag.diagnostics import capture, record
 logger = logging.getLogger(__name__)
 
 
-def rank_documents(query: str, documents: Sequence[Document], k: int, min_score: int = 0) -> list[Document]:
+def reciprocal_rank_fusion(
+    ranked_lists: Sequence[Sequence[Document]],
+    k: int = 60,
+) -> dict[tuple[Any, str], float]:
+    """Calculate Reciprocal Rank Fusion (RRF) scores across multiple ranked candidate lists."""
+    rrf_scores: dict[tuple[Any, str], float] = {}
+    for candidate_list in ranked_lists:
+        for rank, doc in enumerate(candidate_list, start=1):
+            key = (doc.metadata.get("document_id"), doc.page_content)
+            rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (k + rank))
+    return rrf_scores
+
+
+def rank_documents(
+    query: str,
+    documents: Sequence[Document],
+    k: int,
+    min_score: int = 0,
+    rrf_scores: dict[tuple[Any, str], float] | None = None,
+) -> list[Document]:
     terms = query_terms(query)
-    def score(doc: Document) -> int:
+    def score(doc: Document) -> float:
         text = doc.page_content.lower()
         title = str(doc.metadata.get('title', '')).lower()
         filename = str(doc.metadata.get('filename', '')).lower()
-        return sum(3 * (term in text) + 5 * (term in title or term in filename) for term in terms)
+        term_score = sum(3 * (term in text) + 5 * (term in title or term in filename) for term in terms)
+        if rrf_scores:
+            key = (doc.metadata.get("document_id"), doc.page_content)
+            return float(term_score) + rrf_scores.get(key, 0.0)
+        return float(term_score)
     scored = [(score(doc), idx, doc) for idx, doc in enumerate(documents)]
     if min_score > 0:
         scored = [item for item in scored if item[0] >= min_score]
@@ -68,17 +91,17 @@ class EnhancedRetrieval:
         for name, result in zip(['semantic', 'lexical', 'public'], results):
             if isinstance(result, Exception):
                 logger.warning('%s search unavailable: %s', name, type(result).__name__)
+        valid_lists = [r for r in [results[1], results[0], *results[2:]] if not isinstance(r, Exception)]
+        rrf_map = reciprocal_rank_fusion(valid_lists)
         candidates, seen = [], set()
-        for result in [results[1], results[0], *results[2:]]:
-            if isinstance(result, Exception):
-                continue
-            for doc in result:
+        for candidate_list in valid_lists:
+            for doc in candidate_list:
                 key = (doc.metadata.get('document_id'), doc.page_content)
                 if key not in seen:
                     candidates.append(doc)
                     seen.add(key)
         candidates=await self.data.authorized_candidates(candidates,context)
-        selected = rank_documents(query, candidates, k, min_score=1)
+        selected = rank_documents(query, candidates, k, min_score=1, rrf_scores=rrf_map)
         selected = await self._expand_procedural_neighbors(selected, context)
         if diagnostics is not None:
             def snapshot(doc):

@@ -1,9 +1,9 @@
 from hmac import compare_digest
 from assistent.services.diagnostics import capture, record
-from fastapi import APIRouter,Depends,Header,HTTPException
-from pydantic import BaseModel,Field,ConfigDict,StrictBool
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel, Field, ConfigDict, StrictBool
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 import asyncio
 import json
 from contextlib import suppress
@@ -28,14 +28,19 @@ class ChatResponse(BaseModel):
     reply:str
     thread_id:str
     sources:list[ChatSource]=Field(default_factory=list)
-def create_api_router(agent_service,settings,consultant_service=None):
-    router=APIRouter()
-    def authorize(x_internal_token:str|None=Header(default=None,alias='X-Internal-Token')):
-        expected=settings.chat_api_key or (settings.internal_api_key if not settings.secure_runtime else None)
-        if not expected:raise HTTPException(503,'Ключ чата не настроен')
-        accepted=[expected]+([settings.chat_api_key_previous] if settings.chat_api_key_previous else [])
-        if not x_internal_token or not any(compare_digest(key.encode(),x_internal_token.encode()) for key in accepted):
-            raise HTTPException(401,'Необходим ключ чата')
+def create_api_router(agent_service, settings, consultant_service=None):
+    router = APIRouter()
+    TokenHeader = Annotated[str | None, Header(alias='X-Internal-Token')]
+
+    def authorize(x_internal_token: TokenHeader = None) -> None:
+        expected = settings.chat_api_key or (settings.internal_api_key if not settings.secure_runtime else None)
+        if not expected:
+            raise HTTPException(503, 'Ключ чата не настроен')
+        accepted = [expected] + ([settings.chat_api_key_previous] if settings.chat_api_key_previous else [])
+        if not x_internal_token or not any(compare_digest(key.encode(), x_internal_token.encode()) for key in accepted):
+            raise HTTPException(401, 'Необходим ключ чата')
+
+    RequireAuth = Annotated[None, Depends(authorize)]
     @router.get('/health')
     async def health():
         provider = settings.chat_provider or settings.llm_provider
