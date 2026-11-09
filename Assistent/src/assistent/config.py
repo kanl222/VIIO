@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     supervisor_enabled: bool = False
     corrective_rag_enabled: bool = False
     hitl_enabled: bool = False
+    text_to_sql_enabled: bool = True
     github_mcp_enabled: bool = False
     github_mcp_token: str = Field(default="", repr=False)
     github_repository: str = ""
