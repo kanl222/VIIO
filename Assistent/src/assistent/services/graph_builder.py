@@ -32,6 +32,7 @@ def build_agent_graph(
     model_first_tools: bool = False,
     task_routing: bool | None = None,
     max_tool_calls: int = 3,
+    supervisor: bool = False,
     **extra_kwargs: Any,
 ) -> CompiledStateGraph:
     """Сборка и компиляция StateGraph агента с поддержкой инструментов и сохранением состояния.
@@ -52,6 +53,21 @@ def build_agent_graph(
     Returns:
         Скомпилированный граф агента CompiledStateGraph.
     """
+    if supervisor:
+        from assistent.services.supervisor_graph import build_supervisor_graph
+        return build_supervisor_graph(
+            llm=llm,
+            tools=tools,
+            checkpointer=checkpointer,
+            system_prompt=system_prompt,
+            context_max_chars=context_max_chars,
+            summary_after=summary_after,
+            history_max_chars=history_max_chars,
+            model_first_tools=model_first_tools,
+            max_tool_calls=max_tool_calls,
+            **extra_kwargs,
+        )
+
     from assistent.services.agent_runtime import build_runtime
 
     return build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
