@@ -1,10 +1,41 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Download, Save, ChevronDown, Search, FileCheck, MessageSquare, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Download, Save, ChevronDown, Search, FileCheck, MessageSquare, ShieldCheck, ArrowRight, Database, Code, GitBranch } from 'lucide-react';
 import { api, agentName, blankReview, dateTime, seconds, stageNames, text, type DiagnosticTab, type Fragment, type Review, type Trace, type TraceEvent, type TraceSummary } from './types';
 
 import { LazyDetails } from './LazyDetails';
 
-const eventNames: Record<string, string> = { route: 'Выбор маршрута', retrieval: 'Поиск и отбор фрагментов', context: 'Вход модели', generation: 'Результат модели', guard: 'Проверка доступа', answer: 'Ответ пользователю', capture_limit: 'Ограничение журнала' };
+const eventNames: Record<string, string> = {
+  route: 'Выбор маршрута супервизором',
+  specialist_dispatch: 'Передача ветке / специалисту',
+  supervisor_review: 'Итоговая проверка супервизора',
+  retrieval: 'Поиск и отбор фрагментов',
+  context: 'Вход модели',
+  generation: 'Результат модели',
+  guard: 'Проверка доступа',
+  answer: 'Ответ пользователю',
+  capture_limit: 'Ограничение журнала',
+  // База данных (Database Analyst Subgraph)
+  db_inspect_schema: 'БД: Инспекция схемы и таблиц',
+  db_optimize_query: 'БД: Анализ и оптимизация запроса',
+  db_diagnose_error: 'БД: Диагностика ошибки в логах',
+  db_generate_sql: 'БД: Генерация SQL-запроса',
+  db_explain_check: 'БД: Проверка плана EXPLAIN',
+  db_fix_sql: 'БД: Исправление SQL (Fix Loop)',
+  db_execute_sql: 'БД: Выполнение SQL в PostgreSQL',
+  db_format_answer: 'БД: Форматирование ответа',
+  // Кодер (Coding Specialist)
+  coding_dispatch: 'Кодер: Классификация задачи',
+  coding_reference: 'Кодер: Справка и код из БЗ',
+  coding_generation: 'Кодер: Разработка решения',
+  // CRAG (Corrective RAG Subgraph)
+  crag_retrieve: 'CRAG: Извлечение документов',
+  crag_grade_documents: 'CRAG: Оценка релевантности',
+  crag_rewrite_query: 'CRAG: Переформулирование запроса',
+  crag_generate: 'CRAG: Генерация черновика',
+  crag_check_groundedness: 'CRAG: Проверка обоснованности (Groundedness)',
+  crag_fallback: 'CRAG: Резервный ответ',
+  document_catalog: 'Каталог документов',
+};
 const roleNames: Record<string, string> = { human: 'Пользователь', user: 'Пользователь', ai: 'Модель', assistant: 'Модель', system: 'Системное сообщение', tool: 'Результат инструмента' };
 
 function Fragments({ items, label }: { items: Fragment[] | undefined; label: string }) {
@@ -49,7 +80,112 @@ const EventBody = memo(function EventBody({ event }: { event: TraceEvent }) {
     </>;
   }
   if (event.stage === 'answer') return <><div className="text">{event.reply}</div><SourceList event={event} /></>;
-  if (event.stage === 'route') return <dl className="route-data"><dt>Режим</dt><dd>{event.mode}</dd><dt>Доступные инструменты</dt><dd>{event.tools?.join(', ') || 'Без инструментов'}</dd>{event.model_first_tools !== undefined ? <><dt>Выбор инструмента</dt><dd>{event.model_first_tools ? 'Сначала модель' : 'По правилам приложения'}</dd></> : null}</dl>;
+  if (event.stage === 'route') return <dl className="route-data">
+    <dt>Режим</dt><dd><strong>{event.mode}</strong>{event.branch ? ` (ветка: ${event.branch})` : ''}</dd>
+    <dt>Доступные инструменты</dt><dd>{event.tools?.join(', ') || 'Без инструментов'}</dd>
+    {event.model_first_tools !== undefined ? <><dt>Выбор инструмента</dt><dd>{event.model_first_tools ? 'Сначала модель' : 'По правилам приложения'}</dd></> : null}
+  </dl>;
+  if (event.stage === 'specialist_dispatch') return <div className="specialist-box">
+    <p><strong>Целевая ветка:</strong> <span className="badge-highlight">{event.name || event.specialist}</span></p>
+    {event.question ? <p className="hint">Входящий запрос: {event.question}</p> : null}
+    {event.result ? <p className="good"><strong>Результат:</strong> {event.result}</p> : null}
+  </div>;
+
+  if (event.stage === 'db_inspect_schema') return <>
+    <p><strong>Таблицы:</strong> {event.tables?.length ? event.tables.join(', ') : 'Не указаны'}</p>
+    <p className="hint">Объем схемы: {event.length?.toLocaleString('ru-RU')} символов</p>
+    {event.schema ? <LazyDetails summary="Схема выбранных таблиц">{() => <pre className="code-block">{event.schema}</pre>}</LazyDetails> : null}
+  </>;
+
+  if (event.stage === 'db_optimize_query') return <>
+    <p><strong>Запрос на оптимизацию:</strong></p>
+    {event.sql ? <pre className="code-block"><code>{event.sql}</code></pre> : null}
+    <h3>План выполнения (EXPLAIN)</h3>
+    <pre className="code-block">{event.plan || 'План не получен'}</pre>
+    {event.tables?.length ? <p className="hint">Таблицы: {event.tables.join(', ')}</p> : null}
+  </>;
+
+  if (event.stage === 'db_diagnose_error') return <>
+    <p className="bad"><strong>Диагностика ошибки:</strong> {event.error || 'Ошибка не указана'}</p>
+    {event.tables?.length ? <p className="hint">Связанные таблицы: {event.tables.join(', ')}</p> : null}
+  </>;
+
+  if (event.stage === 'db_generate_sql') return <>
+    <p><strong>Сгенерированный SQL-запрос:</strong></p>
+    <pre className="code-block"><code>{event.sql || event.query}</code></pre>
+    {event.tables?.length ? <p className="hint">Целевые таблицы: {event.tables.join(', ')}</p> : null}
+  </>;
+
+  if (event.stage === 'db_explain_check') return <>
+    <p><strong>Статус проверки плана: </strong><span className={event.valid ? 'good' : 'bad'}>{event.valid ? '✓ План запроса валиден (Explain Check OK)' : '✗ План некорректен (Требуется автоисправление)'}</span></p>
+    {event.sql ? <pre className="code-block"><code>{event.sql}</code></pre> : null}
+    {event.error ? <p className="bad"><strong>Ошибка PostgreSQL:</strong> {event.error}</p> : null}
+    {(event.plan || event.plan_snippet) ? <LazyDetails summary="План выполнения запроса (EXPLAIN)">{() => <pre className="code-block">{event.plan || event.plan_snippet}</pre>}</LazyDetails> : null}
+  </>;
+
+  if (event.stage === 'db_fix_sql') return <>
+    <p className="bad"><strong>Цикл автоисправления SQL (попытка #{event.attempt})</strong></p>
+    {event.error ? <p className="bad">Причина: {event.error}</p> : null}
+    <div className="diff-view">
+      <div><h4>Было (ошибочный SQL):</h4><pre className="code-block"><code>{event.old_sql}</code></pre></div>
+      <div><h4>Стало (исправленный SQL):</h4><pre className="code-block"><code>{event.fixed_sql}</code></pre></div>
+    </div>
+  </>;
+
+  if (event.stage === 'db_execute_sql') return <>
+    <p className="good"><strong>SQL выполнен успешно.</strong> Длина результата: {event.length?.toLocaleString('ru-RU')} байт</p>
+    {event.sql ? <pre className="code-block"><code>{event.sql}</code></pre> : null}
+    {event.result ? <LazyDetails summary="Фрагмент возвращенных данных">{() => <pre className="code-block">{event.result}</pre>}</LazyDetails> : null}
+  </>;
+
+  if (event.stage === 'db_format_answer') return <>
+    <p><strong>Форматирование ответа:</strong> {event.length?.toLocaleString('ru-RU')} символов</p>
+    {event.answer ? <LazyDetails summary="Сформированный ответ">{() => <div className="text">{event.answer}</div>}</LazyDetails> : null}
+  </>;
+
+  if (event.stage === 'coding_dispatch') return <>
+    <p><strong>Задача программирования:</strong> {event.task}</p>
+    {event.user ? <p className="hint">Пользователь: {event.user}</p> : null}
+  </>;
+
+  if (event.stage === 'coding_reference') return <>
+    <p><strong>Поиск по базе знаний / коду:</strong> {event.query || 'Без запроса'}</p>
+    <p className="hint">Статус: {event.status === 'ok' ? `Найдено ${event.chars?.toLocaleString('ru-RU')} символов` : 'Контекст не найден'}</p>
+    {event.reference ? <LazyDetails summary="Справочный фрагмент кода/документа">{() => <pre className="code-block">{event.reference}</pre>}</LazyDetails> : null}
+  </>;
+
+  if (event.stage === 'coding_generation') return <>
+    <p><strong>Ответ программиста сформирован:</strong> {event.length?.toLocaleString('ru-RU')} символов</p>
+    {event.answer ? <LazyDetails summary="Текст решения кодера">{() => <div className="text">{event.answer}</div>}</LazyDetails> : null}
+  </>;
+
+  if (event.stage === 'crag_retrieve') return <>
+    <p><strong>Извлечение документов (CRAG):</strong> {event.query}</p>
+    <p className="hint">Режим: {event.mode || 'векторный'} · Объем: {event.chars ?? event.length ?? 0} символов</p>
+  </>;
+
+  if (event.stage === 'crag_grade_documents') return <>
+    <p><strong>Оценка релевантности: </strong><span className={event.relevant ? 'good' : 'bad'}>{event.relevant ? '✓ Документы релевантны вопросу' : '✗ Документы признаны нерелевантными'}</span>{event.fast_path ? ' (быстрый путь)' : ''}</p>
+    {event.query ? <p className="hint">Запрос: {event.query}</p> : null}
+  </>;
+
+  if (event.stage === 'crag_rewrite_query') return <>
+    <p className="bad"><strong>Переформулирование запроса (попытка #{event.attempt})</strong></p>
+    <dl className="route-data"><dt>Было</dt><dd>{event.old_query}</dd><dt>Стало</dt><dd><strong>{event.new_query}</strong></dd></dl>
+  </>;
+
+  if (event.stage === 'crag_check_groundedness') return <>
+    <p><strong>Проверка обоснованности источниками (Groundedness): </strong><span className={event.grounded ? 'good' : 'bad'}>{event.grounded ? '✓ Ответ полностью подтвержден источниками' : '✗ Обнаружена галлюцинация / нехватка фактов'}</span></p>
+  </>;
+
+  if (event.stage === 'crag_fallback') return <p className="bad">Переход к резервному ответу после {event.attempts} попыток переформулирования.</p>;
+
+  if (event.stage === 'supervisor_review') return <>
+    <p><strong>Итоговая проверка ответа супервизором.</strong></p>
+    {event.active ? <p className="hint">Активный специалист: {event.active}</p> : null}
+    {event.sources?.length ? <p className="hint">Подтверждающие источники: {event.sources.join(', ')}</p> : null}
+  </>;
+
   if (event.stage === 'guard') return <p className={event.status === 'blocked' ? 'bad' : 'good'}>{event.name}: {event.status === 'blocked' ? 'ответ заблокирован' : 'проверка пройдена'}</p>;
   if (event.stage === 'error') return <p className="bad">{event.detail}: {event.error}</p>;
   return <p>{event.detail || 'Данные этапа не записаны.'}</p>;
@@ -167,24 +303,36 @@ export const TraceDetail = memo(function TraceDetail({ trace, items, onSaved, ta
     {trace.status === 'error' ? <div className="error" role="status">Запрос завершился ошибкой: {trace.error || 'тип не записан'}. Сохранены этапы, выполненные до сбоя.</div> : null}
     <h2>Цепочка ответа</h2><p className="hint">Время отсчитывается от начала запроса. Откройте этап, чтобы увидеть его данные.</p>
     <section className="trace-graph" aria-label="Граф этапов проверки">
-      <h3>Граф этапов</h3>
-      <p className="hint">Блоки соединены в порядке записи событий. Нажмите на блок, чтобы открыть подробности.</p>
+      <h3>Граф этапов и веток</h3>
+      <p className="hint">Блоки соединены в порядке выполнения шагов графа. Нажмите на любой блок, чтобы раскрыть его детали.</p>
       {trace.events.length ? <ol className="trace-graph-nodes">{trace.events.map((event, index) => {
-        const failed = event.stage === 'error' || event.status === 'error' || Boolean(event.error);
+        const failed = event.stage === 'error' || event.status === 'error' || Boolean(event.error) || event.valid === false || event.relevant === false || event.grounded === false;
         const blocked = event.status === 'blocked';
+        const good = event.valid === true || event.relevant === true || event.grounded === true;
         return <li key={index}><button className={`trace-graph-node${failed || blocked ? ' trace-graph-alert' : ''}`} onClick={() => jumpToEvent(index)} aria-label={`Этап ${index + 1}: ${eventNames[event.stage] || event.stage}. Открыть подробности`}>
           <span className="trace-graph-number">{index + 1}</span>
           <strong>{eventNames[event.stage] || event.stage}</strong>
           <span className="trace-graph-time">+{seconds(event.elapsed_ms)}{event.duration_ms !== undefined ? ` · длительность ${seconds(event.duration_ms)}` : ''}</span>
-          <span className={failed || blocked ? 'bad' : 'muted'}>{blocked ? 'Заблокировано' : failed ? 'Ошибка' : 'Событие записано'}</span>
+          <span className={failed || blocked ? 'bad' : good ? 'good' : 'muted'}>
+            {blocked ? 'Заблокировано' : failed ? 'Ошибка / Не пройдено' : good ? 'Успешно' : 'Событие записано'}
+          </span>
+          {event.specialist ? <span className="muted">Ветка: {event.name || event.specialist}</span> : null}
+          {event.tables?.length ? <span className="muted">Таблицы: {event.tables.join(', ')}</span> : null}
+          {event.sql ? <span className="muted">SQL: {event.sql.slice(0, 35)}…</span> : null}
+          {event.attempt !== undefined ? <span className="bad">Попытка: #{event.attempt}</span> : null}
           {event.stage === 'retrieval' ? <span className="muted">Кандидатов: {event.candidates?.length ?? 'нет данных'} · Отобрано: {event.selected?.length ?? 'нет данных'}</span> : null}
         </button></li>;
       })}</ol> : <p className="hint">В трассе нет записанных этапов.</p>}
     </section>
     <nav className="pipeline" aria-label="Перейти к этапу">{[
-      { stage: 'retrieval', title: 'Поиск и отбор', icon: Search }, { stage: 'context', title: 'Контекст', icon: FileCheck },
-      { stage: 'generation', title: 'Модель', icon: MessageSquare }, { stage: 'answer', title: 'Ответ', icon: ShieldCheck },
-    ].map(({ stage, title, icon: Icon }) => <button key={stage} onClick={() => jump(stage)} disabled={!trace.events.some(event => event.stage === stage)}><Icon size={16} aria-hidden="true" />{title}<span>{trace.events.filter(event => event.stage === stage).length}</span></button>)}</nav>
+      { stage: 'specialist_dispatch', title: 'Ветка', icon: GitBranch },
+      { stage: 'retrieval', title: 'Поиск и отбор', icon: Search },
+      { stage: 'db_generate_sql', title: 'БД / SQL', icon: Database },
+      { stage: 'coding_generation', title: 'Код', icon: Code },
+      { stage: 'context', title: 'Контекст', icon: FileCheck },
+      { stage: 'generation', title: 'Модель', icon: MessageSquare },
+      { stage: 'answer', title: 'Ответ', icon: ShieldCheck },
+    ].map(({ stage, title, icon: Icon }) => <button key={stage} onClick={() => jump(stage)} disabled={!trace.events.some(event => event.stage === stage || (stage === 'db_generate_sql' && event.stage.startsWith('db_')) || (stage === 'coding_generation' && event.stage.startsWith('coding_')))}><Icon size={16} aria-hidden="true" />{title}<span>{trace.events.filter(event => event.stage === stage || (stage === 'db_generate_sql' && event.stage.startsWith('db_')) || (stage === 'coding_generation' && event.stage.startsWith('coding_'))).length}</span></button>)}</nav>
     <div className="events">{trace.events.map((event, index) => <LazyDetails className="event" key={index} id={`${trace.id}-${index}`} summary={<><span className="event-number">{index + 1}</span><span>{event.scope === 'publication_gateway' ? 'Поиск опубликованных материалов' : eventNames[event.stage] || event.stage}{event.status === 'error' || event.status === 'blocked' ? <span className="bad"> · {event.status === 'blocked' ? 'блокировка' : 'ошибка'}</span> : null}</span><small>+{seconds(event.elapsed_ms)}{event.duration_ms !== undefined ? ` · ${seconds(event.duration_ms)}` : ''}</small><ChevronDown size={15} aria-hidden="true" /></>}>
       {() => <div className="event-body"><EventBody event={event} /></div>}
     </LazyDetails>)}</div>

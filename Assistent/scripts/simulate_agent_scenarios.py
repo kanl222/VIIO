@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 import sys
 from unittest.mock import MagicMock
 
@@ -21,6 +23,7 @@ from assistent.services.supervisor_graph import build_supervisor_graph
 from assistent.tools.postgres_tool import create_postgres_readonly_tool
 from assistent.services.coding_agent import CodingAgentService, MultiAgentService, CODING_SYSTEM_PROMPT
 from assistent.services.graph_builder import build_agent_graph
+from assistent.services.diagnostics import capture, record
 
 
 def print_banner(title: str):
@@ -95,11 +98,15 @@ async def run_scenario_1_db_optimization():
     llm = GenericFakeChatModel(messages=iter([AIMessage(content=optimization_advice)]))
     graph = build_database_analyst_graph(llm=llm, tools=[db_tool], checkpointer=MemorySaver())
 
-    res = await graph.ainvoke(
-        {"messages": [HumanMessage(content=user_query)]},
-        context={"user_context": {"user_id": "prog1", "role": "programmer"}},
-        config={"configurable": {"thread_id": "sim-opt-1"}},
-    )
+    with capture('main', user_query, thread_id="sim-opt-1"):
+        record("route", mode="database", supervisor=True, tools=["postgresql_readonly"], branch="database")
+        record("specialist_dispatch", specialist="database", name="Аналитик базы данных (Database Analyst)", question=user_query[:200])
+        res = await graph.ainvoke(
+            {"messages": [HumanMessage(content=user_query)]},
+            context={"user_context": {"user_id": "prog1", "role": "programmer"}},
+            config={"configurable": {"thread_id": "sim-opt-1"}},
+        )
+        record("answer", reply=res["messages"][-1].content, sources=[])
 
     print_step("Вызовы инструментов PostgreSQL:", "")
     for op, args in tool_log:
@@ -162,11 +169,15 @@ async def run_scenario_2_db_log_error():
     llm = GenericFakeChatModel(messages=iter([AIMessage(content=error_fix_advice)]))
     graph = build_database_analyst_graph(llm=llm, tools=[db_tool], checkpointer=MemorySaver())
 
-    res = await graph.ainvoke(
-        {"messages": [HumanMessage(content=log_error_query)]},
-        context={"user_context": {"user_id": "prog1", "role": "programmer"}},
-        config={"configurable": {"thread_id": "sim-err-2"}},
-    )
+    with capture('main', log_error_query, thread_id="sim-err-2"):
+        record("route", mode="database", supervisor=True, tools=["postgresql_readonly"], branch="database")
+        record("specialist_dispatch", specialist="database", name="Аналитик базы данных (Database Analyst)", question=log_error_query[:200])
+        res = await graph.ainvoke(
+            {"messages": [HumanMessage(content=log_error_query)]},
+            context={"user_context": {"user_id": "prog1", "role": "programmer"}},
+            config={"configurable": {"thread_id": "sim-err-2"}},
+        )
+        record("answer", reply=res["messages"][-1].content, sources=[])
 
     print_step("Инспекция схемы БД агентом:", "")
     for op, args in tool_log:
@@ -234,13 +245,21 @@ async def run_scenario_3_app_log_error():
     general_service = MagicMock()
     multi_agent = MultiAgentService(general_service, coder_service)
 
-    reply, _ = await multi_agent.chat(app_error_query, "sim-thread-3", {"user_id": "prog1", "role": "programmer"})
+    with capture('main', app_error_query, thread_id="sim-thread-3"):
+        record("route", mode="coding", supervisor=True, tools=["knowledge_search"], branch="coding")
+        record("specialist_dispatch", specialist="coding", name="Инженер-программист (Coding Specialist)", question=app_error_query[:200])
+        reply, _ = await multi_agent.chat(app_error_query, "sim-thread-3", {"user_id": "prog1", "role": "programmer"})
+        record("answer", reply=reply, sources=[])
 
     print_step("Маршрутизация:", "Запрос классифицирован как Coding/Debugging intent -> передан Coding Specialist")
     print_step("Ответ агента пользователю:", reply)
 
 
 async def main():
+    trace_dir = "D:/Source/VIIO/tmp/traces"
+    os.environ["VIIO_TRACE_DIR"] = trace_dir
+    os.makedirs(trace_dir, exist_ok=True)
+
     print("================================================================================")
     print("      ИМИТАЦИЯ ТРЕХ РЕАЛЬНЫХ СЦЕНАРИЕВ РАБОТЫ АГЕНТА VIIO")
     print("================================================================================")
@@ -248,6 +267,13 @@ async def main():
     await run_scenario_2_db_log_error()
     await run_scenario_3_app_log_error()
     print_banner("ВСЕ СЦЕНАРИИ УСПЕШНО ПРОЙДЕНЫ")
+
+    # Синхронизация трасс с контейнером диагностики
+    try:
+        subprocess.run(["docker", "cp", f"{trace_dir}/.", "viio_assistent:/traces"], check=False)
+        print("\n[ДИАГНОСТИКА] Трассы успешно загружены в веб-интерфейс диагностики: http://localhost:3010\n")
+    except Exception as exc:
+        print(f"\n[ДИАГНОСТИКА] Предупреждение: {exc}")
 
 
 if __name__ == "__main__":

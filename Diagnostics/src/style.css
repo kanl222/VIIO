@@ -182,3 +182,41 @@ footer { display: flex; justify-content: space-between; gap: 20px; color: var(--
   .trace-graph-nodes > li:not(:last-child)::after { content: '↓'; left: 50%; top: 100%; line-height: 28px; }
   .trace-graph-node { min-height: 0; }
 }
+
+.code-block {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  overflow-x: auto;
+}
+.diff-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 10px;
+}
+.diff-view > div {
+  min-width: 0;
+}
+.diff-view h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+.specialist-box {
+  padding: 8px 12px;
+  background: var(--subtle);
+  border-radius: 6px;
+  margin: 6px 0;
+}
+.badge-highlight {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--soft);
+  color: var(--accent);
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12px;
+}

@@ -18,6 +18,13 @@ export interface TraceEvent {
   tools?: string[]; name?: string; error?: string; reply?: string;
   sources?: { title: string; document_id?: string; publication_id?: string }[];
   detail?: string; call_id?: string;
+  specialist?: string; role?: string; branch?: string; supervisor?: boolean;
+  question?: string; sql?: string; plan?: string; plan_snippet?: string;
+  schema?: string; tables?: string[]; old_sql?: string; fixed_sql?: string;
+  result?: string; valid?: boolean; attempt?: number; attempts?: number;
+  chars?: number; reference?: string; task?: string; answer?: string;
+  relevant?: boolean; grounded?: boolean; old_query?: string; new_query?: string;
+  fast_path?: boolean; active?: string; length?: number; user?: string;
   usage?: {
     input_tokens?: number; prompt_tokens?: number;
     output_tokens?: number; completion_tokens?: number;

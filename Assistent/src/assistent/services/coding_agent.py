@@ -22,6 +22,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from assistent.prompts import CODING_SYSTEM_PROMPT, DELEGATION_PROMPT  # noqa: F401  (могут импортироваться отсюда)
 from assistent.services.agent_service import AgentService
 from assistent.services.conversation_route import ConversationRoute
+from assistent.services.diagnostics import record
 from assistent.security import ensure_role_access
 from assistent.services.request_policy import (DOMAIN, FOLLOWUP, NO_CODE, calculate,
                                                is_coding_request, request_mode)
@@ -149,6 +150,7 @@ class CodingAgentService(AgentService):
 
     async def chat(self, message, thread_id=None, user_context=None, *, knowledge_query: str | None = None):
         self.ensure_access(user_context)
+        record("coding_dispatch", task=message[:500], user=(user_context or {}).get("user_id"))
         thread_id = thread_id or str(uuid.uuid4())
         coding_thread = self.coding_thread_id(thread_id, user_context["user_id"])
         # Таймаут включает ожидание блокировки своего диалога.
@@ -163,12 +165,17 @@ class CodingAgentService(AgentService):
         return reply, thread_id
 
     async def _answer(self, message: str, coding_thread: str, user_context: dict, knowledge_query: str | None):
+        query = None
         try:
             query = await self._resolve_query(message, coding_thread, knowledge_query)
             reference = await self._fetch_reference(query, user_context) if query else None
+            record("coding_reference", query=query, chars=len(reference or ""), status="ok" if reference else "none", reference=(reference[:1500] if reference else None))
         except KnowledgeUnavailable as exc:
+            record("coding_reference", query=query, status="error", error=str(exc))
             return str(exc), coding_thread
-        return await super().chat(message, coding_thread, user_context, reference_context=reference)
+        reply, effective_thread = await super().chat(message, coding_thread, user_context, reference_context=reference)
+        record("coding_generation", length=len(str(reply)), answer=str(reply)[:2000])
+        return reply, effective_thread
 
     async def _resolve_query(self, message: str, coding_thread: str, knowledge_query: str | None) -> str | None:
         """Запрос к базе знаний: явный, из текста сообщения или восстановленный из предыдущих реплик."""

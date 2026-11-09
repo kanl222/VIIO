@@ -272,7 +272,7 @@ def build_database_analyst_graph(
                 logger.warning("Failed to describe table %s: %s", t, e)
 
         schema_info = "\n\n".join(schema_descriptions) if schema_descriptions else tables_text
-        record("db_inspect_schema", tables=selected_tables, length=len(schema_info))
+        record("db_inspect_schema", tables=selected_tables, length=len(schema_info), schema=schema_info[:2000])
 
         # Step D: Specialized handling for Optimization requests or Log Error diagnosis
         is_opt = bool(re.search(r"оптимиз\w*|ускор\w*|план\s+запрос\w*|explain|индекс\w*|медленн", question, re.I))
@@ -281,6 +281,7 @@ def build_database_analyst_graph(
         if is_opt and schema_info:
             sql_match = re.search(r"```(?:sql)?\s*([\s\S]*?)\s*```|(?:SELECT\s+[\s\S]+?(?:;|$))", question, re.I)
             explain_plan = "План запроса не указан пользователем"
+            extracted_sql = None
             if sql_match:
                 extracted_sql = clean_sql(sql_match.group(1) if sql_match.group(1) else sql_match.group(0))
                 try:
@@ -291,6 +292,8 @@ def build_database_analyst_graph(
                     explain_plan = str(exp_res)
                 except Exception as exc:
                     explain_plan = f"Ошибка получения плана: {exc}"
+
+            record("db_optimize_query", sql=extracted_sql, plan=explain_plan[:2000], tables=selected_tables)
 
             opt_res = await llm.ainvoke([
                 SystemMessage(content=DATABASE_SYSTEM_PROMPT),
@@ -309,6 +312,7 @@ def build_database_analyst_graph(
             }
 
         if is_err and schema_info:
+            record("db_diagnose_error", tables=selected_tables, error=question[:500])
             err_res = await llm.ainvoke([
                 SystemMessage(content=DATABASE_SYSTEM_PROMPT),
                 HumanMessage(content=DIAGNOSE_DB_ERROR_PROMPT.format(
@@ -354,7 +358,7 @@ def build_database_analyst_graph(
             logger.error("SQL generation failed: %s", exc)
             query = ""
 
-        record("db_generate_sql", query=query)
+        record("db_generate_sql", sql=query, tables=state.get("target_tables", []))
         return {"sql_query": query}
 
     # 3. Explain Check Node
@@ -363,6 +367,7 @@ def build_database_analyst_graph(
         user_context = ctx(runtime).get("user_context", {})
 
         if not sql_query or not db_tool:
+            record("db_explain_check", valid=False, error="Пустой или отсутствующий SQL-запрос", sql=sql_query)
             return {"explain_valid": False, "explain_error": "Пустой или отсутствующий SQL-запрос"}
 
         try:
@@ -378,13 +383,13 @@ def build_database_analyst_graph(
                 or "отклон" in explain_str.lower()
             )
             if is_err:
-                record("db_explain_check", valid=False, error=explain_str)
+                record("db_explain_check", valid=False, error=explain_str[:2000], sql=sql_query)
                 return {"explain_valid": False, "explain_error": explain_str}
 
-            record("db_explain_check", valid=True, plan_snippet=explain_str[:200])
+            record("db_explain_check", valid=True, plan=explain_str[:2000], sql=sql_query)
             return {"explain_valid": True, "explain_plan": explain_str, "explain_error": None}
         except Exception as exc:
-            record("db_explain_check", valid=False, error=str(exc))
+            record("db_explain_check", valid=False, error=str(exc)[:1000], sql=sql_query)
             return {"explain_valid": False, "explain_error": str(exc)}
 
     def explain_condition(state: DatabaseAnalystState, runtime: Runtime[AgentRuntimeContext]) -> Literal["execute_sql", "fix_sql", "format_answer"]:
@@ -418,7 +423,7 @@ def build_database_analyst_graph(
             logger.error("Fix SQL failed: %s", exc)
             fixed_sql = sql_query
 
-        record("db_fix_sql", attempt=attempts, old_sql=sql_query, fixed_sql=fixed_sql)
+        record("db_fix_sql", attempt=attempts, old_sql=sql_query, fixed_sql=fixed_sql, error=explain_error[:1000] if explain_error else None)
         return {"sql_query": fixed_sql, "fix_attempts": attempts}
 
     # 5. Execute SQL Node
@@ -438,13 +443,14 @@ def build_database_analyst_graph(
         except Exception as exc:
             res_str = f"Ошибка при выполнении запроса: {exc}"
 
-        record("db_execute_sql", length=len(res_str))
+        record("db_execute_sql", sql=sql_query, length=len(res_str), result=res_str[:2000])
         return {"query_result": res_str}
 
     # 6. Format Answer Node
     async def format_answer_node(state: DatabaseAnalystState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
         if state.get("is_direct_command"):
             ans = state.get("direct_command_result", "")
+            record("db_format_answer", length=len(ans), answer=ans[:2000])
             return {"messages": [finalize_response(AIMessage(content=ans), sources=[], active="database")]}
 
         question = state.get("question", "")
@@ -458,6 +464,7 @@ def build_database_analyst_graph(
                 f"Ошибка проверки плана PostgreSQL:\n{explain_err}\n\n"
                 f"Попробуйте уточнить формулировку или проверьте доступность таблиц."
             )
+            record("db_format_answer", length=len(ans), answer=ans[:2000])
             return {"messages": [finalize_response(AIMessage(content=ans), sources=[], active="database")]}
 
         prompt = FORMAT_ANSWER_PROMPT.format(
@@ -474,7 +481,7 @@ def build_database_analyst_graph(
         except Exception as exc:
             ans = f"Результат выполнения SQL ({sql_query}):\n\n{query_result}"
 
-        record("db_format_answer", length=len(ans))
+        record("db_format_answer", length=len(ans), answer=ans[:2000])
         return {"messages": [finalize_response(AIMessage(content=ans), sources=[], active="database")]}
 
     # Assembly
