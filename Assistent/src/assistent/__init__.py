@@ -82,6 +82,7 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
             document_search_first=True,
             summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
             history_max_chars=app_settings.conversation_history_max_chars,
+            supervisor=app_settings.supervisor_enabled,
         )
         agent_service = AgentService(graph=graph)
         if catalog_service:
