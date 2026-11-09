@@ -102,6 +102,18 @@ class AgentService(IAgentService):
             raise RuntimeError(exc_msg) from exc
 
         messages = result.get("messages", [])
+        interrupts = result.get("__interrupt__", [])
+        if interrupts:
+            int_val = interrupts[0].value
+            prompt_text = int_val.get("prompt") if isinstance(int_val, dict) else str(int_val)
+            return AgentReply(
+                prompt_text or "Требуется подтверждение операции.",
+                sources=[],
+                active_specialist=None,
+                saved_documents=[],
+                interrupt=int_val,
+            ), effective_thread_id
+
         if not messages:
             return "", effective_thread_id
 
@@ -122,3 +134,61 @@ class AgentService(IAgentService):
         active = getattr(last_message, "response_metadata", {}).get("active_specialist")
         saved = getattr(last_message, 'response_metadata', {}).get('saved_documents', [])
         return AgentReply(clean_answer(reply, sources), sources, active, saved_documents=saved), effective_thread_id
+
+    async def resume(
+        self,
+        thread_id: str,
+        value: Any,
+        user_context: dict[str, Any] | None = None,
+    ) -> tuple[AgentReply, str]:
+        """Возобновляет приостановленную сессию графа ответом пользователя."""
+        from langgraph.types import Command
+        effective_thread_id = thread_id.strip()
+        config = {
+            "configurable": {
+                "thread_id": effective_thread_id,
+                "user_context": user_context or {},
+            }
+        }
+        context = {
+            "access_scope": scope_key(user_context) + ":" + str((user_context or {}).get("_knowledge_epoch", "")),
+            "user_context": user_context or {},
+        }
+        try:
+            result = await self._graph.ainvoke(Command(resume=value), config=config, context=context)
+        except Exception as exc:
+            logger.error("Ошибка при возобновлении графа (thread_id: %s): %s", effective_thread_id, exc, exc_info=True)
+            raise RuntimeError(str(exc)) from exc
+
+        interrupts = result.get("__interrupt__", [])
+        if interrupts:
+            int_val = interrupts[0].value
+            prompt_text = int_val.get("prompt") if isinstance(int_val, dict) else str(int_val)
+            return AgentReply(
+                prompt_text or "Требуется подтверждение операции.",
+                sources=[],
+                active_specialist=None,
+                saved_documents=[],
+                interrupt=int_val,
+            ), effective_thread_id
+
+        messages = result.get("messages", [])
+        if not messages:
+            return AgentReply("", []), effective_thread_id
+
+        last_message = messages[-1]
+        raw_content: Any = getattr(last_message, "content", "")
+        reply = raw_content if isinstance(raw_content, str) else str(raw_content)
+        sources = getattr(last_message, "response_metadata", {}).get("sources", [])
+        active = getattr(last_message, "response_metadata", {}).get("active_specialist")
+        saved = getattr(last_message, "response_metadata", {}).get("saved_documents", [])
+        return AgentReply(clean_answer(reply, sources), sources, active, saved_documents=saved), effective_thread_id
+
+    async def get_pending_interrupt(self, thread_id: str) -> Any | None:
+        """Проверяет, ожидает ли сессия интерактивного подтверждения пользователем."""
+        state = await self._graph.aget_state({"configurable": {"thread_id": thread_id}})
+        if state and state.tasks:
+            for task in state.tasks:
+                if getattr(task, "interrupts", None):
+                    return task.interrupts[0].value
+        return None
