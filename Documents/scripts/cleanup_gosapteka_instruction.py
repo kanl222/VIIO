@@ -60,7 +60,7 @@ async def main(apply=False):
                 publication = await (await conn.execute(
                     'SELECT id::text,title,content,publisher_id FROM document_publications WHERE document_id=%s',
                     (identifier,))).fetchone()
-            # A prior interrupted run may already have activated the clean version.
+            # Предыдущий прерванный запуск мог уже активировать очищенную версию.
             report = dict(old_id=identifier, current_id=current.id, title=current.title,
                           before_characters=len(before), after_characters=len(cleaned), applied=False)
             if not apply:
@@ -89,7 +89,7 @@ async def main(apply=False):
                 report.update(current_id=new_id, chunks=chunks, applied=True)
                 current = await catalog.get(new_id)
             if publication and current.id != identifier:
-                # Reuse an existing new snapshot after an interrupted successful publish.
+                # Повторно используем существующий новый снапшот после прерванной успешной публикации.
                 existing = await data.publication(current.id)
                 if not existing or existing['content'] != cleaned:
                     await data.publish(current.id, publication['title'], cleaned, publication['publisher_id'])

@@ -1,4 +1,4 @@
-// Explicit test-only credentials; production has no built-in service token.
+// Явные учетные данные только для тестов; в продакшене нет встроенного служебного токена.
 process.env.CHAT_API_KEY = 'c'.repeat(40);
 process.env.DOCUMENTS_READ_KEY = 'r'.repeat(40);
 process.env.DOCUMENTS_ADMIN_KEY = 'a'.repeat(40);

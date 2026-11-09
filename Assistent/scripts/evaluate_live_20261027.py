@@ -203,7 +203,7 @@ async def main():
                     await saver.adelete_thread("coder-text-" + hashlib.sha256(identity.encode()).hexdigest())
                     await saver.adelete_thread("route-text-" + hashlib.sha256(identity.encode()).hexdigest())
             async with conn.cursor() as cur:
-                # The unique random username belongs only to this test run.
+                # Уникальное случайное имя пользователя принадлежит только этому тестовому прогону.
                 await cur.execute("DELETE FROM users WHERE username=%s", (username,))
                 removed = cur.rowcount
             await conn.commit()

@@ -135,7 +135,7 @@ export function createChatRouter(
             errDetail = errData.detail;
           }
         } catch {
-          // ignore parsing error
+          // игнорируем ошибку парсинга
         }
         res.status(agentResponse.status >= 500 ? 502 : agentResponse.status).json({
           detail: errDetail,

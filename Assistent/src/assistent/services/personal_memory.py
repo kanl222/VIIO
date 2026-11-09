@@ -1,15 +1,46 @@
 """Explicit facts backed by LangGraph Store; summaries never become confirmed facts."""
+from collections import defaultdict
 import asyncio
+import logging
 import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 from langgraph.store.postgres.aio import AsyncPostgresStore
 from assistent.services.graph_builder import scope_key
+from assistent.services.diagnostics import record
+
+logger = logging.getLogger(__name__)
 
 MIGRATION_NAMESPACE = ('viio_migrations',)
 MIGRATION_KEY = 'personal_facts_v1'
+
+SECRET_PATTERN = re.compile(
+    r'(?i)(?:password|пароль|api[_ -]?key|токен|secret)\s*[:=]|'
+    r'-----BEGIN .*PRIVATE KEY|'
+    r'\bsk-[a-zA-Z0-9]{16,}|'
+    r'\bBearer\s+[A-Za-z0-9_\-\.]{20,}|'
+    r'\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_\-]{10,}|'
+    r'[a-zA-Z][a-zA-Z0-9+.-]*://[^:\s]+:[^@\s]+@[^/\s]+|'
+    r'\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}|'
+    r'\bgithub_pat_[A-Za-z0-9_]{50,}'
+)
+
+COMMAND_PATTERN = re.compile(r'(?is)^\s*(/?\w+)[\s,:]*(.*)')
+COMMAND_ALIASES = {
+    'запомни': '/remember',
+    'запомнить': '/remember',
+    '/remember': '/remember',
+    'факты': '/facts',
+    '/факты': '/facts',
+    '/facts': '/facts',
+    'забудь': '/forget',
+    'забыть': '/forget',
+    '/забыть': '/forget',
+    '/forget': '/forget',
+}
 
 
 async def migrate_legacy_facts(store, rows):
@@ -34,12 +65,18 @@ async def migrate_legacy_facts(store, rows):
 class PersonalFacts:
     def __init__(self, catalog=None, *, store=None):
         self.catalog, self.store = catalog, store
-        self._lock = asyncio.Lock()
+        self._user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._global_lock = asyncio.Lock()
+
+    def _get_lock(self, owner: Any) -> asyncio.Lock:
+        if owner is None:
+            return self._global_lock
+        return self._user_locks[str(owner)]
 
     @asynccontextmanager
     async def _backend(self, owner=None):
         if self.store is not None:
-            async with self._lock:
+            async with self._get_lock(owner):
                 yield self.store
             return
         async with self.catalog.pool.connection() as conn:
@@ -50,7 +87,11 @@ class PersonalFacts:
                     yield store
 
     async def setup(self):
-        # Store.setup requires autocommit; schema migration is an explicit deployment operation.
+        # Store.setup требует autocommit; миграция схемы — это явная операция развертывания.
+        if self.catalog is None:
+            if self.store is not None and hasattr(self.store, 'setup'):
+                await self.store.setup()
+            return 0
         async with self.catalog.pool.connection() as conn:
             async with AsyncPostgresStore(conn) as store:
                 await store.setup()
@@ -77,14 +118,22 @@ class PersonalFacts:
         content = content.strip()
         if not content or len(content) > 2000:
             raise ValueError('Факт должен содержать от 1 до 2000 символов.')
-        if re.search(r'(?i)(?:password|пароль|api[_ -]?key|токен|secret)\s*[:=]|-----BEGIN .*PRIVATE KEY|\bsk-[a-zA-Z0-9]{16,}', content):
+        if SECRET_PATTERN.search(content):
             raise ValueError('Пароли, токены и ключи доступа не сохраняются в фактах.')
         async with self._backend(context['user_id']) as store:
             existing = await store.asearch(namespace, filter={'content': content}, limit=1)
             if existing:
                 return existing[0].key
-            all_facts = await store.asearch(namespace[:2], limit=100)
-            if len(all_facts) >= 100:
+            # Проверяем реальное количество фактов пользователя по страницам
+            count = 0
+            offset = 0
+            while True:
+                batch = await store.asearch(namespace[:2], limit=100, offset=offset)
+                count += len(batch)
+                if not batch or len(batch) < 100 or count >= 100:
+                    break
+                offset += len(batch)
+            if count >= 100:
                 raise ValueError('Достигнут лимит 100 фактов. Удалите ненужные командой /forget.')
             identifier = str(uuid.uuid4())
             await store.aput(namespace, identifier, {
@@ -95,7 +144,7 @@ class PersonalFacts:
 
     async def list(self, context):
         namespace = self.namespace(context)
-        async with self._backend() as store:
+        async with self._backend(context.get('user_id')) as store:
             items = await store.asearch(namespace, limit=100)
         rows = [dict(item.value, id=item.key) for item in items]
         return sorted(rows, key=lambda row: row['created_at'], reverse=True)
@@ -107,25 +156,32 @@ class PersonalFacts:
         except (ValueError, TypeError):
             return False
         async with self._backend(context['user_id']) as store:
-            # Forget may delete the owner's fact from an earlier scope, never another user's.
-            items = await store.asearch(namespace[:2], limit=100)
-            found = next((item for item in items if item.key == identifier), None)
+            # Забывание может удалить факт владельца из более ранней области видимости, но никогда — факт другого пользователя.
+            # Поиск через asearch с пагинацией, чтобы найти факт даже при >= 100 записях
+            found = None
+            offset = 0
+            while True:
+                items = await store.asearch(namespace[:2], limit=100, offset=offset)
+                if not items:
+                    break
+                for item in items:
+                    if item.key == identifier:
+                        found = item
+                        break
+                if found is not None or len(items) < 100:
+                    break
+                offset += len(items)
+
             if found is None:
                 return False
             await store.adelete(found.namespace, identifier)
-            if self.store is None:
-                # Same connection/transaction: forgetting is atomic across both storage versions.
-                conn = store.conn
-                exists = await (await conn.execute("SELECT to_regclass('public.user_facts') AS legacy")).fetchone()
-                if exists['legacy']:
-                    await conn.execute('DELETE FROM user_facts WHERE id=%s AND owner_id=%s',
-                                       (identifier, str(context['user_id'])))
         return True
 
 
 class MemoryAgent:
-    def __init__(self, agent, facts):
+    def __init__(self, agent, facts, project_memory=None):
         self.agent, self.facts = agent, facts
+        self.project_memory = project_memory
 
     @property
     def checkpointer(self):
@@ -138,8 +194,16 @@ class MemoryAgent:
         context = dict(user_context or {})
         context.pop('_user_notes', None)
         thread = thread_id or str(uuid.uuid4())
-        command, _, argument = message.strip().partition(' ')
-        command = {'запомни': '/remember', 'запомнить': '/remember', '/факты': '/facts', '/забыть': '/forget'}.get(command.lower(), command.lower())
+        
+        match = COMMAND_PATTERN.match(message)
+        command, argument = '', ''
+        if match:
+            raw_cmd, raw_arg = match.groups()
+            command = COMMAND_ALIASES.get(raw_cmd.lower(), raw_cmd.lower())
+            argument = raw_arg.strip()
+
+        if self.project_memory and command in self.project_memory.commands:
+            return await self.project_memory.handle(command, argument, context), thread
         if command in {'/remember', '/facts', '/forget'}:
             if not context.get('user_id'):
                 raise PermissionError('Для работы с фактами необходима авторизация.')
@@ -147,7 +211,7 @@ class MemoryAgent:
                 identifier = await self.facts.remember(context, thread, argument)
                 return f'Сохранён пользовательский факт. ID: {identifier}', thread
             if command == '/forget':
-                removed = await self.facts.forget(context, argument.strip())
+                removed = await self.facts.forget(context, argument)
                 return ('Факт удалён.' if removed else 'Факт не найден среди ваших записей.'), thread
             rows = await self.facts.list(context)
             return ('\n'.join(f"{row['id']}: {row['content']}" for row in rows) or 'Сохранённых фактов нет.'), thread
@@ -155,7 +219,9 @@ class MemoryAgent:
             try:
                 rows = await self.facts.list(context)
                 context['_user_notes'] = '\n'.join(row['content'] for row in rows[:20])[:4000]
-            except Exception:
-                # Optional notes must not take down normal chat during a DB outage.
-                pass
+            except Exception as error:
+                # Необязательные заметки не должны ломать обычный чат при сбое БД, но ошибка фиксируется в телеметрии
+                logger.warning("Facts retrieval failed: %s", error)
+                record('facts_unavailable', error=type(error).__name__)
         return await self.agent.chat(message, thread, context)
+

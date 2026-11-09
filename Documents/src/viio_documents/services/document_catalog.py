@@ -16,9 +16,21 @@ from typing import Any
 import psycopg
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_catalog_metadata(metadata):
+    metadata = metadata or {}
+    tags = metadata.get('tags', [])
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise ValueError('Теги должны быть списком строк')
+    if len(tags) > 20 or any(len(tag) > 100 for tag in tags):
+        raise ValueError('Допускается до 20 тегов длиной до 100 символов')
+    return {'description': str(metadata.get('description', ''))[:500],
+            'tags': sorted({tag.strip().lower() for tag in tags if tag.strip()})}
 
 # ---------------------------------------------------------------------------
 # DDL — выполняется при первом старте приложения
@@ -112,6 +124,7 @@ class DocumentCatalogService:
             await conn.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true')
             await conn.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_kind text NOT NULL DEFAULT 'document'")
             await conn.execute('ALTER TABLE documents ADD COLUMN IF NOT EXISTS original_filename varchar(255)')
+            await conn.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS catalog_metadata jsonb NOT NULL DEFAULT '{}'::jsonb")
             await conn.execute('UPDATE documents SET family_id=id WHERE family_id IS NULL')
             await conn.execute('ALTER TABLE documents ALTER COLUMN family_id SET NOT NULL')
             await conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS documents_family_version ON documents(family_id,version)')
@@ -146,6 +159,7 @@ class DocumentCatalogService:
         is_active: bool = True,
         document_kind: str = 'document',
         original_filename: str | None = None,
+        catalog_metadata: dict | None = None,
     ) -> DocumentRecord:
         """Создать новую запись в каталоге."""
         roles = allowed_roles if allowed_roles is not None else ["employee"]
@@ -159,8 +173,8 @@ class DocumentCatalogService:
                 INSERT INTO documents
                     (id, title, mime_type, file_size, sha256, owner_id,
                      is_public, allowed_roles, allowed_departments,
-                     storage_key, chunks_count, status,family_id,version,parent_id,is_active,document_kind,original_filename)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     storage_key, chunks_count, status,family_id,version,parent_id,is_active,document_kind,original_filename,catalog_metadata)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(id) DO UPDATE SET storage_key=EXCLUDED.storage_key,
                     status=EXCLUDED.status,chunks_count=EXCLUDED.chunks_count,updated_at=now()
                 RETURNING *
@@ -172,6 +186,7 @@ class DocumentCatalogService:
                     family_id or doc_id, version, parent_id, is_active,
                     document_kind,
                     original_filename,
+                    Jsonb(normalize_catalog_metadata(catalog_metadata)),
                 ),
             )
             row = await cur.fetchone()  # type: ignore[assignment]
@@ -305,6 +320,16 @@ class DocumentCatalogService:
             cur = await conn.execute("SELECT COUNT(*)::int AS cnt FROM documents WHERE is_active")
             row = await cur.fetchone()
         return row["cnt"] if isinstance(row, dict) else row[0] if row else 0
+
+    async def update_catalog_metadata(self, doc_id, metadata):
+        normalized = normalize_catalog_metadata(metadata)
+        value = {key: normalized[key] for key in metadata}
+        async with self._pool.connection() as conn:
+            conn.row_factory = dict_row
+            row = await (await conn.execute(
+                "UPDATE documents SET catalog_metadata=catalog_metadata || %s, updated_at=now() WHERE id=%s RETURNING *",
+                (Jsonb(value), doc_id))).fetchone()
+        return DocumentRecord.from_row(row) if row else None
 
     async def versions(self, family_id):
         async with self.pool.connection() as conn:

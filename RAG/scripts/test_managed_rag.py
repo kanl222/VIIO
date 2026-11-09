@@ -82,7 +82,7 @@ def main():
     print(json.dumps({'stage': 'index_ready', 'index_id': index.id, 'files': len(indexed_files)}), flush=True)
     name = values.get('CONSULTANT_YANDEX_MODEL') or 'aliceai-llm'
     model = name if name.startswith('gpt://') else f'gpt://{folder}/{name}'
-    # Current official SDK manages files/indexes; Responses API is documented via OpenAI client.
+    # Текущий официальный SDK управляет файлами/индексами; Responses API документирован через клиент OpenAI.
     client = OpenAI(api_key=key, project=folder, base_url='https://ai.api.cloud.yandex.net/v1',
         timeout=60, max_retries=0, default_headers={'x-data-logging-enabled': 'false'})
     results = []

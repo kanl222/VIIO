@@ -21,7 +21,7 @@ FOLLOWUP = re.compile(
     r"объясни\s+(?:этот|предыдущий)|а\s+(?:если|теперь))\b", re.I,
 )
 
-# Shared by the supervisor fallback and the explicit coder router.
+# Используется совместно резервным супервизором и явным маршрутизатором кодера.
 CODING_INTENT = re.compile(
     r"\b(?:sql|soap|rest|graphql|wsdl|git|python|javascript|typescript|csharp|java|"
     r"pytest|npm|docker|langgraph|fastapi|react|api)\b|"
@@ -41,7 +41,7 @@ def is_coding_request(message: str) -> bool:
 
 def request_mode(message: str) -> str:
     """Default to retrieval for ambiguous business/domain questions."""
-    # A quoted instruction to rewrite is different from rewriting a function.
+    # Инструкция в кавычках о переписывании отличается от реального переписывания функции.
     instruction = message.split(":", 1)[0]
     if REWRITE.search(message) and not re.search(
         r"\b(?:python|sql|soap|rest|api|функци\w*|код|метод\w*)\b", instruction, re.I,

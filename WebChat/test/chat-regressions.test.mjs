@@ -85,7 +85,7 @@ test('duplicate structured attachments are shown once and user messages are unch
   assert(!user.includes('Предоставленные материалы'));
 });
 
-// Small hook runner for deterministic request ordering without a browser or timers.
+// Небольшой раннер хуков для детерминированного порядка запросов без браузера и таймеров.
 function chatHarness(api) {
   const slots = [];
   let cursor = 0;

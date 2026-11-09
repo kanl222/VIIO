@@ -1,4 +1,4 @@
-// Runs before CSS so a saved dark theme never flashes a light background.
+// Выполняется до CSS, чтобы при сохраненной темной теме не мелькал светлый фон.
 (() => {
   const key='agentai-theme';
   const system=window.matchMedia('(prefers-color-scheme: dark)');

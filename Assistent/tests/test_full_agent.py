@@ -17,7 +17,7 @@ def test_full_graph_with_tools():
     mock_store.similarity_search.return_value = []
     tool = create_knowledge_search_tool(mock_store)
 
-    # 1. LLM answers directly without tool
+    # 1. LLM отвечает напрямую без использования инструментов
     llm1 = ToolFakeChatModel(messages=iter([AIMessage(content="Привет, я бот!")]))
     graph1 = build_agent_graph(llm=llm1, tools=[tool], checkpointer=MemorySaver())
     svc1 = AgentService(graph=graph1)
@@ -28,7 +28,7 @@ def test_full_graph_with_tools():
     mock_store.similarity_search.assert_not_called()
     mock_store.reset_mock()
 
-    # 2. LLM calls the tool search_knowledge_base
+    # 2. LLM вызывает инструмент search_knowledge_base
     tool_call_msg = AIMessage(
         content="",
         tool_calls=[{"name": "search_knowledge_base", "args": {"query": "регламент"}, "id": "call_1"}],

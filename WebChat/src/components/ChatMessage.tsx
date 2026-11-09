@@ -6,7 +6,7 @@ interface ChatMessageProps {
   message: Message;
 }
 
-// Hoisted regular expressions to avoid re-compilation per line/render (js-hoist-regexp)
+// Вынесенные регулярные выражения во избежание повторной компиляции на каждую строку/рендер (js-hoist-regexp)
 const INLINE_REGEX = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
 const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g;
 const ORDERED_REGEX = /^(\d+)\.\s+(.*)$/;
@@ -32,7 +32,7 @@ const KNOWN_HEADINGS = new Set([
 const CodeBlock: React.FC<{ raw: string }> = memo(({ raw }) => {
   const [copied, setCopied] = useState(false);
 
-  // First line might be language
+  // Первая строка может определять язык
   const firstNewline = raw.indexOf('\n');
   let lang = 'code';
   let code = raw;

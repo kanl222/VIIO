@@ -25,7 +25,7 @@ class PostgresMCPClient:
         self.settings = settings
 
     async def call(self, name: str, arguments: dict) -> str:
-        # Fixed allowlist: tuning, write tools and arbitrary MCP calls are not exposed.
+        # Фиксированный белый список: тюнинг, инструменты записи и произвольные MCP-вызовы не раскрываются.
         if name not in {"list_schemas", "list_objects", "get_object_details", "execute_sql", "explain_query"}:
             raise ValueError("Unsupported PostgreSQL operation")
         if name == "explain_query" and (arguments.get("analyze") is not False or arguments.get("hypothetical_indexes")):
@@ -34,7 +34,7 @@ class PostgresMCPClient:
             self.settings.pgsql_mcp_url, name, arguments,
             allowed={"list_schemas", "list_objects", "get_object_details", "execute_sql", "explain_query"},
             timeout=self.settings.pgsql_timeout_seconds, sse=True)
-        # Upstream sometimes returns errors as TextContent without isError.
+        # Вышестоящий сервис иногда возвращает ошибки как TextContent без флага isError.
         if failed or text.lstrip().lower().startswith("error:"):
             return "Ошибка PostgreSQL: запрос отклонён или недоступны таблица/подключение. Проверьте SQL и права пользователя БД."
         limit = self.settings.pgsql_max_chars
@@ -72,8 +72,8 @@ def create_postgres_readonly_tool(settings: Settings, client: PostgresMCPClient 
             if not query or len(query) > 10000:
                 return "Укажите один SELECT-запрос длиной до 10 000 символов."
             if operation == "explain":
-                # Do not inject LIMIT into the original SQL: it changes the plan.
-                # Wrapping as a derived table excludes DML/DDL and multiple statements.
+                # Не внедряем LIMIT в исходный SQL: это меняет план выполнения.
+                # Оборачивание в производную таблицу исключает DML/DDL и множественные инструкции.
                 name, args = "explain_query", {"sql": f"SELECT * FROM ({query}) AS viio_explain", "analyze": False, "hypothetical_indexes": []}
             else:
                 name, args = "execute_sql", {"sql": f"SELECT * FROM ({query}) AS viio_readonly_result LIMIT {settings.pgsql_max_rows}"}
@@ -82,7 +82,7 @@ def create_postgres_readonly_tool(settings: Settings, client: PostgresMCPClient 
         try:
             return await backend.call(name, args)
         except Exception:
-            # Never include connection strings or upstream exception text in chat/logs.
+            # Никогда не включать строки подключения или текст исключений вышестоящего сервиса в чат/логи.
             return "Сервис PostgreSQL недоступен или превышено время ожидания. Проверьте подключение и настройки."
 
     postgresql_readonly.metadata = {'allowed_roles': sorted(DATABASE_ROLES)}

@@ -19,6 +19,8 @@ from viio_rag.knowledge_data import KnowledgeData
 from viio_rag.publication_index import PublicationIndex
 from viio_rag.publication_search import search_publications
 from viio_rag.search_tool import format_documents
+from viio_rag.schemas import DocumentListRequest
+from viio_rag.document_directory import list_documents, search_selected_documents
 from viio_rag.vector_store import QdrantVectorStoreAdapter
 
 
@@ -96,8 +98,15 @@ def create_app(settings=None, *, data=None, vector_store=None):
     async def search(question: KnowledgeQuestion):
         context = question.user_context.model_dump() if question.user_context else None
         diagnostic = {} if question.diagnostics else None
-        docs = await EnhancedRetrieval(vector_store, data).search(question.query, context, question.k, diagnostics=diagnostic)
+        if question.document_ids is not None:
+            docs = await search_selected_documents(data, question.query, question.document_ids, context)
+        else:
+            docs = await EnhancedRetrieval(vector_store, data).search(question.query, context, question.k, diagnostics=diagnostic)
         return {'context': format_documents(docs), **({'diagnostics': diagnostic} if diagnostic is not None else {})}
+
+    @app.post('/api/v1/knowledge/documents', dependencies=[Depends(internal)])
+    async def documents(request: DocumentListRequest):
+        return await list_documents(data, request)
 
     @app.get('/api/v1/knowledge/access-revision', dependencies=[Depends(internal)])
     async def revision():

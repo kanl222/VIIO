@@ -38,7 +38,7 @@ export function createAuthRouter(poolProvider: () => pg.Pool = getPool): Router 
     }
 
     const cleanUsername = username.trim();
-    // Access attributes are assigned by the server, never by public registration.
+    // Атрибуты доступа назначаются сервером, а не при публичной регистрации.
     const userRole = 'employee';
     const userDepts = ['general'];
     const pool = poolProvider();

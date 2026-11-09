@@ -169,6 +169,12 @@ def messages_with_retrieved_context(messages: Sequence[BaseMessage], context_max
         call["id"] for m in messages if isinstance(m, AIMessage)
         for call in m.tool_calls if call.get("id", "").startswith(AUTO_CALL_PREFIX)
     }
+    stale_search_ids = {
+        call['id'] for index, message in enumerate(messages) if index < latest
+        and isinstance(message, AIMessage)
+        for call in message.tool_calls if call.get('name') in {SEARCH_TOOL, 'search_document_content', 'list_documents'}
+    }
+    removed_ids = auto_ids | stale_search_ids
     context: list[str] = []
     remaining = max(0, context_max_chars)
     prepared: list[BaseMessage] = []
@@ -176,13 +182,15 @@ def messages_with_retrieved_context(messages: Sequence[BaseMessage], context_max
 
     for index, message in enumerate(messages):
         if isinstance(message, AIMessage) and message.tool_calls:
-            kept = [c for c in message.tool_calls if c.get("id") not in auto_ids]
+            kept = [c for c in message.tool_calls if c.get("id") not in removed_ids]
             if not kept:
+                if message.content:
+                    prepared.append(message.model_copy(update={"tool_calls": []}))
                 continue
             if len(kept) != len(message.tool_calls):
                 # Смешанное сообщение: убираем автоматические вызовы, чтобы не осталось «осиротевших».
                 message = message.model_copy(update={"tool_calls": kept})
-        elif isinstance(message, ToolMessage) and message.tool_call_id in auto_ids:
+        elif isinstance(message, ToolMessage) and message.tool_call_id in removed_ids:
             if index > latest and remaining > 0:
                 part = readable_reference(str(message.content))[:remaining]
                 context.append(part)
@@ -191,7 +199,7 @@ def messages_with_retrieved_context(messages: Sequence[BaseMessage], context_max
 
         if index == latest:
             question_position = len(prepared)
-        if isinstance(message, ToolMessage) and message.name == SEARCH_TOOL:
+        if isinstance(message, ToolMessage) and message.name in {SEARCH_TOOL, 'search_document_content'}:
             message = message.model_copy(update={"content": readable_reference(str(message.content))})
         prepared.append(message)
 

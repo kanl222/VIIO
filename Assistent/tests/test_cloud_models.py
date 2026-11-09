@@ -25,7 +25,7 @@ def test_global_yandex_and_local_override(role):
 def test_global_cloud_credentials_validated_for_inherited_roles():
     with pytest.raises(ValidationError, match="YANDEX_API_KEY"):
         Settings(_env_file=None, llm_provider="yandex")
-    # No cloud client is used if every role explicitly selects a local provider.
+    # Облачный клиент не используется, если для каждой роли явно выбран локальный провайдер.
     Settings(_env_file=None, llm_provider="yandex", chat_provider="lmstudio",
              coding_provider="ollama", database_provider="lmstudio")
 
@@ -96,7 +96,7 @@ async def test_wire_format_and_tool_call_roundtrip():
                         yandex_api_key="test-key", yandex_folder_id="folder")
     model = create_chat_model(settings, coding=True)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-        # Bind a transport-backed OpenAI client, exercising the real LangChain serialization.
+        # Привязываем клиент OpenAI с транспортом, задействуя реальную сериализацию LangChain.
         from openai import AsyncOpenAI
         model.async_client = AsyncOpenAI(api_key="test-key", base_url=model.openai_api_base,
             default_headers={"Authorization": "Api-Key test-key", "OpenAI-Project": "folder"},

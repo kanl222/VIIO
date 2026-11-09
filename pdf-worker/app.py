@@ -56,7 +56,7 @@ def convert_child(data, output):
                     "pages": len(reader.pages), "document": result.document.export_to_dict()})
     except Exception as exc:
         print("PDF conversion failed:", type(exc).__name__, flush=True)
-        # Document contents, filenames and upstream exceptions are not returned.
+        # Содержимое документов, имена файлов и исключения вышестоящих сервисов не возвращаются.
         output.put({"status": 422})
 
 

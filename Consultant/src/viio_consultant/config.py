@@ -7,11 +7,12 @@ class ConsultantSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='CONSULTANT_', extra='ignore', hide_input_in_errors=True)
     enabled: bool = False
     rag_backend: Literal['local', 'yandex'] = 'local'
+    search_first: bool = False
     yandex_enabled: bool = False
     yandex_api_key: str | None = Field(default=None, repr=False)
     yandex_folder_id: str | None = None
     yandex_model: str = 'aliceai-llm'
-    # SHA-256 of title + newline + content, approved by an operator for cloud use.
+    # SHA-256 от заголовка + перевод строки + контент, утвержденный оператором для облачного использования.
     cloud_public_material_hashes: list[str] = Field(default_factory=list)
     api_key: str | None = None
     source_key: str | None = None

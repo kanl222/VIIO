@@ -1,4 +1,4 @@
-// Isolated visual QA: all API responses are fixtures. Never mounted by the app server.
+// Изолированное визуальное QA: все ответы API являются фикстурами. Никогда не монтируется сервером приложения.
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 const app = express();

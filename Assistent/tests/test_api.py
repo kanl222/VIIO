@@ -172,5 +172,5 @@ def test_create_document_uses_run_sync(monkeypatch) -> None:
         "/api/v1/documents", json={"title": "Тест", "content": "Контент"}
     )
     assert response.status_code == 201
-    # Sync dependencies (including token verification) also run in the thread pool.
+    # Синхронные зависимости (включая проверку токена) также выполняются в пуле потоков.
     assert run_sync_called.count(doc_svc.index_document) == 1

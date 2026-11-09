@@ -28,7 +28,7 @@ async def main():
         user=s.postgres_user,password=s.postgres_password)
     async with httpx.AsyncClient(timeout=170,headers={'X-Internal-Token':s.internal_api_key}) as client:
         try:
-            # The queue is shared with the worker, not held in the agent process.
+            # Очередь разделяется с воркером и не хранится в процессе агента.
             files=[('files',(f'probe-{i}.txt',(f'Проверка отдельного сервиса документов {owner} {i}.\n'*65).encode(),'text/plain')) for i in range(4)]
             response=await client.post(docs+'/api/v1/documents/bulk-upload',params={'owner_id':owner,
                 'allowed_roles':'employee','allowed_departments':''},files=files)
@@ -93,7 +93,7 @@ async def main():
                     states=(await client.get(docs+'/api/v1/documents/bulk-status',params={'task_ids':','.join(tasks)})).json()['tasks']
                     if not any(row['status']=='processing' for row in states):break
                     await asyncio.sleep(.5)
-            # Discover any fixture jobs even if indexing failed before returning IDs.
+            # Обнаруживаем любые задачи фикстур, даже если индексация завершилась ошибкой до возврата ID.
             async with await psycopg.AsyncConnection.connect(dsn,row_factory=dict_row) as conn:
                 jobs=await(await conn.execute('SELECT * FROM document_upload_jobs WHERE id=ANY(%s)',(tasks,))).fetchall()
                 own=await(await conn.execute('SELECT * FROM documents WHERE owner_id=%s',(owner,))).fetchall()

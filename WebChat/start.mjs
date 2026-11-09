@@ -7,7 +7,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT m
 const sessionKey = await loadSessionKey(process.env.CHAT_SESSION_KEY_FILE || fileURLToPath(new URL('../../data/chat-session.key', import.meta.url)));
 const server = createChatServer({ sessionKey });
 server.on('error', error => {
-  // Never log URLs, headers, keys, request bodies or provider error payloads.
+  // Никогда не логировать URL, заголовки, ключи, тела запросов или данные ошибок провайдеров.
   console.error(JSON.stringify({ event: 'chat_server_error', code: error.code || 'SERVER_ERROR' }));
   process.exitCode = 1;
 });

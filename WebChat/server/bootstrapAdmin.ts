@@ -23,7 +23,7 @@ export async function bootstrapAdmin(pool: pg.Pool, config: BootstrapAdminConfig
   try {
     await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '10s'");
-    // Same transaction lock as the administrative role editor.
+    // Та же блокировка транзакции, что и в редакторе административных ролей.
     await client.query('SELECT pg_advisory_xact_lock(864210)');
     const admins = await client.query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
     if (admins.rows.length) {

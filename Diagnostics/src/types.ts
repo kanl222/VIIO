@@ -18,11 +18,16 @@ export interface TraceEvent {
   tools?: string[]; name?: string; error?: string; reply?: string;
   sources?: { title: string; document_id?: string; publication_id?: string }[];
   detail?: string; call_id?: string;
+  usage?: {
+    input_tokens?: number; prompt_tokens?: number;
+    output_tokens?: number; completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
 export interface TraceSummary {
   id: string; agent: string; question: string; thread_id?: string; started_at: string;
   duration_ms: number; status: string; error?: string; searches: number;
-  model_calls: number; event_count: number; review: Partial<Review>;
+  model_calls: number; event_count: number; total_tokens?: number | null; review: Partial<Review>;
 }
 export interface Trace extends TraceSummary { events: TraceEvent[]; configuration?: Record<string, string> }
 export const stageNames: Record<string, string> = {

@@ -55,7 +55,7 @@ async def test_arithmetic_does_not_use_model_or_knowledge():
 async def test_rewrite_does_not_receive_knowledge_or_citation_instructions():
     store = MagicMock()
     model = CapturingModel(messages=iter([AIMessage(content="Пожалуйста, пришлите отчёт сегодня.")]))
-    # This model deliberately has no bind_tools: text transformations need none.
+    # У этой модели намеренно нет bind_tools: текстовые преобразования в них не нуждаются.
     service = AgentService(build_agent_graph(model, [], MemorySaver()))
     await service.chat("Перепиши вежливо одним предложением: пришли отчёт сегодня, ты опять задерживаешь.", "rewrite", PROGRAMMER)
     assert [message.content for message in model.seen[-1] if isinstance(message, SystemMessage)] == [REWRITE_SYSTEM_PROMPT]
@@ -176,3 +176,15 @@ def test_api_sources_are_structured_and_reply_remains_compatible():
     result = TestClient(app).post("/api/v1/chat", headers={"X-Internal-Token": "release-test"}, json={"message": "Вопрос"})
     assert result.status_code == 200
     assert result.json() == {"reply": "Ответ", "thread_id": "thread", "sources": [{"title": "Инструкция", "document_id": "doc-source"}]}
+
+
+def test_turn_provenance_extracts_github_sources():
+    from assistent.services.answer_sources import turn_provenance
+    from langchain_core.messages import HumanMessage, ToolMessage
+    messages = [
+        HumanMessage(content="Покажи код сервиса"),
+        ToolMessage(content="Файл viio/service/src/main.py (GitHub REST):\nprint('hello')", tool_call_id="call1", name="github_repository"),
+    ]
+    sources, active = turn_provenance(messages)
+    assert sources == [{"title": "viio/service/src/main.py", "document_id": "github:viio/service/src/main.py"}]
+

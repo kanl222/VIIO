@@ -19,7 +19,7 @@ const Summary = memo(function Summary({ items }: { items: TraceSummary[] }) {
 const TraceRow = memo(function TraceRow({ item, selected, onChoose }: { item: TraceSummary; selected: boolean; onChoose: (id: string) => void }) {
   return <button className="trace-row" aria-pressed={selected} onClick={() => onChoose(item.id)}>
         <span className="row-meta"><span>{agentName(item.agent)}</span><time dateTime={item.started_at}>{dateTime(item.started_at)}</time></span><strong>{item.question}</strong>
-        <span className="row-state"><span>{seconds(item.duration_ms)}{!['ocr', 'search'].includes(item.agent) ? ` · поиск ${item.searches} · модель ${item.model_calls}` : ''}</span>{item.status === 'error' ? <CircleAlert size={14} className="bad" aria-label="Ошибка выполнения" /> : <CircleCheck size={14} className="muted" aria-label="Выполнен" />}</span>
+        <span className="row-state"><span>{seconds(item.duration_ms)}{!['ocr', 'search'].includes(item.agent) ? ` · поиск ${item.searches} · модель ${item.model_calls}${item.total_tokens ? ` · ${item.total_tokens.toLocaleString('ru-RU')} токенов` : ''}` : ''}</span>{item.status === 'error' ? <CircleAlert size={14} className="bad" aria-label="Ошибка выполнения" /> : <CircleCheck size={14} className="muted" aria-label="Выполнен" />}</span>
         {!['ocr', 'search'].includes(item.agent) ? <span className={`review-state ${item.review.stage === 'correct' ? 'good' : ''}`}>{item.review.stage ? stageNames[item.review.stage] : 'Без оценки'}{item.review.score ? ` · ${item.review.score}/5` : ''}</span> : null}
       </button>;
 });

@@ -63,6 +63,31 @@ def test_context_is_in_current_question_without_mutating_checkpoint_messages():
     assert question.content == 'Что такое ИСЛО?'
 
 
+def test_old_model_search_is_removed_preserving_other_tools_and_current_search():
+    messages = [
+        HumanMessage(content='Старый вопрос'),
+        AIMessage(content='Проверю', tool_calls=[
+            {'name': 'search_knowledge_base', 'args': {}, 'id': 'call-old'},
+            {'name': 'other_tool', 'args': {}, 'id': 'call-other'},
+        ]),
+        ToolMessage(content='Старый поиск', tool_call_id='call-old'),
+        ToolMessage(content='Другой результат', tool_call_id='call-other'),
+        AIMessage(content='Предыдущий ответ'),
+        HumanMessage(content='Новый вопрос'),
+        AIMessage(content='', tool_calls=[
+            {'name': 'search_knowledge_base', 'args': {}, 'id': 'call-new'},
+        ]),
+        ToolMessage(content='Новый поиск', tool_call_id='call-new'),
+    ]
+    prepared = messages_with_retrieved_context(messages)
+    assert 'Старый поиск' not in str(prepared)
+    assert prepared[1].content == 'Проверю'
+    assert [call['id'] for call in prepared[1].tool_calls] == ['call-other']
+    assert prepared[2:4] == messages[3:5]
+    assert prepared[-2:] == messages[-2:]
+    assert len(messages[1].tool_calls) == 2
+
+
 def test_old_automatic_context_is_removed_but_model_tool_protocol_is_preserved():
     messages = [
         HumanMessage(content='Старый вопрос'),

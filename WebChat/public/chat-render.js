@@ -1,5 +1,5 @@
 import { colorizeCode } from './highlighter.js';
-// Model/source text stays text. Syntax spans come only from the local highlighter.
+// Текст модели/источника остается текстом. Элементы подсветки синтаксиса формируются только локальным подсветчиком.
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
 export function sourceName(row) {
   if (row.filename) return row.filename;

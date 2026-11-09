@@ -1,8 +1,10 @@
 """Independent consultant agent with a bounded, permission-scoped search tool."""
 import asyncio
+from bisect import bisect_left
 import logging
+from math import sqrt
 from html import escape, unescape
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 import operator
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
@@ -31,31 +33,62 @@ class SearchQuestion(BaseModel):
     query: StrictStr = Field(min_length=1, max_length=4000)
 
 
-def clean_reply(content, documents):
+def strip_thinking(text: str) -> str:
+    cleaned = re.sub(r"(?is)<(?:think|thought|reasoning)>.*?</(?:think|thought|reasoning)>\s*", "", text)
+    cleaned = re.sub(r"(?is)<(?:think|thought|reasoning)>.*$", "", cleaned)
+    return cleaned.strip()
+
+
+def clean_reply(content: Any, documents: list[dict[str, Any]]) -> str:
     if isinstance(content, list):
         content = '\n'.join(part.get('text', '') if isinstance(part, dict) else str(part) for part in content)
+    content = strip_thinking(str(content))
     allowed = {doc['title'] for doc in documents}
-    def title(match):
+    def title(match: re.Match[str]) -> str:
         value = unescape(match.group(2))
         return value if value in allowed else ''
-    reply = re.sub(r'<material\s+title=(["\'])(.*?)\1[^>]*>', title, str(content), flags=re.I | re.S)
+    reply = re.sub(r'<material\s+title=(["\'])(.*?)\1[^>]*>', title, content, flags=re.I | re.S)
     return re.sub(r'</?material\b[^>]*>', '', reply, flags=re.I).strip()
 
-def excerpt(content, query, limit=3000):
-    terms = re.findall(r"[\w]{3,}", query.lower())
-    positions = [content.lower().find(term) for term in terms]
-    start = max(0, min((pos for pos in positions if pos >= 0), default=0) - 300)
+def excerpt(content: str, query: str, limit: int = 3000) -> tuple[str, int]:
+    if len(content) <= limit:
+        return content, 1
+    stop = {'что', 'как', 'это', 'для', 'или', 'где', 'какой', 'означает', 'такое', 'the', 'and', 'what'}
+    terms = list(dict.fromkeys(term for term in re.findall(r"\w{3,}", query.lower()) if term not in stop))[:20]
+    if not terms:
+        return content[:limit], 1
+    pattern = r"\b(?:" + "|".join(map(re.escape, terms)) + r")\b"
+    positions = {term: [] for term in terms}
+    for match in re.finditer(pattern, content, re.IGNORECASE):
+        positions.get(match.group().lower(), []).append(match.start())
+    matches = [(found, 1 / sqrt(len(found))) for found in positions.values() if found]
+    starts = {0}
+    for found, _ in matches:
+        stride = max(1, len(found) // 100)
+        starts.update(min(len(content) - limit, max(0, pos - min(300, limit // 4)))
+                      for pos in found[::stride][:100])
+
+    def score(start: int) -> float:
+        end = start + limit
+        padding = min(100, limit // 8)
+        # Сохраняем контекст с обеих сторон совпадения, если документ продолжается.
+        left = start + padding if start else start
+        right = end - padding if end < len(content) else end
+        return sum(weight for found, weight in matches
+                   if bisect_left(found, left) < bisect_left(found, right))
+
+    start = max(sorted(starts), key=score)
     return content[start:start + limit], content[:start].count("\n") + 1
 
 
 class PublicConsultant:
-    def __init__(self, data, llm, *, search_first=False):
+    def __init__(self, data: Any, llm: Any, *, search_first: bool = False) -> None:
         self.data, self.llm = data, llm
         self.search_first = search_first
         self.capacity = asyncio.Semaphore(2)
-        # Binding advertises only this capability. Execution and permissions are
-        # checked separately on every call; model-provided tool names are untrusted.
-        async def search(query: str):
+        # Привязка объявляет только эту возможность. Выполнение и права
+        # проверяются отдельно при каждом вызове; имена инструментов от модели считаются недоверенными.
+        async def search(query: str) -> list[dict[str, Any]]:
             return await self.data.public_search(query)
         self.search_tool = StructuredTool.from_function(coroutine=search,
             name='search_published_documents', args_schema=SearchQuestion,
@@ -76,11 +109,12 @@ class PublicConsultant:
             ['model', 'validate_publications', 'no_information', END])
         builder.add_edge('validate_publications', END)
         builder.add_edge('no_information', END)
-        # Each API request owns its state; no conversation or publication cache.
+        # Каждый запрос к API владеет своим состоянием; кэш диалога или публикаций отсутствует.
         self.graph = builder.compile()
 
-    async def _call_model(self, state: ConsultantState):
-        response = await model_call(self.model, state['messages'])
+    async def _call_model(self, state: ConsultantState) -> dict[str, Any]:
+        model = self.llm if self.search_first and state['documents'] and state['model_turns'] == 0 else self.model
+        response = await model_call(model, state['messages'])
         return {'messages': [response], 'model_turns': state['model_turns'] + 1}
 
     def _after_model(self, state: ConsultantState) -> Literal['tools', 'grounding', 'no_information']:
@@ -92,7 +126,7 @@ class PublicConsultant:
     def _after_tools(self, state: ConsultantState) -> Literal['model', 'no_information']:
         return 'model' if state['model_turns'] < 4 else 'no_information'
 
-    def _check_grounding(self, state: ConsultantState):
+    def _check_grounding(self, state: ConsultantState) -> dict[str, Any]:
         if not state['documents']:
             if re.fullmatch(r'\s*(привет|здравствуйте|добрый день|hello|hi|спасибо)[!.,\s]*', state['question'], re.I):
                 return {'result': {'reply': 'Здравствуйте! Я консультант организации. Помогу разобраться в опубликованных инструкциях. Что вас интересует?', 'sources': []}}
@@ -109,20 +143,73 @@ class PublicConsultant:
             return 'model'
         return 'no_information'
 
-    async def _validate_publications(self, state: ConsultantState):
+    async def _validate_publications(self, state: ConsultantState) -> dict[str, Any]:
         identifiers = list(state['documents'])
         if await self.data.public_ids(identifiers) != set(identifiers):
             record('guard', name='publication_revision', status='blocked')
             return {'result': {'reply': 'Материалы обновились. Повторите вопрос.', 'sources': []}}
         record('guard', name='publication_revision', status='ok')
         docs = list(state['documents'].values())
-        return {'result': {'reply': clean_reply(state['messages'][-1].content, docs), 'sources': [
-            {'publication_id': doc['id'], 'title': doc['title']} for doc in docs]}}
+        reply = clean_reply(state['messages'][-1].content, docs)
 
-    def _no_information(self, state: ConsultantState):
+        footer_pattern = r'(?im)^\s*(?:источник[и]?|документ[ы]?|использованн(?:ые|ая)\s+материал[ы]?)\s*[:—-]*(.+)'
+        footer = re.search(footer_pattern, reply, re.S)
+        if footer:
+            answer = reply[:footer.start()].strip()
+            footer_text = footer.group(1).strip()
+        else:
+            answer = reply.strip()
+            footer_text = reply
+
+        if not answer or re.search(r'\b(?:не наш[её]л|не удалось найти|недостаточно (?:данных|сведений)|'
+                                  r'нет (?:сведений|информации))\b', answer, re.I):
+            return self._no_information(state)
+
+        def norm(s: str) -> str:
+            return re.sub(r'^\s*(?:\d+[.)]|\*|-|•)\s*', '', s.strip(' \t.•*-«»"\'`')).casefold().replace('ё', 'е')
+
+        raw_parts = re.split(r'[;\n]', footer_text)
+        candidate_titles = {norm(p) for p in raw_parts if norm(p)}
+        norm_footer = footer_text.casefold().replace('ё', 'е')
+        norm_answer = answer.casefold().replace('ё', 'е')
+
+        sources = []
+        for doc in docs:
+            title = doc['title']
+            doc_id = str(doc.get('id', ''))
+            norm_doc_title = norm(title)
+
+            # 1. Точное совпадение очищенной строки из блока источников
+            if norm_doc_title in candidate_titles:
+                sources.append({'publication_id': doc['id'], 'title': title})
+                continue
+
+            # 2. Совпадение ID документа в блоке источников
+            if doc_id and doc_id in footer_text:
+                sources.append({'publication_id': doc['id'], 'title': title})
+                continue
+
+            # 3. Полное вхождение названия в блок источников или ответ (для названий длиннее 1 слова)
+            if len(norm_doc_title.split()) >= 2 and (norm_doc_title in norm_footer or norm_doc_title in norm_answer):
+                sources.append({'publication_id': doc['id'], 'title': title})
+                continue
+
+            # 4. Высокая доля совпадения значимых слов (>=70% для названий >=3 слов) в блоке источников
+            content_words = [w for w in re.findall(r'\w{4,}', norm_doc_title)
+                             if w not in {'инструкция', 'руководство', 'программа', 'паспорт'}]
+            if len(content_words) >= 3:
+                matched = sum(1 for w in content_words if w in norm_footer)
+                if matched / len(content_words) >= 0.7:
+                    sources.append({'publication_id': doc['id'], 'title': title})
+
+        if not sources:
+            return self._no_information(state)
+        return {'result': {'reply': answer, 'sources': sources}}
+
+    def _no_information(self, state: ConsultantState) -> dict[str, Any]:
         return {'result': {'reply': NO_INFORMATION, 'sources': []}}
 
-    async def _search(self, state: ConsultantState):
+    async def _search(self, state: ConsultantState) -> dict[str, Any]:
         calls = state['messages'][-1].tool_calls
         documents, calls_used = dict(state['documents']), state['calls_used']
         messages = []
@@ -138,26 +225,30 @@ class PublicConsultant:
                     except ValueError:
                         content = 'Укажи непустой query без дополнительных параметров.'
                     else:
-                        # Two results per search, at most four snapshots
-                        # per turn; the model may refine its query once.
+                        # Два результата на поиск, не более четырех снапшотов
+                        # на ход; модель может уточнить запрос один раз.
                         start = time.monotonic()
                         candidates = await self.search_tool.ainvoke({'query': query})
                         docs = candidates[:2]
                         for doc in docs:
                             documents[doc['id']] = doc
+                        selected = []
+                        for doc in docs:
+                            text, line_start = excerpt(doc['content'], query)
+                            selected.append({'document_id': doc['id'], 'title': doc['title'],
+                                             'text': text, 'line_start': line_start})
                         content = '\n\n'.join('<material title="' + escape(doc['title'], quote=True) + '">\n'
-                            + excerpt(doc['content'], query, 3000)[0].replace('</material>', '&lt;/material&gt;')
-                            + '\n</material>' for doc in docs) or NO_INFORMATION
+                            + doc['text'].replace('</material>', '&lt;/material&gt;')
+                            + '\n</material>' for doc in selected) or NO_INFORMATION
                         record('retrieval', query=query, duration_ms=round((time.monotonic()-start)*1000),
                             candidates=[{'document_id': d['id'], 'title': d['title'], 'text': d['content']} for d in candidates],
-                            selected=[{'document_id': d['id'], 'title': d['title'], 'text': excerpt(d['content'], query, 3000)[0],
-                                       'line_start': excerpt(d['content'], query, 3000)[1]} for d in docs],
+                            selected=selected,
                             context=content, ranking='first 2 gateway results, excerpts up to 3000 characters', k=2)
                         logger.info('Consultant model selected search_published_documents; materials=%d', len(docs))
             messages.append(ToolMessage(content=content, tool_call_id=call['id']))
         return {'documents': documents, 'calls_used': calls_used, 'messages': messages}
 
-    async def chat(self, message):
+    async def chat(self, message: str) -> dict[str, Any]:
         async with asyncio.timeout(60):
             async with self.capacity:
                 initial = {
@@ -166,8 +257,8 @@ class PublicConsultant:
                     'documents': {}, 'calls_used': 0, 'model_turns': 0,
                 }
                 if self.search_first:
-                    # Some cloud models emit textual tool names instead of function calls.
-                    # Retrieve locally first, retaining the same bounded publication gateway.
+                    # Некоторые облачные модели возвращают текстовые имена инструментов вместо вызовов функций.
+                    # Сначала извлекаем локально, сохраняя тот же ограниченный шлюз публикаций.
                     from langchain_core.messages import AIMessage
                     search_state = {**initial, 'messages': [AIMessage(content='', tool_calls=[
                         {'name': self.search_tool.name, 'args': {'query': message},

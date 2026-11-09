@@ -58,8 +58,8 @@ class PdfExtractionService:
             pages = len(reader.pages)
             if not pages or pages > self.settings.pdf_max_pages:
                 raise PdfExtractionError(413, f"PDF должен содержать от 1 до {self.settings.pdf_max_pages} страниц.")
-            # Text presence says nothing about columns, tables or reading order.
-            # auto uses the layout parser; pypdf is an explicit legacy opt-in.
+            # Наличие текста ничего не говорит о колонках, таблицах или порядке чтения.
+            # auto использует парсер макета; pypdf — явное устаревшее включение.
             if self.settings.pdf_engine != "pypdf":
                 return "", pages, True
             texts = []

@@ -37,7 +37,7 @@ export function useChat(
       setError(null);
       return;
     }
-    // A newly selected conversation may already have its first message in flight.
+    // В только что выбранном диалоге первое сообщение уже может быть в процессе отправки.
     if (pendingSend.current?.id === conversationId) {
       setHistory(pendingSend.current);
       setLoading(false);
@@ -73,7 +73,7 @@ export function useChat(
         return;
       }
       ++loadVersion.current;
-      // Creation and the first send happen before React commits the new selection.
+      // Создание и первая отправка происходят до того, как React зафиксирует новый выбор.
       if (!conversationId) activeId.current = targetId;
       const isCurrent = () => activeId.current === targetId;
 

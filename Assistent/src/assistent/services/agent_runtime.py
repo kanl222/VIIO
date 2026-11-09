@@ -62,12 +62,17 @@ class VIIOPolicy(AgentMiddleware):
         tools = [item for item in request.tools
                  if (roles := (getattr(item, 'metadata', None) or {}).get('allowed_roles')) is None
                  or has_role_access(user_context, roles)]
+        if any(call.get('name') == 'list_documents' for call in calls):
+            tools = [item for item in tools if getattr(item, 'name', '') != 'list_documents']
         override = dict(messages=messages[1:], system_message=messages[0], tools=tools)
         if self.routing and mode != 'knowledge':
             override['tools'] = []
+            tools = []
         call_id = uuid.uuid4().hex
         started = time.monotonic()
         record('context', call_id=call_id,
+               tools=[getattr(t, 'name', str(t)) for t in tools],
+               provider=(getattr(request.model, 'metadata', None) or {}).get('viio_provider', 'unknown'),
                model=str(getattr(request.model, 'model_name', None) or
                          getattr(request.model, 'model', None) or 'configured'),
                prompt_sha256=hashlib.sha256(str(messages[0].content).encode()).hexdigest(),
@@ -80,9 +85,12 @@ class VIIOPolicy(AgentMiddleware):
                    duration_ms=round((time.monotonic() - started) * 1000))
             raise
         answer = response.result[-1]
+        usage = getattr(answer, 'usage_metadata', None) or (getattr(answer, 'response_metadata', None) or {}).get('token_usage')
         record('generation', call_id=call_id, status='ok', content=answer.content,
+               model=answer.response_metadata.get('model_name') or answer.response_metadata.get('model'),
                duration_ms=round((time.monotonic() - started) * 1000),
-               tool_calls=getattr(answer, 'tool_calls', []))
+               tool_calls=getattr(answer, 'tool_calls', []),
+               usage=usage)
 
         if (self.model_first and self.routing and isinstance(answer, AIMessage)
                 and not answer.tool_calls):
@@ -111,7 +119,8 @@ class VIIOPolicy(AgentMiddleware):
 
 
 def build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
-                  summary_after, history_max_chars, model_first_tools, task_routing, max_tool_calls=MAX_TOOL_CALLS):
+                  summary_after, history_max_chars, model_first_tools, task_routing, max_tool_calls=MAX_TOOL_CALLS,
+                  **extra_kwargs):
     prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
     routing = (system_prompt is None or system_prompt.startswith(DEFAULT_SYSTEM_PROMPT)
                if task_routing is None else task_routing)
@@ -127,6 +136,9 @@ def build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
             on_failure=lambda _: 'Инструмент временно недоступен. Повторите запрос позже.'),
         ToolCallLimitMiddleware(run_limit=max_tool_calls, exit_behavior='end'),
     ]
+    if 'list_documents' in names:
+        middleware.insert(1, ToolCallLimitMiddleware(
+            tool_name='list_documents', run_limit=1, exit_behavior='continue'))
     # The outer checkpoint retains the full audit history; the ready-made loop is ephemeral.
     agent = create_agent(llm, active_tools, middleware=middleware,
                          context_schema=AgentRuntimeContext, checkpointer=False)

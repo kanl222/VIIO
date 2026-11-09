@@ -37,7 +37,7 @@ async def test_summary_excludes_tools_and_is_not_rebuilt_every_turn():
     prepared, update = await compact_dialogue(messages, state, boundary, llm, 24)
     assert update['summary_upto'] > 0 and 'Summary of user goals' in prepared[0].content
     assert 'PRIVATE_TOOL_PAYLOAD' not in str(llm.ainvoke.call_args)
-    assert len(messages) == 31  # Full audit/checkpoint was not modified.
+    assert len(messages) == 31  # Полный аудит/чекпоинт не был изменен.
     llm.reset_mock()
     await compact_dialogue(messages + [HumanMessage(content='Next')], {**state, **update}, boundary, llm, 24)
     llm.ainvoke.assert_not_called()
@@ -84,7 +84,7 @@ async def test_langmem_extends_existing_checkpoint_summary():
     assert 'Goal 0' not in str(llm.ainvoke.call_args)
     assert update['dialogue_summary'] == 'Extended summary'
     assert 'Extended summary' in prepared[0].content
-    assert all(message.id is None for message in messages)  # Copies, not checkpoint mutation.
+    assert all(message.id is None for message in messages)  # Копии, а не мутация чекпоинта.
 
 
 @pytest.mark.asyncio

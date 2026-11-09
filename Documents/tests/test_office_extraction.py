@@ -20,7 +20,7 @@ async def test_real_office_structure_and_normalized_meaning(suffix):
     assert text.index('Контрольная')<text.index('Поле | Значение')<text.index('После таблицы.')
     assert '\u00ad' not in text and '\u200b' not in text and '\t' not in text
     assert '\n\n\n' not in text
-    assert result['pages'] is None  # Page count cannot be inferred without layout rendering.
+    assert result['pages'] is None  # Количество страниц нельзя определить без отрисовки макета.
 
 
 def test_normalizer_removes_noise_without_removing_meaning_or_code_indentation():

@@ -13,6 +13,7 @@ from assistent.router import create_api_router
 from assistent.services.documents_client import create_remote_search_tool
 from assistent.services.agent_service import AgentService
 from assistent.services.personal_memory import PersonalFacts,MemoryAgent
+from assistent.services.project_memory import ProjectMemory
 from assistent.services.graph_builder import build_agent_graph
 from assistent.prompts import UNIFIED_SYSTEM_PROMPT
 from assistent.tools.github_tool import create_github_tool
@@ -53,8 +54,8 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
     if agent_service is None:
         llm = create_chat_model(app_settings)
 
-        from assistent.services.documents_client import create_remote_search_tool
-        search_tool = create_remote_search_tool(app_settings, 5)
+        from assistent.services.documents_client import create_remote_search_tool, create_document_list_tool
+        search_tool = create_remote_search_tool(app_settings, 5, tool_name='search_knowledge_base')
         # Изначально используем переданный чекпоинтер или MemorySaver.
         # Если база PostgreSQL доступна, AsyncPostgresSaver подключится в lifespan.
         initial_checkpointer = checkpointer or MemorySaver()
@@ -63,7 +64,9 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
         if app_settings.documents_admin_key:
             active_tools.append(create_knowledge_write_tool(app_settings))
         if app_settings.github_mcp_enabled:
-            active_tools.append(create_github_tool(app_settings))
+            tool = create_github_tool(app_settings)
+            if tool is not None:
+                active_tools.append(tool)
         if app_settings.pgsql_enabled:
             active_tools.append(create_postgres_readonly_tool(app_settings))
 
@@ -76,12 +79,13 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
             max_tool_calls=app_settings.agent_max_tool_calls,
             context_max_chars=app_settings.rag_context_max_chars,
             model_first_tools=True,
+            document_search_first=True,
             summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
             history_max_chars=app_settings.conversation_history_max_chars,
         )
         agent_service = AgentService(graph=graph)
         if catalog_service:
-            agent_service = MemoryAgent(agent_service, PersonalFacts(catalog_service))
+            agent_service = MemoryAgent(agent_service, PersonalFacts(catalog_service), ProjectMemory(app_settings))
 
     app=FastAPI(title='Assistent',lifespan=lifespan)
     app.state.settings=app_settings

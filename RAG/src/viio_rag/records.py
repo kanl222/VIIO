@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +26,7 @@ class DocumentRecord:
     is_active: bool = True
     document_kind: str = 'document'
     original_filename: str | None = None
+    catalog_metadata: dict = field(default_factory=dict)
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "DocumentRecord":
@@ -50,4 +51,5 @@ class DocumentRecord:
             is_active=row.get('is_active', True),
             document_kind=row.get('document_kind', 'document'),
             original_filename=row.get('original_filename'),
+            catalog_metadata=row.get('catalog_metadata') or {},
         )

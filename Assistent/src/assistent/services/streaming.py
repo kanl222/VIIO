@@ -19,7 +19,8 @@ async def invoke_streaming(graph, inputs, config, context, sink):
 
     async for event in graph.astream_events(inputs, config=config, context=context, version='v2'):
         kind, data = event['event'], event.get('data', {})
-        is_model = event.get('metadata', {}).get('langgraph_node') == 'model'
+        is_model = (event.get('metadata', {}).get('langgraph_node') == 'model'
+                    and 'viio-request-classifier' not in event.get('tags', []))
         if kind == 'on_chat_model_start' and is_model:
             await flush()
             await sink({'type': 'reset'})
@@ -33,6 +34,8 @@ async def invoke_streaming(graph, inputs, config, context, sink):
             await flush()
             labels = {'manage_plan': 'Обновляем план', 'save_knowledge': 'Сохраняем в базу знаний',
                       'github_repository': 'Читаем GitHub', 'search_knowledge_base': 'Ищем в базе знаний',
+                      'list_documents': 'Получаем каталог документов',
+                      'search_document_content': 'Ищем в содержимом документов',
                       'postgresql_readonly': 'Читаем базу данных'}
             await sink({'type': 'status', 'message': labels.get(event.get('name'), 'Выполняем шаг задачи')})
         elif kind == 'on_tool_end' and event.get('name') == 'manage_plan':

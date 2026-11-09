@@ -169,7 +169,7 @@ def document_chunks(content, size=500, overlap=50, unit='characters', strip_toc=
     for headings, body in sections(content, strip_toc=strip_toc):
         path = [title for _, title in headings]
         prefix = '\n'.join('#' * level + ' ' + title for level, title in headings)
-        # Unusually long heading paths remain complete in metadata.
+        # Необычно длинные пути заголовков сохраняются полностью в метаданных.
         if measure(prefix) > size // 2:
             prefix = (' '.join(prefix.split()[:size // 2]) if unit == 'words' else prefix[:size // 2])
         budget = max(1, size - measure(prefix) - (2 if prefix else 0))
@@ -178,7 +178,7 @@ def document_chunks(content, size=500, overlap=50, unit='characters', strip_toc=
             if prefix:
                 yield prefix, metadata
             continue
-        # Separate tables from prose even if the exporter omitted a blank line.
+        # Отделяем таблицы от прозы, даже если экспортер пропустил пустую строку.
         for is_table, block in table_blocks(body):
             safe_overlap = min(overlap, budget - 1)
             rows = block.splitlines()

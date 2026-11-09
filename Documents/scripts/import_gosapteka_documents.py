@@ -70,7 +70,7 @@ async def main():
                 text=(ROOT/row['text_path']).read_text(encoding='utf-8')
                 if hashlib.sha256(text.encode()).hexdigest()!=row['text_sha256']:
                     raise ValueError('Reviewed text hash mismatch')
-                # Verify the reviewed source first; clean before splitting and publishing.
+                # Сначала проверяем проверенный исходник; очищаем перед разбиением и публикацией.
                 if path.suffix.lower() in {'.pdf', '.docx'} and row['engine'] != 'docling-cpu':
                     text=normalize_document_text(text)
                 metadata={'source_url':row['url'],'source_page':prepared['source_page'],'import_batch':OWNER,

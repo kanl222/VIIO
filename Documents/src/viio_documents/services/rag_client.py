@@ -10,8 +10,8 @@ async def forward_rag(request, settings):
     publication = request.url.path.startswith('/api/v1/consultant-materials/')
     (authorize_publication if publication else authorize)(request, settings)
     name = 'X-Publication-Key' if publication else 'X-Internal-Token'
-    # An already-authorized admin call becomes a read-only RAG call. The RAG
-    # process never receives the document-management key.
+    # Уже авторизованный админский вызов становится вызовом RAG только для чтения. Процесс RAG
+    # никогда не получает ключ управления документами.
     token = request.headers.get(name, '') if publication else (settings.documents_read_key or request.headers.get(name, ''))
     headers = {name: token, 'Content-Type': 'application/json'}
     body = bytearray()

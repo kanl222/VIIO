@@ -33,7 +33,7 @@ def main():
     matched, unmatched = [], []
     for row in rows:
         body = normalized(row['content'])
-        # Require complete publication text and title in one approved file.
+        # Требуется полный текст публикации и заголовок в одном подтвержденном файле.
         matches = [name for name, text in canonical if body and body in text and normalized(row['title']) in text]
         if matches:
             matched.append({'publication_id': row['id'], 'document_id': row['document_id'],

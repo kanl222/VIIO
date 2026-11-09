@@ -45,13 +45,13 @@ class CollectorTests(unittest.TestCase):
             file.write_text('x')
             with patch.dict('os.environ', {'VIIO_TRACE_DIR': str(file)}):
                 with collector.capture('main', 'question'):
-                    pass  # A full/unwritable trace volume must not break chat.
+                    pass  # Переполненный или недоступный для записи том трассировки не должен ломать чат.
 
     def test_model_capture_is_visible_input_output_only_and_keeps_behavior(self):
         class Model:
             model_name = 'test-model'
             async def ainvoke(self, messages):
-                return SimpleNamespace(content='answer', tool_calls=[], response_metadata={'reasoning': 'HIDDEN'})
+                return SimpleNamespace(content='answer', tool_calls=[], usage_metadata={'input_tokens': 10, 'output_tokens': 5, 'total_tokens': 15}, response_metadata={'reasoning': 'HIDDEN'})
 
         with tempfile.TemporaryDirectory() as directory, patch.dict('os.environ', {'VIIO_TRACE_DIR': directory}):
             with collector.capture('main', 'question'):
@@ -60,6 +60,7 @@ class CollectorTests(unittest.TestCase):
             trace = json.loads(next(Path(directory).glob('*.json')).read_text(encoding='utf-8'))
             self.assertEqual([event['stage'] for event in trace['events']], ['context', 'generation'])
             self.assertEqual(trace['events'][0]['model'], 'test-model')
+            self.assertEqual(trace['events'][1]['usage'], {'input_tokens': 10, 'output_tokens': 5, 'total_tokens': 15})
             self.assertNotIn('HIDDEN', json.dumps(trace))
 
     def test_disabled_diagnostics_writes_nothing(self):
