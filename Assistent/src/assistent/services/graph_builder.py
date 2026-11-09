@@ -34,6 +34,7 @@ def build_agent_graph(
     max_tool_calls: int = 3,
     supervisor: bool = False,
     corrective_rag: bool = False,
+    database_analyst: bool = True,
     **extra_kwargs: Any,
 ) -> CompiledStateGraph:
     """Сборка и компиляция StateGraph агента с поддержкой инструментов и сохранением состояния.
@@ -67,6 +68,7 @@ def build_agent_graph(
             model_first_tools=model_first_tools,
             max_tool_calls=max_tool_calls,
             corrective_rag=corrective_rag,
+            database_analyst=database_analyst,
             **extra_kwargs,
         )
 

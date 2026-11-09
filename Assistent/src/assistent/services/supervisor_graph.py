@@ -92,6 +92,7 @@ def build_supervisor_graph(
     model_first_tools: bool = True,
     max_tool_calls: int = 6,
     corrective_rag: bool = False,
+    database_analyst: bool = True,
     **extra_kwargs: Any,
 ) -> CompiledStateGraph:
     """Constructs a Supervisor StateGraph that orchestrates specialized sub-runtimes."""
@@ -144,20 +145,29 @@ def build_supervisor_graph(
         max_tool_calls=max_tool_calls,
     )
 
-    # 3. Database Specialist (postgresql_readonly)
+    # 3. Database Specialist (Interactive Text-to-SQL Analyst or Runtime)
     database_tools = [t for t in active_tools if t.name in ("postgresql_readonly",)]
-    database_runtime = build_runtime(
-        llm=llm,
-        tools=database_tools,
-        checkpointer=False,
-        system_prompt=DATABASE_SYSTEM_PROMPT,
-        context_max_chars=context_max_chars,
-        summary_after=0,
-        history_max_chars=history_max_chars,
-        model_first_tools=model_first_tools,
-        task_routing=False,
-        max_tool_calls=max_tool_calls,
-    )
+    if database_analyst and any(t.name == "postgresql_readonly" for t in active_tools):
+        from assistent.services.database_subgraph import build_database_analyst_graph
+        database_runtime = build_database_analyst_graph(
+            llm=llm,
+            tools=database_tools,
+            checkpointer=False,
+            system_prompt=DATABASE_SYSTEM_PROMPT,
+        )
+    else:
+        database_runtime = build_runtime(
+            llm=llm,
+            tools=database_tools,
+            checkpointer=False,
+            system_prompt=DATABASE_SYSTEM_PROMPT,
+            context_max_chars=context_max_chars,
+            summary_after=0,
+            history_max_chars=history_max_chars,
+            model_first_tools=model_first_tools,
+            task_routing=False,
+            max_tool_calls=max_tool_calls,
+        )
 
     # Direct Specialist: handles rewrite & polite conversational phrases without tools
     direct_runtime = build_runtime(
