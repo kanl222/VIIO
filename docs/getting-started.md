@@ -109,14 +109,15 @@ curl --fail http://localhost:8000/health
 | `QDRANT_PORT` | `6333` | HTTP-порт Qdrant |
 | `QDRANT_GRPC_PORT` | `6334` | gRPC-порт Qdrant |
 | `QDRANT_COLLECTION_NAME` | `knowledge_base` | Коллекция документов |
+| `REDIS_PORT` | `6379` | Порт Redis (кэширование кандидатов и скоров) |
 
 Если порт занят, измените соответствующую переменную и используйте новый порт в адресах ниже. Существующий `.env` команды копирования не перезаписывают.
 
 ### Как понять, что запуск завершён
 
-В `docker compose ps` должны работать `postgres`, `qdrant`, `assistent`, `documents`, `document-worker`, `consultant` и `webchat`. Дождитесь прохождения проверок здоровья. Консультант отвечает только при включённом `CONSULTANT_ENABLED`.
+В `docker compose ps` должны работать `postgres`, `qdrant`, `redis`, `assistent`, `documents`, `rag`, `document-worker`, `consultant` и `webchat`. Дождитесь прохождения проверок здоровья. Консультант отвечает только при включённом `CONSULTANT_ENABLED`.
 
-Основной агент переименован в `Assistent`. Документы обслуживаются отдельно: API на порту 8002 и worker в отдельном контейнере. Веб-чат отправляет загрузки напрямую в Documents API. [Границы сервисов и запуск без Docker на Windows/Linux](../Documents/README.md).
+Основной агент переименован в `Assistent`. Поиск и ранжирование выполняет отдельный сервис `rag` (двухэтапный гибридный поиск Dense + Sparse BM25 + лексика, Cross-Encoder переранжирование, Small2Big и Redis-кэш). Документы обслуживаются отдельно: API на порту 8002 и worker в отдельном контейнере. Веб-чат отправляет загрузки напрямую в Documents API. [Границы сервисов и запуск без Docker на Windows/Linux](../Documents/README.md). [Архитектура и устройство RAG](../RAG/README.md).
 
 - Откройте [веб-чат](http://localhost:3000).
 - `/health` WebChat должен вернуть `db: true`.
