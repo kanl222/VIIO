@@ -86,6 +86,9 @@ export const TraceDetailView = memo(function TraceDetailView({
       latestRetrieval?.ranking_details?.after_access_check ?? latestRetrieval?.candidates?.length ?? 0;
     const selectedCount = latestRetrieval?.selected?.length ?? 0;
     const uShaped = Boolean(latestRetrieval?.ranking_details?.lost_in_the_middle_reordered);
+    const rerankerModel = (latestRetrieval?.reranker_model as string) || (latestRetrieval?.ranking_details as any)?.reranker_model;
+    const fromCache = Boolean(latestRetrieval?.from_cache);
+    const cacheBackend = (latestRetrieval?.cache_backend as string) || 'redis';
 
     const latestGrade = cragGradeEvents[cragGradeEvents.length - 1];
     const isRelevant = latestGrade?.relevant;
@@ -114,6 +117,9 @@ export const TraceDetailView = memo(function TraceDetailView({
       isGrounded,
       faithfulness,
       rewriteAttempts,
+      rerankerModel,
+      fromCache,
+      cacheBackend,
     };
   }, [trace.events]);
 
@@ -269,6 +275,15 @@ export const TraceDetailView = memo(function TraceDetailView({
               </strong>
               <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>
                 {ragMetrics.rewriteAttempts > 0 ? `${ragMetrics.rewriteAttempts} попыток переформулирования (RRR)` : 'Первичный запрос точен'}
+              </span>
+            </div>
+            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Reranker & Cache</span>
+              <strong className="metric-val good" style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
+                {ragMetrics.fromCache ? `⚡ Из кэша (${ragMetrics.cacheBackend})` : (ragMetrics.rerankerModel ? '✓ Cross-Encoder (ONNX)' : 'Лексический')}
+              </strong>
+              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                {ragMetrics.rerankerModel ? ragMetrics.rerankerModel : 'BGE-Reranker-v2-m3'}
               </span>
             </div>
           </div>
