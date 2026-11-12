@@ -69,6 +69,54 @@ export const TraceDetailView = memo(function TraceDetailView({
     [trace.events]
   );
 
+  const ragMetrics = useMemo(() => {
+    const retrievalEvents = trace.events.filter(e => e.stage === 'retrieval');
+    const cragGradeEvents = trace.events.filter(e => e.stage === 'crag_grade_documents');
+    const cragGroundedEvents = trace.events.filter(e => e.stage === 'crag_check_groundedness');
+    const cragRewriteEvents = trace.events.filter(e => e.stage === 'crag_rewrite_query');
+
+    if (retrievalEvents.length === 0 && cragGradeEvents.length === 0) {
+      return null;
+    }
+
+    const latestRetrieval = retrievalEvents[retrievalEvents.length - 1];
+    const candidateCount =
+      latestRetrieval?.ranking_details?.before_access_check ?? latestRetrieval?.candidates?.length ?? 0;
+    const admittedCount =
+      latestRetrieval?.ranking_details?.after_access_check ?? latestRetrieval?.candidates?.length ?? 0;
+    const selectedCount = latestRetrieval?.selected?.length ?? 0;
+    const uShaped = Boolean(latestRetrieval?.ranking_details?.lost_in_the_middle_reordered);
+
+    const latestGrade = cragGradeEvents[cragGradeEvents.length - 1];
+    const isRelevant = latestGrade?.relevant;
+    const noiseRemoved =
+      latestGrade?.noise_removed ??
+      (latestGrade?.total_chunks && latestGrade?.filtered_chunks
+        ? latestGrade.total_chunks - latestGrade.filtered_chunks.length
+        : 0);
+    const filterMethod = latestGrade?.method ?? (latestGrade?.filtered_chunks?.length ? 'filter_reranker' : 'binary');
+
+    const latestGrounded = cragGroundedEvents[cragGroundedEvents.length - 1];
+    const isGrounded = latestGrounded?.grounded;
+    const faithfulness =
+      latestGrounded?.faithfulness_score ?? (isGrounded === true ? 1.0 : isGrounded === false ? 0.0 : null);
+
+    const rewriteAttempts = cragRewriteEvents.length;
+
+    return {
+      candidateCount,
+      admittedCount,
+      selectedCount,
+      uShaped,
+      isRelevant,
+      noiseRemoved,
+      filterMethod,
+      isGrounded,
+      faithfulness,
+      rewriteAttempts,
+    };
+  }, [trace.events]);
+
   // If OCR or standalone Search tab
   if (tab !== 'agents') {
     const stages =
@@ -184,6 +232,47 @@ export const TraceDetailView = memo(function TraceDetailView({
             <span className="hint">Сохранены этапы, выполненные до возникновения сбоя.</span>
           </div>
         </div>
+      ) : null}
+
+      {ragMetrics ? (
+        <section className="rag-analysis-dashboard" aria-label="Метрики RAG пайплайна для анализа и улучшения">
+          <div className="dashboard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700 }}>Метрики RAG пайплайна (для анализа и оптимизации)</h4>
+            <span className="hint" style={{ fontSize: '12px' }}>Анализ ретривера, шума, внимания и фактологичности</span>
+          </div>
+          <div className="rag-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Кандидаты поиска</span>
+              <strong className="metric-val" style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>{ragMetrics.candidateCount} до ACL → {ragMetrics.admittedCount} допущено</strong>
+              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>Отобрано: {ragMetrics.selectedCount} чанков</span>
+            </div>
+            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Lost in the Middle</span>
+              <strong className={`metric-val ${ragMetrics.uShaped ? 'good' : ''}`} style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
+                {ragMetrics.uShaped ? '✓ U-раскладка активна' : 'Стандартный порядок'}
+              </strong>
+              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>Оптимизация внимания модели</span>
+            </div>
+            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Filter-Reranker</span>
+              <strong className={`metric-val ${ragMetrics.isRelevant ? 'good' : 'bad'}`} style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
+                {ragMetrics.isRelevant ? '✓ Релевантно' : '✗ Нерелевантно'}
+              </strong>
+              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                {ragMetrics.noiseRemoved > 0 ? `Отсечено ${ragMetrics.noiseRemoved} мусорных чанков` : `Метод: ${ragMetrics.filterMethod}`}
+              </span>
+            </div>
+            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Фактологичность (Self-RAG)</span>
+              <strong className={`metric-val ${ragMetrics.isGrounded ? 'good' : 'bad'}`} style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
+                {ragMetrics.isGrounded ? '100% подтверждено' : 'Обнаружена галлюцинация'}
+              </strong>
+              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                {ragMetrics.rewriteAttempts > 0 ? `${ragMetrics.rewriteAttempts} попыток переформулирования (RRR)` : 'Первичный запрос точен'}
+              </span>
+            </div>
+          </div>
+        </section>
       ) : null}
 
       {/* DAG Timeline Graph */}

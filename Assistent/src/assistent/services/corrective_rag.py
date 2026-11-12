@@ -218,7 +218,16 @@ def build_corrective_rag_graph(
             if valid_nums and matches_count > 1:
                 filtered_raw = filter_context_by_indices(raw_ref, valid_nums)
                 filtered_docs = readable_reference(filtered_raw, max_chars=context_max_chars)
-                record("crag_grade_documents", relevant=True, filtered_chunks=valid_nums, total_chunks=matches_count)
+                record(
+                    "crag_grade_documents",
+                    relevant=True,
+                    method="filter_reranker",
+                    filtered_chunks=valid_nums,
+                    total_chunks=matches_count,
+                    noise_removed=matches_count - len(valid_nums),
+                    eval_output=eval_text,
+                    query=state.get("current_query"),
+                )
                 return {
                     "is_relevant": True,
                     "retrieved_docs": filtered_docs,
@@ -229,8 +238,16 @@ def build_corrective_rag_graph(
         except Exception as exc:
             logger.warning("Document grading failed, assuming relevant: %s", exc)
             relevant = True
+            eval_text = str(exc)
 
-        record("crag_grade_documents", relevant=relevant, query=state.get("current_query"))
+        record(
+            "crag_grade_documents",
+            relevant=relevant,
+            method="binary",
+            total_chunks=matches_count if "matches_count" in locals() else 0,
+            eval_output=eval_text if "eval_text" in locals() else None,
+            query=state.get("current_query"),
+        )
         return {"is_relevant": relevant}
 
     # Routing condition after grading
@@ -259,7 +276,13 @@ def build_corrective_rag_graph(
             logger.warning("Rewrite query failed: %s", exc)
             new_query = question
 
-        record("crag_rewrite_query", attempt=rewrite_count, old_query=current_query, new_query=new_query)
+        record(
+            "crag_rewrite_query",
+            attempt=rewrite_count,
+            old_query=current_query,
+            new_query=new_query,
+            strategy="RRR (Rewrite-Retrieve-Read)",
+        )
         return {
             "current_query": new_query,
             "rewrite_count": rewrite_count,
@@ -282,7 +305,12 @@ def build_corrective_rag_graph(
             logger.error("Generation failed: %s", exc)
             draft = NOT_FOUND_PHRASE
 
-        record("crag_generate", length=len(draft))
+        record(
+            "crag_generate",
+            length=len(draft),
+            draft_snippet=draft[:400],
+            context_chars=len(docs),
+        )
         return {"draft_answer": draft}
 
     # 5. Check Groundedness Node (Self-RAG)
@@ -298,12 +326,21 @@ def build_corrective_rag_graph(
         prompt = CHECK_GROUNDEDNESS_PROMPT.format(documents=docs[:3000], answer=draft)
         try:
             eval_res = await llm.ainvoke([HumanMessage(content=prompt)])
-            grounded = is_affirmative(str(eval_res.content))
+            eval_text = str(eval_res.content).strip()
+            grounded = is_affirmative(eval_text)
         except Exception as exc:
             logger.warning("Groundedness evaluation failed: %s", exc)
             grounded = True
+            eval_text = str(exc)
 
-        record("crag_check_groundedness", grounded=grounded)
+        record(
+            "crag_check_groundedness",
+            grounded=grounded,
+            eval_output=eval_text,
+            context_chars=len(docs),
+            draft_chars=len(draft),
+            faithfulness_score=1.0 if grounded else 0.0,
+        )
         if not grounded:
             # Replace hallucinated draft with a cautious, grounded notification
             draft = (

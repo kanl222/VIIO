@@ -34,6 +34,16 @@ const Fragments = memo(function Fragments({ items, label }: FragmentsProps) {
                     {item.score === undefined ? index + 1 : item.score_rank ?? '—'}
                   </span>
                   <span className="fragment-title">{item.title || 'Без названия'}</span>
+                  {item.context_position !== undefined ? (
+                    <span className="badge-highlight" style={{ fontSize: '11px', padding: '1px 5px' }}>
+                      #{item.context_position} в контексте
+                    </span>
+                  ) : null}
+                  {item.selection_reason ? (
+                    <span className="badge-highlight" style={{ fontSize: '11px', padding: '1px 5px' }}>
+                      {item.selection_reason === 'procedural_neighbor' ? 'сосед' : 'ранжирован'}
+                    </span>
+                  ) : null}
                   {item.score !== undefined ? (
                     <span className="fragment-score">
                       {scoreLabel.format(item.score)} б.
@@ -140,6 +150,16 @@ export const RetrievalStage = memo(function RetrievalStage({ event }: { event: T
           <dd>
             до проверки: <strong>{event.ranking_details.before_access_check}</strong> → допущено пользователю: <strong>{event.ranking_details.after_access_check}</strong>
           </dd>
+          {event.ranking_details.lost_in_the_middle_reordered ? (
+            <>
+              <dt>Оптимизация внимания:</dt>
+              <dd>
+                <span className="badge-highlight good">
+                  ✓ U-образная раскладка Lost-in-the-Middle ({event.ranking_details.reordered_count ?? 0} чанков)
+                </span>
+              </dd>
+            </>
+          ) : null}
         </dl>
       ) : null}
 
