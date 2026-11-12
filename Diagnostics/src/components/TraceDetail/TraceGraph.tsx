@@ -18,13 +18,13 @@ export const TraceGraph = memo(function TraceGraph({ events, onSelectStep }: Tra
   }
 
   return (
-    <section className="trace-graph-card" aria-label="Граф этапов и веток LangGraph">
+    <section className="trace-graph-card" aria-label="Шаги выполнения LangGraph">
       <div className="graph-header">
         <div className="title-with-icon">
           <GitBranch size={16} className="accent-icon" aria-hidden="true" />
-          <h3>Граф выполнения LangGraph ({events.length} {events.length === 1 ? 'шаг' : 'шагов'})</h3>
+          <h3>Шаги выполнения ({events.length})</h3>
         </div>
-        <span className="hint-label">Нажмите на любой шаг для быстрого перехода к деталям</span>
+        <span className="hint-label">Выберите шаг, чтобы открыть детали</span>
       </div>
 
       <div className="trace-graph-scroller">
@@ -102,7 +102,7 @@ export const TraceGraph = memo(function TraceGraph({ events, onSelectStep }: Tra
                   {event.stage === 'retrieval' ? (
                     <div className="node-context-snippet retrieval-snippet">
                       <Search size={10} />
-                      <span>Канд: {event.candidates?.length ?? '—'} · Выбрано: {event.selected?.length ?? '—'}</span>
+                <span>Кандидаты: {event.candidates?.length ?? '—'} · Отобрано: {event.selected?.length ?? '—'}</span>
                     </div>
                   ) : null}
 
