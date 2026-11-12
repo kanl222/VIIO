@@ -108,8 +108,32 @@ class QdrantVectorStoreAdapter(IVectorStore):
         self._ensure_collection()
         if metadatas and all('document_id' in meta and 'chunk_index' in meta for meta in metadatas):
             ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"{meta['document_id']}:{meta['chunk_index']}")) for meta in metadatas]
-            return self._store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
-        return self._store.add_texts(texts=texts, metadatas=metadatas)
+            res_ids = self._store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
+        else:
+            res_ids = self._store.add_texts(texts=texts, metadatas=metadatas)
+
+        try:
+            encoder = get_sparse_encoder()
+            if encoder.is_available and res_ids:
+                sparse_vectors = encoder.embed_documents(texts)
+                point_vectors = [
+                    models.PointVectors(
+                        id=pid,
+                        vector={"bm25": svec}
+                    )
+                    for pid, svec in zip(res_ids, sparse_vectors)
+                    if svec.indices
+                ]
+                if point_vectors:
+                    self._client.update_vectors(
+                        collection_name=self._collection_name,
+                        points=point_vectors,
+                        wait=False,
+                    )
+        except Exception as e:
+            logger.debug("Не удалось сохранить sparse векторы: %s", e)
+
+        return res_ids
 
     def similarity_search(
         self, query: str, k: int = 4, filter: Any | None = None

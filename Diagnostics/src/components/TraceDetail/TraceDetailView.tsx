@@ -75,49 +75,46 @@ export const TraceDetailView = memo(function TraceDetailView({
     const cragGroundedEvents = trace.events.filter(e => e.stage === 'crag_check_groundedness');
     const cragRewriteEvents = trace.events.filter(e => e.stage === 'crag_rewrite_query');
 
-    if (retrievalEvents.length === 0 && cragGradeEvents.length === 0) {
+    if (!retrievalEvents.length && !cragGradeEvents.length && !cragGroundedEvents.length && !cragRewriteEvents.length) {
       return null;
     }
 
     const latestRetrieval = retrievalEvents[retrievalEvents.length - 1];
-    const candidateCount =
-      latestRetrieval?.ranking_details?.before_access_check ?? latestRetrieval?.candidates?.length ?? 0;
+    const candidateCount = latestRetrieval?.ranking_details?.before_access_check;
     const admittedCount =
-      latestRetrieval?.ranking_details?.after_access_check ?? latestRetrieval?.candidates?.length ?? 0;
-    const selectedCount = latestRetrieval?.selected?.length ?? 0;
-    const uShaped = Boolean(latestRetrieval?.ranking_details?.lost_in_the_middle_reordered);
-    const rerankerModel = (latestRetrieval?.reranker_model as string) || (latestRetrieval?.ranking_details as any)?.reranker_model;
-    const fromCache = Boolean(latestRetrieval?.from_cache);
-    const cacheBackend = (latestRetrieval?.cache_backend as string) || 'redis';
+      latestRetrieval?.ranking_details?.after_access_check;
+    const selectedCount = latestRetrieval?.selected?.length;
+    const uShaped = latestRetrieval?.ranking_details?.lost_in_the_middle_reordered;
+    const reranker = latestRetrieval?.reranker_model || latestRetrieval?.reranker_used;
+    const cacheBackend = latestRetrieval?.cache_backend;
+    const fromCache = latestRetrieval?.from_cache;
 
     const latestGrade = cragGradeEvents[cragGradeEvents.length - 1];
     const isRelevant = latestGrade?.relevant;
     const noiseRemoved =
       latestGrade?.noise_removed ??
-      (latestGrade?.total_chunks && latestGrade?.filtered_chunks
+      (latestGrade?.total_chunks != null && latestGrade.filtered_chunks
         ? latestGrade.total_chunks - latestGrade.filtered_chunks.length
-        : 0);
-    const filterMethod = latestGrade?.method ?? (latestGrade?.filtered_chunks?.length ? 'filter_reranker' : 'binary');
+        : undefined);
+    const filterMethod = latestGrade?.method;
 
     const latestGrounded = cragGroundedEvents[cragGroundedEvents.length - 1];
     const isGrounded = latestGrounded?.grounded;
-    const faithfulness =
-      latestGrounded?.faithfulness_score ?? (isGrounded === true ? 1.0 : isGrounded === false ? 0.0 : null);
 
     const rewriteAttempts = cragRewriteEvents.length;
 
     return {
       candidateCount,
       admittedCount,
+      recordedCount: latestRetrieval?.candidates?.length,
       selectedCount,
       uShaped,
       isRelevant,
       noiseRemoved,
       filterMethod,
       isGrounded,
-      faithfulness,
       rewriteAttempts,
-      rerankerModel,
+      reranker,
       fromCache,
       cacheBackend,
     };
@@ -241,56 +238,63 @@ export const TraceDetailView = memo(function TraceDetailView({
       ) : null}
 
       {ragMetrics ? (
-        <section className="rag-analysis-dashboard" aria-label="Метрики RAG пайплайна для анализа и улучшения">
-          <div className="dashboard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700 }}>Метрики RAG пайплайна (для анализа и оптимизации)</h4>
-            <span className="hint" style={{ fontSize: '12px' }}>Анализ ретривера, шума, внимания и фактологичности</span>
-          </div>
-          <div className="rag-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
-            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
-              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Кандидаты поиска</span>
-              <strong className="metric-val" style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>{ragMetrics.candidateCount} до ACL → {ragMetrics.admittedCount} допущено</strong>
-              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>Отобрано: {ragMetrics.selectedCount} чанков</span>
+        <section className="rag-analysis-dashboard" aria-labelledby="rag-metrics-title">
+          <h3 id="rag-metrics-title">Метрики поиска и проверки ответа</h3>
+          <dl className="rag-metrics-grid">
+            <div className="rag-metric">
+              <dt>Кандидаты поиска</dt>
+              <dd>
+                <strong>
+                  {ragMetrics.candidateCount != null || ragMetrics.admittedCount != null
+                    ? `${ragMetrics.candidateCount ?? '—'} до проверки доступа · ${ragMetrics.admittedCount ?? '—'} допущено`
+                    : ragMetrics.recordedCount != null ? `Записано: ${ragMetrics.recordedCount}` : 'Нет данных'}
+                </strong>
+                <span>Отобрано фрагментов: {ragMetrics.selectedCount ?? '—'}</span>
+              </dd>
             </div>
-            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
-              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Lost in the Middle</span>
-              <strong className={`metric-val ${ragMetrics.uShaped ? 'good' : ''}`} style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
-                {ragMetrics.uShaped ? '✓ U-раскладка активна' : 'Стандартный порядок'}
-              </strong>
-              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>Оптимизация внимания модели</span>
+            <div className="rag-metric">
+              <dt>Порядок фрагментов</dt>
+              <dd>
+                <strong>
+                  {ragMetrics.uShaped === true ? 'U-образная раскладка'
+                    : ragMetrics.uShaped === false ? 'Стандартный порядок' : 'Нет данных'}
+                </strong>
+              </dd>
             </div>
-            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
-              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Filter-Reranker</span>
-              <strong className={`metric-val ${ragMetrics.isRelevant ? 'good' : 'bad'}`} style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
-                {ragMetrics.isRelevant ? '✓ Релевантно' : '✗ Нерелевантно'}
-              </strong>
-              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                {ragMetrics.noiseRemoved > 0 ? `Отсечено ${ragMetrics.noiseRemoved} мусорных чанков` : `Метод: ${ragMetrics.filterMethod}`}
-              </span>
+            <div className="rag-metric">
+              <dt>Релевантность фрагментов</dt>
+              <dd>
+                <strong data-result={ragMetrics.isRelevant}>
+                  {ragMetrics.isRelevant === true ? 'Релевантны'
+                    : ragMetrics.isRelevant === false ? 'Нерелевантны' : 'Нет оценки в трассе'}
+                </strong>
+                {ragMetrics.noiseRemoved != null && <span>Отсечено фрагментов: {ragMetrics.noiseRemoved}</span>}
+                {ragMetrics.filterMethod && <span>Метод: {ragMetrics.filterMethod}</span>}
+              </dd>
             </div>
-            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
-              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Фактологичность (Self-RAG)</span>
-              <strong className={`metric-val ${ragMetrics.isGrounded ? 'good' : 'bad'}`} style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
-                {ragMetrics.isGrounded ? '100% подтверждено' : 'Обнаружена галлюцинация'}
-              </strong>
-              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                {ragMetrics.rewriteAttempts > 0 ? `${ragMetrics.rewriteAttempts} попыток переформулирования (RRR)` : 'Первичный запрос точен'}
-              </span>
+            <div className="rag-metric">
+              <dt>Подтверждение ответа</dt>
+              <dd>
+                <strong data-result={ragMetrics.isGrounded}>
+                  {ragMetrics.isGrounded === true ? 'Подтверждён источниками'
+                    : ragMetrics.isGrounded === false ? 'Не подтверждён источниками' : 'Нет оценки в трассе'}
+                </strong>
+                {ragMetrics.rewriteAttempts > 0 && <span>Переформулировок запроса: {ragMetrics.rewriteAttempts}</span>}
+              </dd>
             </div>
-            <div className="metric-box" style={{ background: 'var(--subtle)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
-              <span className="metric-label" style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Reranker & Cache</span>
-              <strong className="metric-val good" style={{ display: 'block', fontSize: '13px', margin: '4px 0' }}>
-                {ragMetrics.fromCache ? `⚡ Из кэша (${ragMetrics.cacheBackend})` : (ragMetrics.rerankerModel ? '✓ Cross-Encoder (ONNX)' : 'Лексический')}
-              </strong>
-              <span className="metric-sub" style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                {ragMetrics.rerankerModel ? ragMetrics.rerankerModel : 'BGE-Reranker-v2-m3'}
-              </span>
+            <div className="rag-metric">
+              <dt>Переранжирование и кэш</dt>
+              <dd>
+                <strong>{ragMetrics.reranker || 'Реранкер не указан'}</strong>
+                {ragMetrics.fromCache === true && (
+                  <span>Результат из кэша{ragMetrics.cacheBackend ? ` (${ragMetrics.cacheBackend})` : ''}</span>
+                )}
+              </dd>
             </div>
-          </div>
+          </dl>
         </section>
       ) : null}
 
-      {/* DAG Timeline Graph */}
       <TraceGraph events={trace.events} onSelectStep={jumpToEvent} />
 
       {/* Pipeline Stage Quick Navigation */}
