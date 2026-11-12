@@ -95,6 +95,26 @@ def rank_documents(
     return [doc for _, doc in diversified[:k]]
 
 
+def reorder_lost_in_the_middle(documents: Sequence[Any]) -> list[Any]:
+    """Reorder documents to mitigate the 'lost in the middle' phenomenon (Liu et al. 2023).
+
+    Places the most relevant documents at the beginning and end of the sequence
+    where LLMs exhibit primacy and recency bias, and less relevant documents in the middle.
+    """
+    docs = list(documents)
+    if len(docs) <= 2:
+        return docs
+
+    left: list[Any] = []
+    right: list[Any] = []
+    for i, doc in enumerate(docs):
+        if i % 2 == 0:
+            left.append(doc)
+        else:
+            right.insert(0, doc)
+    return left + right
+
+
 class EnhancedRetrieval:
     def __init__(self, vector_store: Any, data: Any) -> None:
         self.vector_store: Any = vector_store
@@ -162,7 +182,8 @@ class EnhancedRetrieval:
         details = [] if diagnostics is not None else None
         min_score = 1
         ranked = rank_documents(query, candidates, k, min_score=min_score, rrf_scores=rrf_map, details=details)
-        selected = await self._expand_procedural_neighbors(ranked, context)
+        expanded = await self._expand_procedural_neighbors(ranked, context)
+        selected = reorder_lost_in_the_middle(expanded)
         if diagnostics is not None:
             positions = {fragment_key(doc): {} for doc in candidates}
             for name, result in zip(names, results):

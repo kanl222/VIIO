@@ -37,6 +37,26 @@ def sources_from_reference(reference: str) -> list[AnswerSource]:
     return sources
 
 
+def reorder_lost_in_the_middle(items: Sequence[Any]) -> list[Any]:
+    """Reorder items to mitigate the 'lost in the middle' phenomenon (Liu et al. 2023).
+
+    Places the most relevant items at the beginning and end of the context
+    where LLMs exhibit primacy and recency bias, and less relevant items in the middle.
+    """
+    item_list = list(items)
+    if len(item_list) <= 2:
+        return item_list
+
+    left: list[Any] = []
+    right: list[Any] = []
+    for i, item in enumerate(item_list):
+        if i % 2 == 0:
+            left.append(item)
+        else:
+            right.insert(0, item)
+    return left + right
+
+
 def readable_reference(reference: str, max_chars: int | None = None, *, include_ids: bool = False) -> str:
     """Format excerpts, optionally exposing document IDs for targeted follow-up."""
     matches = CONTEXT.findall(reference)
@@ -49,13 +69,14 @@ def readable_reference(reference: str, max_chars: int | None = None, *, include_
             label += f' (doc_id: {html.unescape(identifier)})'
         fragments.append(f'{label}:\n{body.strip()}')
     if max_chars is None:
-        return "\n\n".join(fragments)
+        return "\n\n".join(reorder_lost_in_the_middle(fragments))
     # Длинный первый результат не должен занимать всё место для последующих релевантных источников.
     available = max(0, max_chars - 2 * (len(fragments) - 1))
     first_budget = min(len(fragments[0]), available if len(fragments) == 1 else available // 2)
     remaining = (available - first_budget) // max(1, len(fragments) - 1)
     excerpts = [fragments[0][:first_budget], *(fragment[:remaining] for fragment in fragments[1:])]
-    return "\n\n".join(excerpts)[:max_chars]
+    reordered_excerpts = reorder_lost_in_the_middle(excerpts)
+    return "\n\n".join(reordered_excerpts)[:max_chars]
 
 
 def strip_thinking(text: str) -> str:

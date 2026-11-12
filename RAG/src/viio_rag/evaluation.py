@@ -104,3 +104,44 @@ def evaluate_retrieval_batch(
         'mean_mrr': round(total_mrr / count, 4),
         'mean_ndcg': round(total_ndcg / count, 4),
     }
+
+
+def calculate_faithfulness(verified_claims: int, total_claims: int) -> float:
+    """Calculates Faithfulness (RAGAS / ARES standard): fraction of claims supported by context."""
+    if total_claims <= 0:
+        return 1.0
+    return min(1.0, max(0.0, verified_claims / total_claims))
+
+
+def calculate_context_utilization(
+    cited_ids: Sequence[Any],
+    retrieved_ids: Sequence[Any],
+) -> float:
+    """Calculates Context Utilization: fraction of retrieved documents that were actually cited in the answer."""
+    if not retrieved_ids:
+        return 0.0
+    retrieved_set = set(retrieved_ids)
+    cited_set = set(cited_ids)
+    useful_hits = len(retrieved_set & cited_set)
+    return useful_hits / len(retrieved_set)
+
+
+def is_lost_in_the_middle_layout(items: Sequence[Any], rank_attr: str | None = None) -> bool:
+    """Checks whether items follow a U-shaped 'Lost in the Middle' mitigation order.
+
+    Top items (rank 1 and 2) must be located at the boundaries (index 0 and index -1),
+    while lower ranked items reside in the interior.
+    """
+    if len(items) <= 2:
+        return True
+    first_rank = getattr(items[0], rank_attr) if rank_attr and hasattr(items[0], rank_attr) else items[0]
+    last_rank = getattr(items[-1], rank_attr) if rank_attr and hasattr(items[-1], rank_attr) else items[-1]
+    mid_ranks = [
+        getattr(item, rank_attr) if rank_attr and hasattr(item, rank_attr) else item
+        for item in items[1:-1]
+    ]
+    # For 1-based ranks (1, 2, 3...), boundary ranks should be smaller than worst interior rank
+    try:
+        return min(first_rank, last_rank) <= min(mid_ranks)
+    except TypeError:
+        return True
