@@ -171,6 +171,28 @@ class EnhancedRetrieval:
             return docs
 
         searches = [fetch_semantic(), self.data.lexical(query, context)]
+        if hasattr(self.vector_store, 'sparse_search'):
+            names.append('sparse_bm25')
+
+            async def fetch_sparse():
+                if self.cache is not None:
+                    cache_key = f"viio:sparse:{query.strip().lower()}:{candidate_pool_size}"
+                    cached = await self.cache.get_json(cache_key)
+                    if cached:
+                        return [
+                            Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
+                            for item in cached
+                        ]
+                docs = await anyio.to_thread.run_sync(
+                    partial(self.vector_store.sparse_search, query=query, k=candidate_pool_size, filter=build_access_filter(context))
+                )
+                if self.cache is not None and docs:
+                    cache_key = f"viio:sparse:{query.strip().lower()}:{candidate_pool_size}"
+                    await self.cache.set_json(cache_key, [fragment_snapshot(d) for d in docs], ttl=1800)
+                return docs
+
+            searches.append(fetch_sparse())
+
         if getattr(self.data, 'public_index', None) is not None:
             names.append('public')
             searches.append(self.data.public_vectors(query, candidate_pool_size))
