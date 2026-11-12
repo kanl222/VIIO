@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: viio_postgres
+    mem_limit: 1024m
     environment:
     - POSTGRES_USER=${POSTGRES_USER:-postgres}
     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Configure a deployment password}
@@ -25,6 +26,7 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.20.0
     container_name: viio_qdrant
+    mem_limit: 1536m
     ports:
     - 127.0.0.1:${QDRANT_PORT:-6333}:6333
     - 127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334
@@ -273,8 +275,10 @@ services:
     tmpfs:
     - /tmp:size=256m
     pids_limit: 256
+    mem_limit: 1024m
     user: 65532:65532
   assistent:
+    image: viio-assistent:latest
     build:
       context: ./Assistent
       dockerfile: Dockerfile
@@ -371,8 +375,10 @@ services:
     tmpfs:
     - /tmp:size=256m
     pids_limit: 256
+    mem_limit: 1536m
     user: 65532:65532
   consultant:
+    image: viio-consultant:latest
     build:
       context: ./Consultant
       dockerfile: Dockerfile
@@ -425,10 +431,14 @@ services:
     - ALL
     security_opt:
     - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 768m
+    user: 65532:65532
     restart: unless-stopped
     networks:
     - consultant_net
   webchat:
+    image: viio-webchat:latest
     build:
       context: ./WebChat
       dockerfile: Dockerfile
@@ -479,6 +489,7 @@ services:
     tmpfs:
     - /tmp:size=256m
     pids_limit: 256
+    mem_limit: 512m
   postgres-tool:
     image: crystaldba/postgres-mcp@sha256:dbbd346860d29f1543e991f30f3284bf4ab5f096d049ecc3426528f20b1b6e6b
     profiles:
@@ -501,6 +512,7 @@ services:
     networks:
     - viio_net
   pdf-worker:
+    image: viio-pdf-worker:latest
     build: ./pdf-worker
     environment:
     - INTERNAL_API_KEY=${DOCLING_API_KEY:?Configure DOCLING_API_KEY in .env}
@@ -536,6 +548,7 @@ services:
     pids_limit: 256
     user: 65532:65532
   diagnostics:
+    image: viio-diagnostics:latest
     build: ./Diagnostics
     container_name: viio_diagnostics
     ports:
@@ -573,13 +586,13 @@ networks:
   consultant_net:
     driver: bridge
 volumes:
-  qdrant_storage: null
-  postgres_data: null
-  docling_models: null
-  documents_storage: null
-  assistant_traces: null
-  consultant_traces: null
-  documents_traces: null
-  document_worker_traces: null
-  rag_traces: null
-  diagnostic_reviews: null
+  qdrant_storage: {}
+  postgres_data: {}
+  docling_models: {}
+  documents_storage: {}
+  assistant_traces: {}
+  consultant_traces: {}
+  documents_traces: {}
+  document_worker_traces: {}
+  rag_traces: {}
+  diagnostic_reviews: {}

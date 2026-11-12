@@ -1,6 +1,7 @@
 """Merge bounded lexical and semantic candidates without another model call."""
 import asyncio
 import logging
+import time
 from functools import partial
 import anyio.to_thread
 from collections.abc import Sequence
@@ -12,17 +13,35 @@ from viio_rag.search_tool import build_access_filter, format_documents
 from viio_rag.diagnostics import capture, record
 
 logger = logging.getLogger(__name__)
+RRF_K = 60
+TEXT_WEIGHT = 3
+TITLE_WEIGHT = 5
+
+
+def fragment_key(doc: Document) -> tuple[Any, str]:
+    return doc.metadata.get('document_id'), doc.page_content
+
+
+def fragment_snapshot(doc: Document, *, include_text: bool = True) -> dict:
+    item = {key: doc.metadata.get(key) for key in ('document_id', 'version', 'chunk_id')}
+    item['title'] = doc.metadata.get('title', '')
+    for key in ('filename', 'chunk_index', 'line_start', 'section_path'):
+        if key in doc.metadata:
+            item[key] = doc.metadata[key]
+    if include_text:
+        item['text'] = doc.page_content
+    return item
 
 
 def reciprocal_rank_fusion(
     ranked_lists: Sequence[Sequence[Document]],
-    k: int = 60,
+    k: int = RRF_K,
 ) -> dict[tuple[Any, str], float]:
     """Calculate Reciprocal Rank Fusion (RRF) scores across multiple ranked candidate lists."""
     rrf_scores: dict[tuple[Any, str], float] = {}
     for candidate_list in ranked_lists:
         for rank, doc in enumerate(candidate_list, start=1):
-            key = (doc.metadata.get("document_id"), doc.page_content)
+            key = fragment_key(doc)
             rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (k + rank))
     return rrf_scores
 
@@ -33,31 +52,47 @@ def rank_documents(
     k: int,
     min_score: int = 0,
     rrf_scores: dict[tuple[Any, str], float] | None = None,
+    *,
+    details: list[dict] | None = None,
 ) -> list[Document]:
     terms = query_terms(query)
+
     def score(doc: Document) -> float:
         text = doc.page_content.lower()
         title = str(doc.metadata.get('title', '')).lower()
         filename = str(doc.metadata.get('filename', '')).lower()
-        term_score = sum(3 * (term in text) + 5 * (term in title or term in filename) for term in terms)
-        if rrf_scores:
-            key = (doc.metadata.get("document_id"), doc.page_content)
-            return float(term_score) + rrf_scores.get(key, 0.0)
-        return float(term_score)
+        matched_text = [term for term in terms if term in text]
+        matched_title = [term for term in terms if term in title]
+        matched_filename = [term for term in terms if term in filename]
+        term_score = TEXT_WEIGHT * len(matched_text) + TITLE_WEIGHT * len(set(matched_title + matched_filename))
+        bonus = rrf_scores.get(fragment_key(doc), 0.0) if rrf_scores else 0.0
+        total = term_score + bonus
+        if details is not None:
+            details.append(dict(term_score=term_score, rrf_score=bonus, score=total,
+                                matched_text=matched_text, matched_title=matched_title,
+                                matched_filename=matched_filename))
+        return total
     scored = [(score(doc), idx, doc) for idx, doc in enumerate(documents)]
     if min_score > 0:
         scored = [item for item in scored if item[0] >= min_score]
         if not scored:
             return []
     ordered = sorted(scored, key=lambda item: (-item[0], item[1]))
-    first: list[Document] = []
-    rest: list[Document] = []
+    first: list[tuple[int, Document]] = []
+    rest: list[tuple[int, Document]] = []
     seen: set[Any] = set()
-    for _, _, doc in ordered:
+    for rank, (_, index, doc) in enumerate(ordered, 1):
         key = doc.metadata.get('document_id', doc.page_content)
-        (rest if key in seen else first).append(doc)
+        repeated = key in seen
+        (rest if repeated else first).append((index, doc))
         seen.add(key)
-    return (first + rest)[:k]
+        if details is not None:
+            details[index].update(score_rank=rank, deferred_for_diversity=repeated)
+    diversified = first + rest
+    if details is not None:
+        for rank, (index, _) in enumerate(diversified, 1):
+            details[index]['diversity_rank'] = rank
+    return [doc for _, doc in diversified[:k]]
 
 
 class EnhancedRetrieval:
@@ -68,11 +103,14 @@ class EnhancedRetrieval:
     async def search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
         with capture('search', query) as trace:
             diagnostic = diagnostics if diagnostics is not None else ({} if trace is not None else None)
+            if trace is not None:
+                diagnostic['search_trace_id'] = trace['id']
             record('search_request', query=query, k=k, scope='internal')
             try:
                 selected = await self._search(query, context, k, diagnostic)
             except Exception as error:
-                record('retrieval', query=query, k=k, scope='internal', status='error', error=type(error).__name__)
+                record('retrieval', query=query, scope='internal', status='error', error=type(error).__name__,
+                       **{'k': k, **(diagnostic or {})})
                 raise
             if diagnostic is not None:
                 record('retrieval', query=query, scope='internal', status='ok',
@@ -80,15 +118,34 @@ class EnhancedRetrieval:
             return selected
 
     async def _search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
+        names = ['semantic', 'lexical']
         searches = [
             anyio.to_thread.run_sync(partial(self.vector_store.similarity_search, query=query, k=max(k * 3, 12), filter=build_access_filter(context))),
             self.data.lexical(query, context)]
         if getattr(self.data, 'public_index', None) is not None:
+            names.append('public')
             searches.append(self.data.public_vectors(query, max(k * 3, 12)))
+        timings = {}
+        if diagnostics is not None:
+            async def measured(name, search):
+                started = time.monotonic()
+                try:
+                    return await search
+                finally:
+                    timings[name] = round((time.monotonic() - started) * 1000)
+
+            searches = [measured(name, search) for name, search in zip(names, searches)]
         results = await asyncio.gather(*searches, return_exceptions=True)
+        if diagnostics is not None:
+            diagnostics['branches'] = {
+                name: {'duration_ms': timings[name], 'status': 'error', 'count': None, 'error': type(result).__name__}
+                if isinstance(result, Exception)
+                else {'duration_ms': timings[name], 'status': 'ok', 'count': len(result)}
+                for name, result in zip(names, results)
+            }
         if all(isinstance(result, Exception) for result in results):
             raise RuntimeError('Поиск временно недоступен')
-        for name, result in zip(['semantic', 'lexical', 'public'], results):
+        for name, result in zip(names, results):
             if isinstance(result, Exception):
                 logger.warning('%s search unavailable: %s', name, type(result).__name__)
         valid_lists = [r for r in [results[1], results[0], *results[2:]] if not isinstance(r, Exception)]
@@ -96,25 +153,38 @@ class EnhancedRetrieval:
         candidates, seen = [], set()
         for candidate_list in valid_lists:
             for doc in candidate_list:
-                key = (doc.metadata.get('document_id'), doc.page_content)
+                key = fragment_key(doc)
                 if key not in seen:
                     candidates.append(doc)
                     seen.add(key)
-        candidates=await self.data.authorized_candidates(candidates,context)
-        selected = rank_documents(query, candidates, k, min_score=1, rrf_scores=rrf_map)
-        selected = await self._expand_procedural_neighbors(selected, context)
+        candidate_count = len(candidates)
+        candidates = await self.data.authorized_candidates(candidates, context)
+        details = [] if diagnostics is not None else None
+        min_score = 1
+        ranked = rank_documents(query, candidates, k, min_score=min_score, rrf_scores=rrf_map, details=details)
+        selected = await self._expand_procedural_neighbors(ranked, context)
         if diagnostics is not None:
-            def snapshot(doc):
-                return {'document_id': doc.metadata.get('document_id'),
-                        'title': doc.metadata.get('title', ''), 'text': doc.page_content,
-                        'version': doc.metadata.get('version'), 'chunk_id': doc.metadata.get('chunk_id')}
+            positions = {fragment_key(doc): {} for doc in candidates}
+            for name, result in zip(names, results):
+                if not isinstance(result, Exception):
+                    for rank, doc in enumerate(result, 1):
+                        if fragment_key(doc) in positions:
+                            positions[fragment_key(doc)].setdefault(name, []).append(rank)
+            final_ranks = {fragment_key(doc): rank for rank, doc in enumerate(selected, 1)}
+            ranked_keys = {fragment_key(doc) for doc in ranked}
             # Только кандидаты, прошедшие актуальную проверку ACL, могут покидать сервис документов.
-            diagnostics.update(candidates=[snapshot(doc) for doc in candidates],
-                selected=[snapshot(doc) for doc in selected],
-                branches={name: {'status': 'error' if isinstance(result, Exception) else 'ok',
-                                 'count': None if isinstance(result, Exception) else len(result)}
-                          for name, result in zip(['semantic', 'lexical', 'public'], results)},
-                ranking='lexical term score with document diversity', k=k)
+            diagnostics.update(
+                candidates=[dict(fragment_snapshot(doc, include_text=False), **detail,
+                                 branch_ranks=positions[fragment_key(doc)],
+                                 final_rank=final_ranks.get(fragment_key(doc)))
+                            for doc, detail in zip(candidates, details)],
+                selected=[dict(fragment_snapshot(doc), selection_reason='ranked' if fragment_key(doc) in ranked_keys
+                               else 'procedural_neighbor') for doc in selected],
+                ranking='lexical term score with document diversity', k=k,
+                ranking_details=dict(query_terms=query_terms(query), min_score=min_score, rrf_k=RRF_K,
+                                     text_weight=TEXT_WEIGHT, title_or_filename_weight=TITLE_WEIGHT,
+                                     before_access_check=candidate_count, after_access_check=len(candidates)),
+            )
         return selected
 
     async def _expand_procedural_neighbors(self, selected, context, max_chars=8000):

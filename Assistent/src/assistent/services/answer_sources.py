@@ -15,11 +15,21 @@ class AnswerSource(TypedDict):
 CONTEXT = re.compile(r'<context source="(.*?)" doc_id="([^"]*)"[^>]*>([\s\S]*?)</context>')
 
 
+def reference_title(title: str, body: str) -> str:
+    """Prefer the document heading over a filename-like catalog title."""
+    title = html.unescape(title)
+    if '_' in title and re.fullmatch(r'[a-zA-Z0-9_.-]+', title):
+        heading = re.match(r'\s*# +([^\n<>]{3,300})(?=\r?\n|$)', body)
+        if heading:
+            return html.unescape(heading[1].strip())
+    return title
+
+
 def sources_from_reference(reference: str) -> list[AnswerSource]:
     sources = []
     seen = set()
-    for title, identifier, _ in CONTEXT.findall(reference):
-        source = {"title": html.unescape(title), "document_id": html.unescape(identifier)}
+    for title, identifier, body in CONTEXT.findall(reference):
+        source = {"title": reference_title(title, body), "document_id": html.unescape(identifier)}
         identity = (source["title"], source["document_id"])
         if identity not in seen:
             sources.append(source)
@@ -34,7 +44,7 @@ def readable_reference(reference: str, max_chars: int | None = None, *, include_
         return reference[:max_chars]
     fragments = []
     for title, identifier, body in matches:
-        label = f'Материал «{html.unescape(title)}»'
+        label = f'Материал «{reference_title(title, body)}»'
         if include_ids and identifier and identifier != 'unknown':
             label += f' (doc_id: {html.unescape(identifier)})'
         fragments.append(f'{label}:\n{body.strip()}')
@@ -60,7 +70,7 @@ def strip_thinking(text: str) -> str:
 def clean_answer(text: str, sources: list[AnswerSource]) -> str:
     """Remove leaked transport labels outside fenced code, preserving actual code."""
     text = strip_thinking(text)
-    identifiers = [s["document_id"] for s in sources if s["document_id"] != "unknown"]
+    identifiers = [s["document_id"] for s in sources if s["document_id"] not in {"", "unknown"}]
     sections = re.split(r"(```[\s\S]*?```)", text)
     for index in range(0, len(sections), 2):
         part = sections[index]
@@ -69,8 +79,10 @@ def clean_answer(text: str, sources: list[AnswerSource]) -> str:
         part = re.sub(r"\bknowledge_reference\b", "", part)
         part = re.sub(r"(?im)^\s*(?:chunk_index|chunk_id|similarity_score|vector_score)\s*[:=][^\n]*\n?", "", part)
         part = re.sub(r"(?im)^\s*Чанк\s*(?:№|#)?\s*\d+\s*[:—-]?[^\n]*\n?", "", part)
+        part = re.sub(r"[ \t]*\(doc_id:[ \t]*[^\s)]+\)", "", part)
         for identifier in identifiers:
-            part = re.sub(r"\(?\s*(?:(?:doc_id|document_id)\s*[:=]\s*)?[\"`]?" + re.escape(identifier) + r"[\"`]?\s*\)?", "", part)
+            part = re.sub(r"(?<![\w./%=:-])\(?[ \t]*(?:(?:doc_id|document_id)[ \t]*[:=][ \t]*)?[\"`]?"
+                          + re.escape(identifier) + r"(?![\w./-])[\"`]?[ \t]*\)?", "", part)
         sections[index] = part
     return "".join(sections).strip()
 
@@ -88,7 +100,7 @@ class AgentReply(str):
 
 
 def cited_sources(text: str, candidates: list[AnswerSource]) -> list[AnswerSource]:
-    """Candidates are not citations; require a title and suppress missing-answer lists.
+    """Match cited titles or explicit document IDs among current candidates.
 
     This is a conservative attribution filter, not a factual entailment verifier.
     """
@@ -97,7 +109,18 @@ def cited_sources(text: str, candidates: list[AnswerSource]) -> list[AnswerSourc
                  r"(?:недостаточно данных|невозможно определить|нет (?:информации|сведений)|не удалось (?:найти|получить))", prose, re.I | re.S):
         return []
     normalized = " ".join(prose.casefold().replace("ё", "е").split())
-    return [s for s in candidates if " ".join(s["title"].casefold().replace("ё", "е").split()) in normalized]
+    cited_ids = set(re.findall(r'\(doc_id:\s*([^\s)]+)\)', prose))
+    matched = {}
+    for source in candidates:
+        title = " ".join(source["title"].casefold().replace("ё", "е").split())
+        stem = re.sub(r'\.(pdf|docx|odt|txt|md)$', '', title).strip()
+        identifier = source["document_id"]
+        key = identifier if identifier not in {"", "unknown"} else (identifier, title)
+        if (title and title in normalized) or (stem and len(stem) >= 4 and stem in normalized):
+            matched[key] = source
+        elif identifier in cited_ids:
+            matched.setdefault(key, source)
+    return list(matched.values())
 
 
 def turn_provenance(messages):

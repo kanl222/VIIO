@@ -39,7 +39,8 @@ def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base
                           **({'document_ids': document_ids} if document_ids is not None else {}),
                           **({'diagnostics': True} if enabled() else {})})
                 response.raise_for_status()
-                text = response.json()['context']
+                payload = response.json()
+                text = payload['context']
                 if not isinstance(text, str) or len(text) > 100000:
                     raise ValueError('Invalid document search response')
                 sources = sources_from_reference(text)
@@ -47,7 +48,7 @@ def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base
                 if max_chars and tool_name == 'search_knowledge_base':
                     text = readable_reference(text, max_chars=max_chars, include_ids=True)
                 record('retrieval', query=query, duration_ms=round((time.monotonic()-start)*1000),
-                       context=text, **response.json().get('diagnostics', {}))
+                       context=text, **payload.get('diagnostics', {}))
                 return text, {'sources': sources}
         except (httpx.HTTPError, ValueError, KeyError):
             record('retrieval', query=query, status='error', duration_ms=round((time.monotonic()-start)*1000))

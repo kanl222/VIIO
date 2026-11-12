@@ -20,8 +20,42 @@ async def test_diagnostics_do_not_export_denied_candidates_or_change_selection()
     baseline = await retrieval.search('invoice', {'role':'employee'}, 1)
     assert result == baseline == [allowed]
     assert diagnostic['candidates'][0]['document_id'] == 'allowed'
+    assert 'text' not in diagnostic['candidates'][0]
     assert diagnostic['selected'][0]['text'] == 'invoice instructions'
+    assert diagnostic['ranking_details']['before_access_check'] == 2
+    assert diagnostic['ranking_details']['after_access_check'] == 1
+    assert diagnostic['candidates'][0]['branch_ranks'] == {'lexical': [1], 'semantic': [2]}
     assert 'PRIVATE_CANARY' not in str(diagnostic)
+    assert 'denied' not in str(diagnostic)
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_explain_title_bonus_ranks_and_threshold():
+    pharmacy = Document(page_content='Поиск уже выданного рецепта',
+                        metadata={'document_id': 'pharmacy', 'title': 'Поиск рецептов'})
+    doctor = Document(page_content='Выписать и подписать рецепт',
+                      metadata={'document_id': 'doctor', 'title': 'guide_is_lo', 'filename': 'guide.pdf'})
+    noise = Document(page_content='Складской учёт', metadata={'document_id': 'noise'})
+    data = SimpleNamespace(lexical=AsyncMock(return_value=[doctor, pharmacy]), public_index=object(),
+                           public_vectors=AsyncMock(side_effect=TimeoutError('PRIVATE_UPSTREAM_DETAIL')),
+                           authorized_candidates=AsyncMock(return_value=[doctor, pharmacy, noise]))
+    vector = SimpleNamespace(similarity_search=lambda **_: [noise, doctor, pharmacy])
+    diagnostic = {}
+
+    result = await EnhancedRetrieval(vector, data).search('как выписать рецепт', None, 2, diagnostics=diagnostic)
+
+    assert result == [pharmacy, doctor]
+    assert diagnostic['ranking_details']['query_terms'] == ['выписать', 'рецепт']
+    scores = {item['document_id']: item for item in diagnostic['candidates']}
+    assert scores['pharmacy']['matched_text'] == scores['pharmacy']['matched_title'] == ['рецепт']
+    assert scores['pharmacy']['term_score'] == 8
+    assert scores['pharmacy']['rrf_score'] == pytest.approx(1 / 62 + 1 / 63)
+    assert scores['pharmacy']['score_rank'] == scores['pharmacy']['final_rank'] == 1
+    assert scores['doctor']['matched_text'] == ['выписать', 'рецепт']
+    assert scores['doctor']['term_score'] == 6 and scores['doctor']['final_rank'] == 2
+    assert 'score_rank' not in scores['noise'] and scores['noise']['final_rank'] is None
+    assert diagnostic['branches']['public']['error'] == 'TimeoutError'
+    assert 'PRIVATE_UPSTREAM_DETAIL' not in str(diagnostic)
 
 
 @pytest.mark.asyncio

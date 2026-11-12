@@ -239,7 +239,11 @@ def build_supervisor_graph(
         if reference:
             last = attach_reference_sources(last, reference)
             sources = last.response_metadata.get("sources", sources)
-        sources = cited_sources(str(last.content), sources)
+            sources = cited_sources(str(last.content), sources)
+        elif "sources" in last.response_metadata:
+            sources = last.response_metadata["sources"]
+        else:
+            sources = cited_sources(str(last.content), sources)
         cleaned = clean_answer(last.content, sources)
         finalized = finalize_response(last, sources, active, content=cleaned)
         record("supervisor_review", active=active, sources=[s.get("title") if isinstance(s, dict) else str(s) for s in sources])

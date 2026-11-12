@@ -1,77 +1,113 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
+    "ai-prompt-engineering-safety-review": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/ai-prompt-engineering-safety-review/SKILL.md",
+      "computedHash": "ddd4b034c77151f5e470bb97a492564efbc2e19d01410afe3ac599f7c1c35a19"
+    },
     "docker-compose-patterns": {
       "source": "docker/skills",
       "sourceType": "github",
       "skillPath": "skills/docker-compose-patterns/SKILL.md",
-      "computedHash": "14140693bc1c11a7b59d2b5528c1cb9cd7501697ceb919bf5e820c33b4faff01"
+      "computedHash": "ab8353137a2f7054f113b7aa565eff12248bca7b41518a4d4183f7da522af2c3"
+    },
+    "enhance-prompt": {
+      "source": "google-labs-code/stitch-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/stitch-utilities/skills/enhance-prompt/SKILL.md",
+      "computedHash": "db82ccce387dbe18310325d77e66d72f2d64948838dfb456103d558c58c62dbb"
+    },
+    "evaluate-rag": {
+      "source": "hamelsmu/evals-skills",
+      "sourceType": "github",
+      "skillPath": "skills/evaluate-rag/SKILL.md",
+      "computedHash": "92f3314f027c313c303987dddda76c26597f0cd387a4cbaf32b20cbff41103dd"
     },
     "fastapi": {
       "source": "fastapi/fastapi",
       "sourceType": "github",
       "skillPath": "fastapi/.agents/skills/fastapi/SKILL.md",
-      "computedHash": "704982d45eda9667d4bd68c05f257bd21d2e40bae264f9bc0593eba56a95d2de"
+      "computedHash": "3e2cd1457114d2ba9f29ec17303732f1c9c4ecdd3e61fae36d05de40d94516ea"
     },
     "finalize-agent-prompt": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
       "skillPath": "skills/finalize-agent-prompt/SKILL.md",
-      "computedHash": "a72bea0359d7f69295a28e9f4b94c5dc6fc093930dae663d8c7bab294ea287d3"
+      "computedHash": "c1be30c7f5a74aa475d09a85a3cc93c44774ac28e4f3b9d4821788a5aa780c10"
     },
     "langchain-rag": {
       "source": "langchain-ai/langchain-skills",
       "sourceType": "github",
       "skillPath": "config/skills/langchain-rag/SKILL.md",
-      "computedHash": "cf1cdc8657527ddac4c4d256c73288ec88c9600e0f31d2393324103e9bd503a1"
+      "computedHash": "3395c565ed0fa7b2253fdd198ba7f4afcedd310119772ce4dfe9196a2e120240"
     },
     "langgraph-fundamentals": {
       "source": "langchain-ai/langchain-skills",
       "sourceType": "github",
       "skillPath": "config/skills/langgraph-fundamentals/SKILL.md",
-      "computedHash": "15d38ee836230e438415a256faf54a19eeb08789033aa1211dc113241a42f274"
+      "computedHash": "cefd329526f0611a50db7a1b440fdedbd25d0384928c5b0b6b4621735a39a184"
     },
     "langgraph-human-in-the-loop": {
       "source": "langchain-ai/langchain-skills",
       "sourceType": "github",
       "skillPath": "config/skills/langgraph-human-in-the-loop/SKILL.md",
-      "computedHash": "f98bc8e16c416b859bebf6126009d637b72a26d510d234c296a774d79736ead9"
+      "computedHash": "4239d527036304633560559335e4aef22edf9080f8cbd662855dea5e2f324365"
     },
     "langgraph-persistence": {
       "source": "langchain-ai/langchain-skills",
       "sourceType": "github",
       "skillPath": "config/skills/langgraph-persistence/SKILL.md",
-      "computedHash": "7538756e423b3da5ce25b6c7f99070792214a9c7a51510e9579a40a190e88ccd"
+      "computedHash": "4b53651a29a0ba20f1cd752d8daf59be2993af1cae330936da1ad4f949081a3a"
     },
     "mcp-builder": {
       "source": "anthropics/skills",
       "sourceType": "github",
       "skillPath": "skills/mcp-builder/SKILL.md",
-      "computedHash": "2e3a22ac4f37f654f7aeed55c72776b06c5c2d0e39489f72109f66211d997648"
+      "computedHash": "5a699fa929d99d7e6b1ebe10f13bf960d9ad452b70bd0733efd5d1de9524e285"
     },
     "postgres-patterns": {
       "source": "affaan-m/ecc",
       "sourceType": "github",
       "skillPath": "skills/postgres-patterns/SKILL.md",
-      "computedHash": "5ec6a4f0504f15fe9464ccaed3ab51afcb52345b9456f36b65afc4e5af1fc6aa"
+      "computedHash": "758f1bbc01cd005b51e04dce9a8e2a5052fbc3b0aacc35de257080a4ecc91948"
     },
     "prompt-engineering-patterns": {
       "source": "wshobson/agents",
       "sourceType": "github",
       "skillPath": "plugins/llm-application-dev/skills/prompt-engineering-patterns/SKILL.md",
-      "computedHash": "3cfeff53f7cbc7b33a5ea1624c1d38563f22c6f7e52ad00b5c9a8b822a763a44"
+      "computedHash": "19df76da97709cf86875b769626a5c178ce20f9cc9e5e3bf96821518a736b38c"
+    },
+    "prompt-optimizer": {
+      "source": "affaan-m/ECC",
+      "sourceType": "github",
+      "skillPath": "skills/prompt-optimizer/SKILL.md",
+      "computedHash": "4d7b7fc3ee0bfe2f5f4d1fd1687b16aaf2e9674b2ba4a74700f4675c976e2c4f"
     },
     "qdrant-search-quality": {
       "source": "qdrant/skills",
       "sourceType": "github",
       "skillPath": "skills/qdrant-search-quality/SKILL.md",
-      "computedHash": "aa7d6515c3dccdd6749ec72c600f6f5e3dff85a92fcf93533420d6d7387b634d"
+      "computedHash": "1225be3064f6310ad06dc2ad3e30afd4d410c4b5aaaad0edba9098adaca8963e"
+    },
+    "rag-blueprint": {
+      "source": "NVIDIA/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rag-blueprint/SKILL.md",
+      "computedHash": "595b2e3f6acc8faf86f42151642c1c10eb4e3a2d9d8f9a94236874fc314ca5e5"
+    },
+    "rag-implementation": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/llm-application-dev/skills/rag-implementation/SKILL.md",
+      "computedHash": "f488cd68c88657f8e0fb6476b4b6acf0142ab4aa17ceb036f0106829a94935ab"
     },
     "vercel-react-best-practices": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
       "skillPath": "skills/react-best-practices/SKILL.md",
-      "computedHash": "3219a1944e404ffc14d1d9d6aef6dd2e3855b81387ee0a044ccbfe14d34c2357"
+      "computedHash": "7991ed4fbecdac23f47c1a40c243e00a212a9e7f3604db93959b3ae11dffe299"
     }
   }
 }

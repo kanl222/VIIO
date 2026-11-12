@@ -7,7 +7,12 @@ interface ChatMessageProps {
 }
 
 // Вынесенные регулярные выражения во избежание повторной компиляции на каждую строку/рендер (js-hoist-regexp)
-const INLINE_REGEX = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+const DOWNLOAD_PATH = String.raw`/api/chat/download/doc-(?:[0-9a-f]{32}|[0-9a-f]{8})`;
+const INLINE_REGEX = new RegExp(
+  String.raw`\[([^\]\n]+)\]\((${DOWNLOAD_PATH})\)|(?<![\w/])(${DOWNLOAD_PATH})(?![\w./?#%-])|` +
+  /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/.source,
+  'g',
+);
 const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g;
 const ORDERED_REGEX = /^(\d+)\.\s+(.*)$/;
 const FENCE_REGEX = /^\s*(`{3,}|~{3,})/;
@@ -84,7 +89,14 @@ function renderInline(text: string): React.ReactNode {
       parts.push(text.slice(lastIndex, match.index));
     }
     const token = match[0];
-    if (token.startsWith('`') && token.endsWith('`')) {
+    const downloadUrl = match[2] || match[3];
+    if (downloadUrl) {
+      parts.push(
+        <a key={match.index} href={downloadUrl} className="underline text-indigo-600 dark:text-indigo-300">
+          {match[1] || 'Скачать документ'}
+        </a>
+      );
+    } else if (token.startsWith('`') && token.endsWith('`')) {
       parts.push(
         <code
           key={match.index}

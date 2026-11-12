@@ -110,7 +110,7 @@ def test_factory_uses_one_model_without_a_separate_coder(provider, client):
     general_name = settings.lmstudio_model if provider == "lmstudio" else settings.ollama_model
     assert [call.kwargs["model"] for call in models.call_args_list] == [general_name]
     graphs.assert_called_once()
-    assert {t.name for t in graphs.call_args.kwargs["tools"]} == {"search_knowledge_base", "manage_plan"}
+    assert {t.name for t in graphs.call_args.kwargs["tools"]} == {"search_knowledge_base", "list_documents", "manage_plan"}
 
 
 @pytest.mark.parametrize("message", ["Напиши SQL SELECT", "Создай функцию", "Исправь код", "Перепиши SOAP на REST API"])

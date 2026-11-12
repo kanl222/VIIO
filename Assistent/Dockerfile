@@ -3,6 +3,7 @@ FROM ghcr.io/astral-sh/uv:latest AS uv
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
+ENV UV_LINK_MODE=copy
 
 COPY --from=uv /uv /bin/uv
 

@@ -311,7 +311,12 @@ def build_database_analyst_graph(
                     {"operation": "describe", "schema_name": schema_name, "table": table_name},
                     config={"configurable": {"user_context": user_context}},
                 )
-                schema_descriptions.append(f"Таблица {schema_name}.{table_name}:\n{desc}")
+                header = f"Таблица {schema_name}.{table_name}:"
+                clean_desc = str(desc).strip()
+                if clean_desc.startswith(header):
+                    schema_descriptions.append(clean_desc)
+                else:
+                    schema_descriptions.append(f"{header}\n{clean_desc}")
             except Exception as e:
                 logger.warning("Failed to describe table %s: %s", t, e)
 
