@@ -166,6 +166,13 @@ export const EventCard = memo(function EventCard({ event, index, traceId }: Even
       {() => (
         <div className="event-card-body">
           <EventContent event={event} />
+          <LazyDetails className="raw-event-details" summary="Все параметры события для анализа (JSON)">
+            {() => (
+              <pre className="code-block raw-json-block" style={{ marginTop: '10px', maxHeight: '350px', overflow: 'auto', fontSize: '12px' }}>
+                {JSON.stringify(event, null, 2)}
+              </pre>
+            )}
+          </LazyDetails>
         </div>
       )}
     </LazyDetails>

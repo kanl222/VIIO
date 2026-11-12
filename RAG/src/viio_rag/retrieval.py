@@ -199,12 +199,16 @@ class EnhancedRetrieval:
                                  branch_ranks=positions[fragment_key(doc)],
                                  final_rank=final_ranks.get(fragment_key(doc)))
                             for doc, detail in zip(candidates, details)],
-                selected=[dict(fragment_snapshot(doc), selection_reason='ranked' if fragment_key(doc) in ranked_keys
-                               else 'procedural_neighbor') for doc in selected],
+                selected=[dict(fragment_snapshot(doc),
+                               selection_reason='ranked' if fragment_key(doc) in ranked_keys else 'procedural_neighbor',
+                               context_position=pos + 1)
+                          for pos, doc in enumerate(selected)],
                 ranking='lexical term score with document diversity', k=k,
                 ranking_details=dict(query_terms=query_terms(query), min_score=min_score, rrf_k=RRF_K,
                                      text_weight=TEXT_WEIGHT, title_or_filename_weight=TITLE_WEIGHT,
-                                     before_access_check=candidate_count, after_access_check=len(candidates)),
+                                     before_access_check=candidate_count, after_access_check=len(candidates),
+                                     lost_in_the_middle_reordered=len(selected) > 2,
+                                     reordered_count=len(selected)),
             )
         return selected
 

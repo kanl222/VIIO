@@ -9,7 +9,7 @@ export interface Fragment {
   term_score?: number; rrf_score?: number; score?: number; score_rank?: number;
   diversity_rank?: number; final_rank?: number | null; deferred_for_diversity?: boolean;
   matched_text?: string[]; matched_title?: string[]; matched_filename?: string[];
-  branch_ranks?: Record<string, number[]>; selection_reason?: string;
+  branch_ranks?: Record<string, number[]>; selection_reason?: string; context_position?: number;
 }
 export interface ModelMessage { role: string; content: unknown; tool_calls?: unknown[] }
 export interface TraceEvent {
@@ -24,6 +24,7 @@ export interface TraceEvent {
   ranking_details?: {
     query_terms: string[]; min_score: number; rrf_k: number; text_weight: number;
     title_or_filename_weight: number; before_access_check: number; after_access_check: number;
+    lost_in_the_middle_reordered?: boolean; reordered_count?: number;
   };
   ranking?: string; k?: number; model?: string; messages?: ModelMessage[];
   content?: unknown; tool_calls?: unknown[]; mode?: string; model_first_tools?: boolean;
@@ -34,14 +35,19 @@ export interface TraceEvent {
   question?: string; sql?: string; plan?: string; plan_snippet?: string;
   schema?: string; tables?: string[]; old_sql?: string; fixed_sql?: string;
   result?: string; valid?: boolean; attempt?: number; attempts?: number;
-  chars?: number; reference?: string; task?: string; answer?: string;
+  chars?: number; raw_chars?: number; reference?: string; task?: string; answer?: string;
   relevant?: boolean; grounded?: boolean; old_query?: string; new_query?: string;
   fast_path?: boolean; active?: string; length?: number; user?: string;
+  filtered_chunks?: number[]; total_chunks?: number; noise_removed?: number;
+  eval_output?: string; method?: string; strategy?: string;
+  draft_snippet?: string; draft_chars?: number; context_chars?: number;
+  faithfulness_score?: number; lost_in_the_middle_reordered?: boolean; reordered_count?: number;
   usage?: {
     input_tokens?: number; prompt_tokens?: number;
     output_tokens?: number; completion_tokens?: number;
     total_tokens?: number;
   };
+  [key: string]: unknown;
 }
 export interface TraceSummary {
   id: string; agent: string; question: string; thread_id?: string; started_at: string;
