@@ -193,3 +193,44 @@ async def test_supervisor_with_corrective_rag():
     final_msg = res["messages"][-1]
     assert "1000 рублей" in final_msg.content
     assert "Командировки" in final_msg.content
+
+
+@pytest.mark.asyncio
+async def test_corrective_rag_fine_grained_chunk_filtering():
+    """Verify Filter-Reranker paradigm: LLM critique selects only relevant chunks and discards noise."""
+    @tool("search_knowledge_base")
+    async def search_kb(query: str) -> str:
+        """Поиск по базе знаний."""
+        return (
+            '<context source="Шум 1" doc_id="doc-noise1">Правила посещения столовой в обед.</context>\n\n'
+            '<context source="Целевой регламент" doc_id="doc-target">Командировочные выплачиваются в размере 1500 рублей в сутки.</context>\n\n'
+            '<context source="Шум 2" doc_id="doc-noise2">Правила парковки велосипедов на территории.</context>'
+        )
+
+    # 1. grade_documents: LLM critique returns "2" (only chunk 2 is relevant)
+    # 2. generate: answer based on target
+    # 3. check_groundedness: "yes"
+    llm = NoToolCallsModel(messages=iter([
+        AIMessage(content="2"),
+        AIMessage(content="Командировочные выплачиваются в размере 1500 рублей в сутки. Целевой регламент."),
+        AIMessage(content="yes"),
+    ]))
+
+    graph = build_corrective_rag_graph(
+        llm=llm,
+        tools=[search_kb],
+    )
+
+    res = await graph.ainvoke(
+        {"messages": [HumanMessage(content="Сколько составляют командировочные?")]},
+        config={"configurable": {"thread_id": "crag-filter-reranker"}},
+    )
+
+    final_msg = res["messages"][-1]
+    assert "1500 рублей" in final_msg.content
+    assert "Целевой регламент" in final_msg.content
+    sources = final_msg.response_metadata.get("sources", [])
+    assert len(sources) == 1
+    assert sources[0]["document_id"] == "doc-target"
+    assert sources[0]["title"] == "Целевой регламент"
+
