@@ -1,0 +1,1 @@
+"""Pharma catalog matcher package."""
