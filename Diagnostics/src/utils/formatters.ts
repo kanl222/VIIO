@@ -91,7 +91,8 @@ export const roleNames: Record<string, string> = {
 };
 
 export const searchBranchNames: Record<string, string> = {
-  semantic: 'По смыслу',
+  semantic: 'По смыслу (Dense)',
+  sparse_bm25: 'BM25 (Sparse)',
   lexical: 'По словам',
   public: 'Публичный индекс',
 };

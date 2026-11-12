@@ -13,6 +13,7 @@ from qdrant_client import QdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from viio_rag.interfaces import IVectorStore
+from viio_rag.sparse_bm25 import get_sparse_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,9 @@ class QdrantVectorStoreAdapter(IVectorStore):
                         vectors_config=models.VectorParams(
                             size=vector_size, distance=models.Distance.COSINE
                         ),
+                        sparse_vectors_config={
+                            "bm25": models.SparseVectorParams(modifier=models.Modifier.IDF)
+                        },
                     )
                     logger.info(
                         "Коллекция %s создана с размерностью векторов %d",
@@ -150,6 +154,86 @@ class QdrantVectorStoreAdapter(IVectorStore):
                 return []
             logger.error("Ошибка выполнения similarity_search в Qdrant: %s", exc)
             raise
+
+    def sparse_search(
+        self, query: str, k: int = 4, filter: Any | None = None
+    ) -> list[Document]:
+        """Поиск наиболее релевантных фрагментов по Sparse BM25 вектору.
+
+        Args:
+            query: Текстовый поисковый запрос.
+            k: Количество кандидатов.
+            filter: Фильтр прав доступа.
+
+        Returns:
+            Список найденных документов Document.
+        """
+        if k <= 0 or not query.strip():
+            return []
+        try:
+            encoder = get_sparse_encoder()
+            if not encoder.is_available:
+                return []
+
+            sparse_vec = encoder.embed_query(query)
+            if not sparse_vec.indices:
+                return []
+
+            ready = models.Filter(must_not=[models.FieldCondition(key=key, match=models.MatchValue(value=False))
+                for key in ('metadata.ingestion_ready', 'metadata.is_active')])
+            combined_filter = models.Filter(must=[filter, ready]) if filter is not None else ready
+
+            try:
+                response = self._client.query_points(
+                    collection_name=self._collection_name,
+                    query=sparse_vec,
+                    using="bm25",
+                    query_filter=combined_filter,
+                    limit=k,
+                    with_payload=True,
+                )
+                points = response.points if hasattr(response, 'points') else []
+                if points:
+                    return [
+                        Document(
+                            page_content=p.payload.get("page_content", ""),
+                            metadata=p.payload.get("metadata", {})
+                        )
+                        for p in points if p.payload and p.payload.get("page_content")
+                    ]
+            except Exception as e:
+                logger.debug("Qdrant sparse query_points using 'bm25' unavailable (%s), using payload scroll fallback", e)
+
+            return self._sparse_payload_search(query, k, combined_filter)
+        except Exception as exc:
+            if isinstance(exc, UnexpectedResponse) and exc.status_code == 404:
+                return []
+            logger.debug("Sparse search unavailable: %s", exc)
+            return []
+
+    def _sparse_payload_search(self, query: str, k: int, combined_filter: Any | None) -> list[Document]:
+        words = [w for w in re.findall(r'\b\w{3,}\b', query) if not w.isdigit()]
+        if not words:
+            return []
+        text_filter = models.Filter(should=[
+            models.FieldCondition(key="page_content", match=models.MatchText(text=w))
+            for w in words[:6]
+        ])
+        q_filter = models.Filter(must=[combined_filter, text_filter]) if combined_filter else text_filter
+        try:
+            points, _ = self._client.scroll(
+                collection_name=self._collection_name,
+                scroll_filter=q_filter,
+                limit=k,
+                with_payload=True,
+                with_vectors=False,
+            )
+            return [
+                Document(page_content=p.payload.get("page_content", ""), metadata=p.payload.get("metadata", {}))
+                for p in points if p.payload and p.payload.get("page_content")
+            ]
+        except Exception:
+            return []
 
     def _find_acronym_titles(self, query: str, k: int, access_filter: Any | None) -> list[Document]:
         terms = re.findall(r"\b[A-ZА-ЯЁ][A-ZА-ЯЁ0-9]{2,11}\b", query)
