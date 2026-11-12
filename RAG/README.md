@@ -31,13 +31,81 @@ python RAG/scripts/test_managed_rag.py
 
 ## Рабочий сервис VIIO
 
-Отдельный FastAPI-сервис `rag` / контейнер `viio_rag`. Выполняет семантический и лексический поиск, проверяет актуальные права и публикации, ранжирует фрагменты и формирует контекст.
+Отдельный FastAPI-сервис `rag` / контейнер `viio_rag`. Выполняет двухэтапный гибридный поиск (Dense + Sparse BM25 + лексика через RRF), динамическую авторизацию ACL, Cross-Encoder переранжирование, Small2Big расширение контекста и Redis-кэширование.
 
-Точка входа — `viio_rag.app:create_app` в `RAG/src`. Образ собирается из
-`RAG/Dockerfile` и не содержит пакет Documents или обработчики PDF/Office.
-Documents подключает локальный пакет `viio-rag` как зависимость для общего
-кода индексации. В процессе RAG нет очереди обработки, миграций, оригиналов
-и маршрутов записи документов. Индексацию выполняет `document-worker`.
+Точка входа — `viio_rag.app:create_app` в `RAG/src`. Образ собирается из `RAG/Dockerfile` и не содержит пакет Documents или обработчики PDF/Office. Documents подключает локальный пакет `viio-rag` как зависимость для общего кода индексации. В процессе RAG нет очереди обработки, миграций, оригиналов и маршрутов записи документов. Индексацию выполняет `document-worker`.
+
+### Конвейер поиска (RAG Pipeline)
+
+```mermaid
+flowchart TD
+    UserQuery[Поисковый запрос] --> CacheCheck{Проверка Redis}
+    CacheCheck -->|Cache Miss| ParallelSearch[Параллельный сбор кандидатов pool=25]
+    CacheCheck -->|Cache Hit| RawCandidates[Сырые кандидаты]
+    
+    subgraph MultiBranch [Источники кандидатов]
+        Dense[Dense векторный поиск · Qdrant]
+        Sparse[Sparse BM25 · Qdrant/bm25 ONNX]
+        Lexical[Лексический поиск · Каталог PostgreSQL]
+        Public[Публичный индекс · Qdrant Public]
+    end
+    
+    ParallelSearch --> Dense & Sparse & Lexical & Public
+    Dense & Sparse & Lexical & Public --> RRF[Reciprocal Rank Fusion · слияние рангов]
+    RRF --> RawCandidates
+    
+    RawCandidates --> ACL[Динамическая проверка ACL каталога PostgreSQL]
+    ACL --> Authorized[Авторизованные кандидаты]
+    
+    Authorized --> CrossEncoder[Cross-Encoder Reranker · bge-reranker-v2-m3 CPU ONNX]
+    CrossEncoder --> ScoreFilter[Фильтрация по min_score >= 0.1]
+    ScoreFilter --> TopK[Итоговые Top-K фрагментов]
+    
+    TopK --> Small2Big[Small2Big расширение · window_context для LLM]
+    Small2Big --> ContextBuilder[Формирование финального контекста и телеметрии]
+```
+
+1. **Многопоточный отбор (Multi-Branch Retrieval + RRF):**
+   - **Dense (семантический):** косинусное сходство плотных эмбеддингов в Qdrant.
+   - **Sparse BM25:** разреженные векторы по модели `Qdrant/bm25` (библиотека `fastembed`), токенизация с учётом русского и английского языков и IDF-весов. Сохраняются в отдельном sparse-векторном пространстве Qdrant (`sparse_vectors_config={"bm25": models.SparseVectorParams(modifier=models.Modifier.IDF)}`). Находит точные совпадения аббревиатур, номеров приказов, медикаментов и технических терминов.
+   - **Lexical:** лексический полнотекстовый поиск каталога PostgreSQL.
+   - Слияние списков через **Reciprocal Rank Fusion (RRF)**: $RRF(d) = \sum_{m} \frac{1}{60 + rank_m(d)}$.
+
+2. **Динамическая авторизация ACL:**
+   - Все кандидаты проходят через `self.data.authorized_candidates(candidates, context)`.
+   - **Инвариант безопасности:** результаты поиска никогда не кэшируются целиком в обход ACL. Кэшируются только сырые кандидаты и пары скоринга переранжирования; проверка прав пользователя по ролям, подразделениям и авторству выполняется всегда динамически.
+
+3. **Cross-Encoder Reranker (`bge-reranker-v2-m3`):**
+   - Локальная модель на базе ONNX Runtime (CPU, библиотека `fastembed`, без необходимости GPU).
+   - Принимает пул из 25 кандидатов и вычисляет совместный кросс-аттеншн `(query, document_text)`.
+   - Отсекает ложные совпадения по порогу `min_score` (по умолчанию 0.1) и оставляет наиболее семантически значимые фрагменты.
+
+4. **Small2Big / Sentence-Window Context Expansion:**
+   - При индексации документы разбиваются на компактные предложения (микро-чанки) через `split_into_sentences`.
+   - В метаданные сохраняется связное окно соседних предложений `metadata["window_context"]` ($\pm 1$ предложение).
+   - Векторный и разреженный поиск выполняется по точным микро-чанкам (без размытия семантического вектора), а в промпт для LLM генерации подставляется расширенное окно `window_context`, исключающее обрыв мысли на полуслове.
+   - Телеметрия отслеживает `small2big_ratio` и `small2big_expanded_chars`.
+
+5. **Redis-кэширование (`ViioRedisCache`):**
+   - Кэширование сырых кандидатов веток (`viio:candidates:...`, `viio:sparse:...`) со стандартным TTL 30 минут.
+   - Кэширование скоров Cross-Encoder (`viio:score:...`) со стандартным TTL 24 часа.
+   - **In-memory Fallback:** если Redis недоступен или временно остановлен, сервис прозрачно переключается на встроенный словарь процесса без прерывания поисковых запросов.
+
+### Переменные конфигурации (.env)
+
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Адрес подключения к Redis для кэширования |
+| `REDIS_ENABLED` | `true` | Включение кэширования (при `false` кэш выключен) |
+| `REDIS_CACHE_TTL` | `86400` | Время жизни кэша скоров переранжирования (сек) |
+| `RERANKER_ENABLED` | `true` | Включение двухэтапного переранжирования Cross-Encoder |
+| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Модель ONNX Cross-Encoder (FastEmbed) |
+| `RERANKER_TOP_K` | `25` | Размер пула кандидатов перед переранжированием |
+| `RERANKER_MIN_SCORE` | `0.1` | Минимальный порог релевантности для отсечения шума |
+| `SPARSE_BM25_ENABLED` | `true` | Включение ветки разреженного BM25 поиска в Qdrant |
+| `SPARSE_BM25_MODEL` | `Qdrant/bm25` | Модель разреженных векторов BM25 (FastEmbed) |
+| `SMALL2BIG_ENABLED` | `true` | Включение Sentence-Window расширения контекста |
+| `SMALL2BIG_WINDOW_SENTENCES` | `1` | Размер связного окна предложений (влево и вправо) |
 
 ## FastAPI API
 
@@ -77,6 +145,13 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compos
 
 Тесты общей библиотеки и её интеграции с Documents из корня:
 `uv run --project Documents --group dev pytest RAG/tests Documents/tests`.
+
+Запуск тестов гибридного поиска, переранжирования и кэширования:
+```powershell
+pytest RAG/tests/test_hybrid_sparse_bm25.py
+pytest RAG/tests/test_small2big_sentence_window.py
+pytest RAG/tests/test_reranker_and_cache.py
+```
 Для чистой проверки вне рабочего `.env` запускайте тесты из отдельной папки
 с абсолютными путями; сценарии облачных тестов, напротив, явно читают корневой `.env`.
 

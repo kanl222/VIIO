@@ -2,7 +2,7 @@
 
 VIIO — платформа с веб-чатом, поиском по документам организации и единым агентом с инструментами по правам пользователя. Сотрудники задают вопросы по доступным им материалам, программисты получают код с учётом проектных сведений, администраторы управляют пользователями и загрузкой документов.
 
-Модели работают через Yandex AI Studio, LM Studio или Ollama. Пользователи и история хранятся в PostgreSQL, поисковые фрагменты документов — в Qdrant. Приложение запускается через Docker Compose на Windows и Linux; сервер моделей подготавливается отдельно.
+Модели работают через Yandex AI Studio, LM Studio или Ollama. Пользователи и история хранятся в PostgreSQL, поисковые фрагменты документов — в Qdrant, а кэш поиска и скоров — в Redis. Приложение запускается через Docker Compose на Windows и Linux; сервер моделей подготавливается отдельно.
 
 **[Запуск на Windows и Linux](docs/getting-started.md)** · **[Пользователи и загрузка файлов](docs/getting-started.md#5-создать-пользователя)** · **[Инструменты агента](docs/mcp-integrations.md)**
 
@@ -25,7 +25,7 @@ VIIO — платформа с веб-чатом, поиском по докум
 | Направление | Что реализовано |
 | --- | --- |
 | Веб-чат | Регистрация, вход, отдельные диалоги, история сообщений, светлая и тёмная темы, подсветка кода |
-| Ответы по документам | PDF, DOCX, ODT и текст; очистка извлечённого текста, OCR PDF через Docling на CPU, поиск с проверкой прав и источниками |
+| Ответы по документам | PDF, DOCX, ODT и текст; двухэтапный поиск (Dense + Sparse BM25 + лексика через RRF, переранжирование Cross-Encoder BAAI/bge-reranker-v2-m3 на CPU ONNX), расширение контекста Small2Big (Sentence-Window), кэширование в Redis, OCR PDF через Docling на CPU, поиск с проверкой прав и источниками |
 | Программирование | Отдельная модель coder, автоматическая передача технических задач и прямой вызов через `/code` |
 | Тестовая PostgreSQL | Готовый Postgres MCP Pro, чтение схем и SELECT через `/db` и естественные вопросы о подключённой БД, доступ только программистам и администраторам |
 | Управление доступом | Роли пользователей, подразделения, права документов и проверка владельца диалога |
@@ -44,9 +44,12 @@ flowchart TD
     WebChat -->|Запрос и контекст пользователя| API[assistent · FastAPI + LangGraph]
     API -->|Состояние графа| AgentDB[(PostgreSQL · agent_db)]
     API -->|Поиск с проверкой прав| Documents[Documents API · :8002]
+    Documents -->|Прокси поиска| RAG[RAG Service · :8000]
     Consultant[Агент-консультант · :8001] -->|Только опубликованное| Documents
     WebChat -->|Загрузка, каталог, скачивание| Documents
-    Documents --> Qdrant[(Qdrant · база знаний)]
+    RAG --> Qdrant[(Qdrant · Dense + Sparse BM25)]
+    RAG --> Redis[(Redis · кэш кандидатов и скоров)]
+    RAG --> PostgresRead[(PostgreSQL · каталог ACL read-only)]
     Documents --> Worker[Document Worker · очередь и индексация]
     Worker --> Qdrant
     Worker --> Files[(Оригиналы документов)]
@@ -61,10 +64,11 @@ flowchart TD
 | `assistent` | Python 3.12, FastAPI, LangChain, LangGraph | Основной агент, coder, диалоги и личные факты; поиск через Documents API |
 | `consultant` | FastAPI, LangChain | Самостоятельный агент-консультант; инструмент поиска разрешённых публикаций |
 | `documents` | FastAPI, PostgreSQL, Qdrant | Общий каталог, права, версии, публикации, загрузка, скачивание; совместимые поисковые URL передают запросы в RAG |
-| `rag` | FastAPI, PostgreSQL read-only, Qdrant read-only | Поиск, ранжирование, проверка актуальных ACL, подготовка контекста и трассировка поиска |
+| `rag` | FastAPI, FastEmbed (ONNX), PostgreSQL read-only, Qdrant read-only, Redis | Двухэтапный гибридный поиск (Dense + Sparse BM25 + каталог по RRF), Cross-Encoder переранжирование, Small2Big контекст, ACL и трассировка |
+| `redis` | Redis 7.2 Alpine | Высокоскоростное кэширование сырых кандидатов поиска и скоров переранжирования |
 | `document-worker` | Python, очередь PostgreSQL | Обработка файлов, PDF/OCR, индексация и синхронизация публикаций в отдельном процессе |
 | `postgres` | PostgreSQL 16 | Две базы: `user_db` для веб-чата и `agent_db` для состояния LangGraph |
-| `qdrant` | Qdrant | Хранение поисковых фрагментов и векторов, поиск с фильтрацией доступа |
+| `qdrant` | Qdrant | Хранение плотных векторов и Sparse BM25 фрагментов, поиск с фильтрацией доступа |
 
 Каталог основного проекта — `Assistent`, Python-пакет и Docker-сервис — `assistent`, контейнер — `viio_assistent`. Documents и worker используют самостоятельный пакет `viio_documents` из `Documents/src` со своими зависимостями и Docker-сборкой. Связь агентов с документами проходит только по HTTP; модели диалога/coder в Documents не создаются. У основного агента нет тома с оригиналами и обработчиков очереди. [Границы сервисов и запуск](Documents/README.md).
 
@@ -125,6 +129,8 @@ docker compose ps
 | Состояние assistent | [localhost:8000/health](http://localhost:8000/health) |
 | Панель Qdrant | [localhost:6333/dashboard](http://localhost:6333/dashboard) |
 | PostgreSQL | `localhost:5432` |
+| Redis | `localhost:6379` |
+| Диагностика поиска и агентов | [localhost:3010](http://localhost:3010) |
 
 Порты меняются в корневом `.env`. Проверка здоровья API не заменяет проверку ответа модели: после запуска отправьте вопрос в чате.
 
@@ -164,7 +170,18 @@ docker compose down
 | Название | До 255 символов |
 | Варианты доступа | Сотрудникам, выбранным подразделениям, администраторам или всем |
 
-assistent разбивает текст на фрагменты, вычисляет эмбеддинги и сохраняет их в Qdrant. При поиске применяются права из метаданных: `is_public`, `allowed_roles`, `allowed_departments`, `owner_id`. Достаточно разрешения по одному основанию; администратор и автор сохраняют доступ.
+При индексации применяется **Small2Big (Sentence-Window) чанкинг**: текст нарезается на компактные смысловые фрагменты (микро-чанки) для максимальной точности векторного сходства, а в метаданные каждого фрагмента сохраняется расширенное связное окно предложений (`window_context`).
+
+Поиск документов устроен как **двухэтапный гибридный конвейер**:
+1. **Многопоточный отбор пула кандидатов:**
+   - *Плотный семантический поиск (Dense)* в Qdrant по векторным расстояниям.
+   - *Разреженный поиск (Sparse BM25)* в Qdrant с использованием модели `Qdrant/bm25` (библиотека `fastembed`) и нативного модификатора IDF.
+   - *Лексический поиск* по каталогу документов в PostgreSQL.
+   - Результаты объединяются по алгоритму Reciprocal Rank Fusion (RRF).
+2. **Строгая авторизация ACL:** все кандидаты динамически проверяются по каталогу PostgreSQL с учётом текущей роли, подразделений и авторства пользователя.
+3. **Cross-Encoder переранжирование:** локальная ONNX-модель `BAAI/bge-reranker-v2-m3` (на CPU, без видеокарты) переоценивает релевантность топ-кандидатов и отсекает ложные совпадения по порогу `RERANKER_MIN_SCORE`.
+4. **Контекстное расширение Small2Big:** для отобранных фрагментов в промпт модели передаётся связное окно предложений, что гарантирует целостность фраз без обрыва мыслей.
+5. **Кэширование в Redis:** сырые кандидаты поиска и результаты переранжирования кэшируются в Redis (с автоматическим fallback в память процесса при недоступности кэша), обеспечивая мгновенный повторный ответ.
 
 Для внешних пользователей служит отдельная коллекция `knowledge_public`: в ней находятся только явно опубликованные администратором снимки. Основной агент ищет и в ней, и в доступных внутренних материалах; консультант — только в публичной. Флаг `is_public` сам по себе не включает внешнюю публикацию. [Устройство индексов, синхронизация и проверки](docs/public-qdrant-2026-10-27.md).
 
@@ -198,8 +215,10 @@ assistent разбивает текст на фрагменты, вычисля�
 | Ollama | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL` |
 | Coder | `CODING_AGENT_ENABLED`, `CODING_MODEL`, `CODING_ALLOWED_ROLES`, `CODING_CONTEXT_MAX_CHARS` |
 | База знаний | `QDRANT_COLLECTION_NAME`, `QDRANT_PUBLIC_COLLECTION_NAME`, `RAG_CHUNK_UNIT`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_CONTEXT_MAX_CHARS` |
+| RAG и Reranker | `RERANKER_ENABLED`, `RERANKER_MODEL`, `RERANKER_TOP_K`, `SPARSE_BM25_ENABLED`, `SMALL2BIG_ENABLED` |
+| Redis кэширование | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_ENABLED`, `REDIS_CACHE_TTL` |
 | PostgreSQL | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT` |
-| Внешние порты | `WEBCHAT_PORT`, `API_PORT`, `QDRANT_PORT`, `QDRANT_GRPC_PORT` |
+| Внешние порты | `WEBCHAT_PORT`, `API_PORT`, `QDRANT_PORT`, `QDRANT_GRPC_PORT`, `REDIS_PORT` |
 | Генерация консультанта | `CHAT_TEMPERATURE`, `CHAT_TOP_P`, `CHAT_MAX_TOKENS` |
 | Генерация coder | `CODING_TEMPERATURE`, `CODING_TOP_P`, `CODING_MAX_TOKENS` |
 | Первый администратор | `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD` (оба пусты — выключено) |
@@ -214,19 +233,11 @@ WebChat добавляет `X-Internal-Token` к защищённым запро
 
 ```text
 VIIO/
-├── Assistent/
-│   ├── src/assistent/
-│   │   ├── models/          # Фабрики моделей: chat, coder, embeddings
-│   │   ├── services/        # Граф агента, маршрутизация, документы
-│   │   ├── tools/           # Поиск в базе знаний
-│   │   ├── interfaces/      # Контракты сервисов
-│   │   ├── utils/           # Адаптеры хранилищ и инфраструктура
-│   │   ├── prompts.py       # Короткие инструкции консультанта и coder
-│   │   ├── config.py        # Настройки из окружения
-│   │   └── router.py        # HTTP API и схемы запросов
-│   └── tests/
-├── Documents/              # Образ API документов и worker, инструкции запуска
+├── Assistent/              # Единый LangGraph-агент, диалог, coder и инструменты
+├── RAG/                    # Двухэтапный гибридный поиск, Sparse BM25, Reranker, кэш
+├── Documents/              # Каталог документов, права (ACL), очереди и worker
 ├── Consultant/             # Самостоятельный агент-консультант
+├── Diagnostics/            # Веб-панель телеметрии запросов, OCR и RAG (порт 3010)
 ├── WebChat/
 │   ├── src/                # React-интерфейс
 │   ├── server/             # Express, сессии, чат и администрирование
