@@ -44,6 +44,11 @@ const Fragments = memo(function Fragments({ items, label }: FragmentsProps) {
                       ONNX: {item.cross_encoder_score.toFixed(2)}
                     </span>
                   ) : null}
+                  {item.has_window ? (
+                    <span className="badge-highlight good" style={{ fontSize: '11px', padding: '1px 5px' }} title="Small2Big расширение контекстного окна">
+                      Окно: {item.window_chars} симв.
+                    </span>
+                  ) : null}
                   {item.selection_reason ? (
                     <span className="badge-highlight" style={{ fontSize: '11px', padding: '1px 5px' }}>
                       {item.selection_reason === 'procedural_neighbor' ? 'сосед' : 'ранжирован'}
@@ -180,6 +185,16 @@ export const RetrievalStage = memo(function RetrievalStage({ event }: { event: T
               <dd>
                 <span className="badge-highlight good">
                   ✓ U-образная раскладка Lost-in-the-Middle ({event.ranking_details.reordered_count ?? 0} чанков)
+                </span>
+              </dd>
+            </>
+          ) : null}
+          {(event.ranking_details as any)?.small2big_enabled ? (
+            <>
+              <dt>Small2Big Контекст:</dt>
+              <dd>
+                <span className="badge-highlight good">
+                  ✓ Оконное расширение контекста (коэффициент: {(event.ranking_details as any)?.small2big_ratio ?? 1}x, {(event.ranking_details as any)?.small2big_expanded_chars ?? 0} симв.)
                 </span>
               </dd>
             </>

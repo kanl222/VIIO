@@ -159,11 +159,77 @@ def table_blocks(body):
         yield table, '\n'.join(lines)
 
 
-def document_chunks(content, size=500, overlap=50, unit='characters', strip_toc=True):
+SENTENCE_SPLIT_REGEX = re.compile(r'(?<=[.!?…])\s+(?=[А-ЯA-ZЁ«"\d])')
+
+
+def split_into_sentences(text: str) -> list[str]:
+    """Split text into sentences preserving punctuation."""
+    if not text or not text.strip():
+        return []
+    paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+    sentences: list[str] = []
+    for p in paragraphs:
+        parts = SENTENCE_SPLIT_REGEX.split(p)
+        for part in parts:
+            clean = part.strip()
+            if clean:
+                sentences.append(clean)
+    return sentences
+
+
+def sentence_window_chunks(content: str, window_sentences: int = 2, strip_toc: bool = True):
+    """Yield fine-grained sentence-level (Small) chunks with expanded window (Big) context.
+
+    Each yield is (small_chunk_text, metadata) where metadata contains 'window_context'.
+    """
+    for headings, body in sections(content, strip_toc=strip_toc):
+        path = [title for _, title in headings]
+        prefix = '\n'.join('#' * level + ' ' + title for level, title in headings)
+        metadata = {
+            'section_path': path,
+            'chunker_version': 'sentence-window-v1',
+            'chunker_strategy': 'small2big',
+        }
+        if not body:
+            if prefix:
+                yield prefix, {**metadata, 'window_context': prefix}
+            continue
+
+        raw_items: list[tuple[str, str]] = []
+        for is_table, block in table_blocks(body):
+            if is_table:
+                table_parts = list(split_table(block, 800, 100, 'characters'))
+                for part in table_parts:
+                    raw_items.append(('table', part))
+            else:
+                sentences = split_into_sentences(block)
+                for sent in sentences:
+                    raw_items.append(('sentence', sent))
+
+        total_items = len(raw_items)
+        for idx, (kind, item_text) in enumerate(raw_items):
+            small_text = prefix + '\n\n' + item_text if prefix else item_text
+            if kind == 'sentence' and window_sentences > 0 and total_items > 1:
+                w_start = max(0, idx - window_sentences)
+                w_end = min(total_items, idx + window_sentences + 1)
+                w_body = ' '.join(t for _, t in raw_items[w_start:w_end])
+                window_context = prefix + '\n\n' + w_body if prefix else w_body
+            else:
+                window_context = small_text
+
+            yield small_text, {
+                **metadata,
+                'window_context': window_context,
+                'sentence_index': idx,
+                'sentence_count': total_items,
+                'window_sentences': window_sentences,
+            }
+
+
+def document_chunks(content, size=500, overlap=50, unit='characters', strip_toc=True, window_size=1):
     """Return (text, metadata) pairs from the final, human-reviewed content.
 
-    Source parser offsets are deliberately not reused: review can edit text.
-    Large paragraphs still use the configured bounded splitter.
+    Includes Small2Big 'window_context' in metadata when window_size > 0.
     """
     measure = (lambda text: len(text.split())) if unit == 'words' else len
     for headings, body in sections(content, strip_toc=strip_toc):
@@ -176,14 +242,32 @@ def document_chunks(content, size=500, overlap=50, unit='characters', strip_toc=
         metadata = {'section_path': path, 'chunker_version': CHUNKER_VERSION}
         if not body:
             if prefix:
-                yield prefix, metadata
+                yield prefix, {**metadata, 'window_context': prefix}
             continue
-        # Отделяем таблицы от прозы, даже если экспортер пропустил пустую строку.
+
+        raw_parts: list[str] = []
         for is_table, block in table_blocks(body):
             safe_overlap = min(overlap, budget - 1)
             rows = block.splitlines()
             has_header = is_table and len(rows) > 1 and re.match(r'^\s*\|[\s:|\-]+\|\s*$', rows[1])
             parts = (split_table(block, budget, safe_overlap, unit) if has_header
                      else split_document_text(block, budget, safe_overlap, unit))
-            for part in parts:
-                yield (prefix + '\n\n' + part if prefix else part), metadata
+            raw_parts.extend(parts)
+
+        total_parts = len(raw_parts)
+        for idx, part in enumerate(raw_parts):
+            chunk_text = prefix + '\n\n' + part if prefix else part
+            if window_size > 0 and total_parts > 1:
+                w_start = max(0, idx - window_size)
+                w_end = min(total_parts, idx + window_size + 1)
+                w_body = '\n\n'.join(raw_parts[w_start:w_end])
+                window_context = prefix + '\n\n' + w_body if prefix else w_body
+            else:
+                window_context = chunk_text
+
+            chunk_meta = {
+                **metadata,
+                'window_context': window_context,
+                'chunk_window_size': window_size,
+            }
+            yield chunk_text, chunk_meta
