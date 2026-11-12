@@ -59,6 +59,23 @@ async def test_rag_public_and_internal_capabilities_cannot_be_swapped():
 
 
 @pytest.mark.asyncio
+async def test_rag_targeted_search_traces_only_returned_documents(monkeypatch):
+    app, _ = rag_fixture()
+    selected = Document(page_content='Allowed instruction', metadata={'document_id': 'allowed', 'title': 'Guide'})
+    lookup = AsyncMock(return_value=[selected])
+    monkeypatch.setattr('viio_rag.app.search_selected_documents', lookup)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://rag') as client:
+        result = await client.post('/api/v1/knowledge/search', headers={'X-Internal-Token': READ_KEY}, json={
+            'query': 'instruction', 'document_ids': ['allowed', 'DENIED_PRIVATE_ID'], 'diagnostics': True,
+        })
+    assert result.status_code == 200
+    diagnostic = result.json()['diagnostics']
+    assert diagnostic['lookup_mode'] == 'document_ids' and diagnostic['requested_documents'] == 2
+    assert diagnostic['selected'][0]['selection_reason'] == 'document_id'
+    assert 'DENIED_PRIVATE_ID' not in result.text
+
+
+@pytest.mark.asyncio
 async def test_rag_has_revision_and_health_but_no_document_writes():
     app, _ = rag_fixture()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://rag') as client:

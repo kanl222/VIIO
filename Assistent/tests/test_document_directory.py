@@ -38,13 +38,43 @@ async def test_catalog_parallel_calls_are_bounded_and_sources_survive():
         AIMessage(content='', tool_calls=[
             {'name': 'list_documents', 'args': {'offset': offset}, 'id': f'call-{offset}'}
             for offset in (0, 20)]),
-        AIMessage(content='Guide'),
+        AIMessage(content='[Guide](/api/chat/download/guide) (doc_id: guide)'),
     ]))
     graph = build_agent_graph(model, [directory, search], MemorySaver(),
                               model_first_tools=True, task_routing=False, max_tool_calls=6)
     reply, _ = await AgentService(graph).chat('Какие документы доступны?', user_context={'role': 'employee'})
     assert calls == [0]
     assert reply.sources == [{'title': 'Guide', 'document_id': 'guide'}]
+    assert reply == '[Guide](/api/chat/download/guide)'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('citation', [
+    'Руководство пользователя ИС ЛО',
+    'Инструкция по ИС ЛО (doc_id: doc-guide)',
+])
+async def test_search_keeps_the_source_card_when_model_uses_a_readable_name(citation):
+    @tool('search_knowledge_base', response_format='content_and_artifact')
+    async def search(query: str):
+        """Read document content."""
+        from assistent.services.answer_sources import readable_reference, sources_from_reference
+        reference = (
+            '<context source="06_is_lo_rukovodstvo_polzovatelya" doc_id="doc-guide">'
+            '# Руководство пользователя ИС ЛО\nНажмите «Продолжить».</context>'
+        )
+        return readable_reference(reference, include_ids=True), {'sources': sources_from_reference(reference)}
+
+    model = DirectoryModel(messages=iter([
+        AIMessage(content='', tool_calls=[
+            {'name': 'search_knowledge_base', 'args': {'query': 'сертификат'}, 'id': 'search'}]),
+        AIMessage(content=f'Нажмите «Продолжить».\n\nИсточники:\n• {citation}'),
+    ]))
+    graph = build_agent_graph(model, [search], model_first_tools=True, task_routing=False)
+
+    reply, _ = await AgentService(graph).chat('Что нажать после выбора сертификата?')
+
+    assert reply.sources == [{'title': 'Руководство пользователя ИС ЛО', 'document_id': 'doc-guide'}]
+    assert 'doc-guide' not in reply
 
 
 @pytest.mark.asyncio

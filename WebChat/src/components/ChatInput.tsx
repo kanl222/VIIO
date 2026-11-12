@@ -1,10 +1,15 @@
-import React, { useRef, useState, memo } from 'react';
+import React, { useEffect, useRef, useState, memo } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 
 interface ChatInputProps {
   onSendMessage: (text: string) => void | Promise<void>;
   disabled?: boolean;
   placeholder?: string;
+}
+
+function resizeInput(input: HTMLTextAreaElement) {
+  input.style.height = 'auto';
+  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = memo(({
@@ -15,11 +20,36 @@ export const ChatInput: React.FC<ChatInputProps> = memo(({
   const [text, setText] = useState('');
   const textarea = useRef<HTMLTextAreaElement>(null);
 
+  useEffect(() => {
+    if (disabled) return;
+
+    const startTyping = (event: KeyboardEvent) => {
+      const input = textarea.current;
+      const active = document.activeElement;
+      if (!input || input.disabled || active === input || !document.hasFocus() ||
+          event.defaultPrevented || event.isComposing || event.metaKey ||
+          ((event.ctrlKey || event.altKey) && !event.getModifierState('AltGraph')) ||
+          event.key === ' ' || [...event.key].length !== 1 ||
+          (active instanceof HTMLElement && active.isContentEditable) ||
+          active?.closest('input, textarea, select, [role="textbox"], [role="combobox"], [role="dialog"]')) return;
+
+      event.preventDefault();
+      input.focus({ preventScroll: true });
+      const { selectionStart, selectionEnd } = input;
+      if (input.value.length - (selectionEnd - selectionStart) + event.key.length <= input.maxLength) {
+        input.setRangeText(event.key, selectionStart, selectionEnd, 'end');
+        setText(input.value);
+        resizeInput(input);
+      }
+    };
+
+    document.addEventListener('keydown', startTyping);
+    return () => document.removeEventListener('keydown', startTyping);
+  }, [disabled]);
+
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
-    const target = e.target;
-    target.style.height = 'auto';
-    target.style.height = `${Math.min(target.scrollHeight, 180)}px`;
+    resizeInput(e.target);
   };
 
   const submit = () => {

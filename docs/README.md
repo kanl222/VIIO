@@ -4,6 +4,7 @@
 - [Администрирование](admin-ui.md)
 - [Инструменты и права доступа](mcp-integrations.md)
 - [Компоненты агента](ready-agent-components.md)
+- [Скиллы агентов](agent-skills.md)
 - [Облачные модели](cloud-models.md)
 - [Свёртка истории диалога](dialogue-summarization.md)
 - [PostgreSQL](postgresql-tool.md)

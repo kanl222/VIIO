@@ -54,6 +54,18 @@ test('saved assistant messages show one source list rather than model and attach
   assert(html.includes('Предоставленные материалы'));
 });
 
+test('catalog download paths render as links while unrelated links remain text', () => {
+  const { ChatMessage } = loadSource('../src/components/ChatMessage.tsx', {});
+  const path = '/api/chat/download/doc-0123456789abcdef0123456789abcdef';
+  const html = renderToStaticMarkup(React.createElement(ChatMessage, { message: {
+    id: 'catalog-downloads', sender: 'assistant',
+    text: '1. Руководство — [Скачать](' + path + ')\n2. Инструкция — /api/chat/download/doc-01234567\n[Другое](javascript:alert(1))',
+  } }));
+  assert(html.includes('href="' + path + '"'));
+  assert(html.includes('href="/api/chat/download/doc-01234567"'));
+  assert(!html.includes('href="javascript:'));
+});
+
 test('citation cleanup preserves code and explanations after a source heading', () => {
   const { stripDuplicateSources } = loadSource('../src/components/ChatMessage.tsx', {});
   const code = '```text\nИсточники:\n- Материал «Регламент»\n```';
@@ -141,6 +153,7 @@ test('composer sends messages without a knowledge base selector or cloud consent
     useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial;
       return [slots[i], value => { slots[i] = value; }]; },
     useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
+    useEffect() {},
   };
   const { ChatInput } = loadSource('../src/components/ChatInput.tsx', { react });
   const render = () => { cursor = 0; return ChatInput({ onSendMessage: (...args) => sent.push(args) }); };

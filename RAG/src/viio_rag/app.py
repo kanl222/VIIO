@@ -14,7 +14,8 @@ from viio_rag.embeddings import create_embeddings
 from viio_rag.schemas import PublicQuestion, PublishedIdsRequest, KnowledgeQuestion, ManagedRagQuestion
 from viio_rag.security import authorize, authorize_publication
 from viio_rag.catalog import ReadCatalog
-from viio_rag.retrieval import EnhancedRetrieval
+from viio_rag.retrieval import EnhancedRetrieval, fragment_snapshot
+from viio_rag.diagnostics import capture, record
 from viio_rag.knowledge_data import KnowledgeData
 from viio_rag.publication_index import PublicationIndex
 from viio_rag.publication_search import search_publications
@@ -99,10 +100,27 @@ def create_app(settings=None, *, data=None, vector_store=None):
         context = question.user_context.model_dump() if question.user_context else None
         diagnostic = {} if question.diagnostics else None
         if question.document_ids is not None:
-            docs = await search_selected_documents(data, question.query, question.document_ids, context)
+            with capture('search', question.query) as trace:
+                record('search_request', query=question.query, scope='internal', lookup_mode='document_ids')
+                try:
+                    docs = await search_selected_documents(data, question.query, question.document_ids, context)
+                except Exception as error:
+                    record('retrieval', query=question.query, scope='internal', lookup_mode='document_ids',
+                           status='error', error=type(error).__name__)
+                    raise
+                text = format_documents(docs)
+                if diagnostic is not None or trace is not None:
+                    details = dict(lookup_mode='document_ids', requested_documents=len(question.document_ids),
+                                   selected=[dict(fragment_snapshot(doc), selection_reason='document_id') for doc in docs])
+                    if trace is not None:
+                        details['search_trace_id'] = trace['id']
+                    if diagnostic is not None:
+                        diagnostic.update(details)
+                    record('retrieval', query=question.query, scope='internal', status='ok', context=text, **details)
         else:
             docs = await EnhancedRetrieval(vector_store, data).search(question.query, context, question.k, diagnostics=diagnostic)
-        return {'context': format_documents(docs), **({'diagnostics': diagnostic} if diagnostic is not None else {})}
+            text = format_documents(docs)
+        return {'context': text, **({'diagnostics': diagnostic} if diagnostic is not None else {})}
 
     @app.post('/api/v1/knowledge/documents', dependencies=[Depends(internal)])
     async def documents(request: DocumentListRequest):

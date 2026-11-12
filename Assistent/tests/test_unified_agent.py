@@ -64,11 +64,11 @@ def test_app_builds_one_model_and_no_specialist_tools():
     model.assert_called_once_with(settings)
     build.assert_called_once()
     names = {item.name for item in build.call_args.kwargs['tools']}
-    assert names == {'search_knowledge_base', 'manage_plan', 'github_repository', 'postgresql_readonly'}
+    assert names == {'search_knowledge_base', 'list_documents', 'manage_plan', 'github_repository', 'postgresql_readonly'}
     assert build.call_args.kwargs['task_routing'] is False
 
 
 def test_disabled_integrations_are_not_registered():
     with patch('assistent.create_chat_model'), patch('assistent.build_agent_graph') as build:
         create_app(settings=Settings(_env_file=None, github_mcp_enabled=False, pgsql_enabled=False))
-    assert [item.name for item in build.call_args.kwargs['tools']] == ['search_knowledge_base', 'manage_plan']
+    assert [item.name for item in build.call_args.kwargs['tools']] == ['search_knowledge_base', 'list_documents', 'manage_plan']

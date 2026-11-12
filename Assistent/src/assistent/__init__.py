@@ -60,7 +60,7 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
         # Если база PostgreSQL доступна, AsyncPostgresSaver подключится в lifespan.
         initial_checkpointer = checkpointer or MemorySaver()
 
-        active_tools = [search_tool, manage_plan]
+        active_tools = [search_tool, create_document_list_tool(app_settings), manage_plan]
         if app_settings.documents_admin_key:
             active_tools.append(create_knowledge_write_tool(app_settings))
         if app_settings.github_mcp_enabled:

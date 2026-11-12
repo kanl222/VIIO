@@ -3,7 +3,14 @@ export interface Review {
   evidence: string; document_id: string; notes: string;
 }
 export const blankReview: Review = { stage: '', score: null, expected_answer: '', evidence: '', document_id: '', notes: '' };
-export interface Fragment { document_id?: string; title: string; text: string; version?: string | number; chunk_id?: string; line_start?: number }
+export interface Fragment {
+  document_id?: string; title: string; text?: string; version?: string | number; chunk_id?: string;
+  filename?: string; line_start?: number; chunk_index?: number; section_path?: string | string[];
+  term_score?: number; rrf_score?: number; score?: number; score_rank?: number;
+  diversity_rank?: number; final_rank?: number | null; deferred_for_diversity?: boolean;
+  matched_text?: string[]; matched_title?: string[]; matched_filename?: string[];
+  branch_ranks?: Record<string, number[]>; selection_reason?: string;
+}
 export interface ModelMessage { role: string; content: unknown; tool_calls?: unknown[] }
 export interface TraceEvent {
   engine?: string; filename?: string; pages?: number; document?: unknown; size_bytes?: number; sha256?: string;
@@ -12,7 +19,12 @@ export interface TraceEvent {
   scope?: string; note?: string; candidate_count?: number;
   stage: string; elapsed_ms: number; duration_ms?: number; status?: string;
   query?: string; context?: string; candidates?: Fragment[]; selected?: Fragment[];
-  branches?: Record<string, { status: string; count: number | null }>;
+  branches?: Record<string, { status: string; count: number | null; duration_ms?: number; error?: string }>;
+  search_trace_id?: string; lookup_mode?: string; requested_documents?: number;
+  ranking_details?: {
+    query_terms: string[]; min_score: number; rrf_k: number; text_weight: number;
+    title_or_filename_weight: number; before_access_check: number; after_access_check: number;
+  };
   ranking?: string; k?: number; model?: string; messages?: ModelMessage[];
   content?: unknown; tool_calls?: unknown[]; mode?: string; model_first_tools?: boolean;
   tools?: string[]; name?: string; error?: string; reply?: string;
