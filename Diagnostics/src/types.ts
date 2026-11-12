@@ -11,6 +11,7 @@ export interface Fragment {
   matched_text?: string[]; matched_title?: string[]; matched_filename?: string[];
   branch_ranks?: Record<string, number[]>; selection_reason?: string; context_position?: number;
   cross_encoder_score?: number; reranker_model?: string; reranker_rank?: number;
+  has_window?: boolean; window_chars?: number;
 }
 export interface ModelMessage { role: string; content: unknown; tool_calls?: unknown[] }
 export interface TraceEvent {

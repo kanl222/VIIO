@@ -25,9 +25,12 @@ def fragment_key(doc: Document) -> tuple[Any, str]:
 def fragment_snapshot(doc: Document, *, include_text: bool = True) -> dict:
     item = {key: doc.metadata.get(key) for key in ('document_id', 'version', 'chunk_id')}
     item['title'] = doc.metadata.get('title', '')
-    for key in ('filename', 'chunk_index', 'line_start', 'section_path'):
+    for key in ('filename', 'chunk_index', 'line_start', 'section_path', 'chunk_window_size', 'chunker_strategy'):
         if key in doc.metadata:
             item[key] = doc.metadata[key]
+    if doc.metadata.get('window_context'):
+        item['has_window'] = True
+        item['window_chars'] = len(doc.metadata['window_context'])
     if include_text:
         item['text'] = doc.page_content
     return item
@@ -238,6 +241,18 @@ class EnhancedRetrieval:
                     'reranker_used': 'bge-reranker-v2-m3' if not getattr(self.reranker, '_failed_init', False) else 'lexical_fallback',
                 }
 
+            has_window = any(bool(d.metadata.get('window_context')) for d in selected)
+            small2big_info = {}
+            if has_window:
+                orig_chars = sum(len(d.page_content) for d in selected)
+                exp_chars = sum(len(d.metadata.get('window_context') or d.page_content) for d in selected)
+                small2big_info = {
+                    'small2big_enabled': True,
+                    'small2big_expanded_chars': exp_chars,
+                    'small2big_original_chars': orig_chars,
+                    'small2big_ratio': round(exp_chars / max(1, orig_chars), 2),
+                }
+
             # Только кандидаты, прошедшие актуальную проверку ACL, могут покидать сервис документов.
             diagnostics.update(
                 candidates=[dict(fragment_snapshot(doc, include_text=False), **detail,
@@ -255,10 +270,11 @@ class EnhancedRetrieval:
                                      candidate_pool_size=candidate_pool_size,
                                      lost_in_the_middle_reordered=len(selected) > 2,
                                      reordered_count=len(selected),
-                                     **reranker_info),
+                                     **reranker_info,
+                                     **small2big_info),
                 **reranker_info,
+                **small2big_info,
             )
-        return selected
         return selected
 
     async def _expand_procedural_neighbors(self, selected, context, max_chars=8000):

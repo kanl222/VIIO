@@ -146,6 +146,10 @@ def format_documents(docs):
             title = doc.metadata.get("title", "Без названия")
             doc_id = doc.metadata.get("document_id", "unknown")
         content = getattr(doc, "page_content", str(doc))
+        if hasattr(doc, "metadata") and doc.metadata:
+            window = doc.metadata.get("window_context")
+            if window and len(str(window)) > len(content):
+                content = str(window)
         if doc.metadata.get("kind") == "code":
             content = f"Файл: {doc.metadata.get('filename', title)}, строки {doc.metadata.get('line_start', 1)}–{doc.metadata.get('line_end', 1)}\n" + content
 
