@@ -14,6 +14,8 @@ from viio_rag.embeddings import create_embeddings
 from viio_rag.schemas import PublicQuestion, PublishedIdsRequest, KnowledgeQuestion, ManagedRagQuestion
 from viio_rag.security import authorize, authorize_publication
 from viio_rag.catalog import ReadCatalog
+from viio_rag.cache import get_cache
+from viio_rag.reranker import get_reranker
 from viio_rag.retrieval import EnhancedRetrieval, fragment_snapshot
 from viio_rag.diagnostics import capture, record
 from viio_rag.knowledge_data import KnowledgeData
@@ -30,6 +32,8 @@ def create_app(settings=None, *, data=None, vector_store=None):
     if s.service_role != 'rag':
         raise ValueError('RAG must use SERVICE_ROLE=rag')
     s.validate_runtime()
+    cache = get_cache(s)
+    reranker = get_reranker(s)
     client = None
     catalog = None
     if data is None:
@@ -83,7 +87,12 @@ def create_app(settings=None, *, data=None, vector_store=None):
                 raise HTTPException(503, 'Каталог документов недоступен')
             async with catalog.pool.connection() as conn:
                 await conn.execute('SELECT 1 FROM documents LIMIT 1')
-        return {'status': 'healthy', 'service': 'rag'}
+        return {
+            'status': 'healthy',
+            'service': 'rag',
+            'redis': cache.is_redis_active,
+            'reranker': reranker.model_name if reranker.enabled else None,
+        }
 
     @app.post('/api/v1/knowledge/yandex/chat', dependencies=[Depends(internal)])
     async def yandex_assistant(question: ManagedRagQuestion):
@@ -118,7 +127,9 @@ def create_app(settings=None, *, data=None, vector_store=None):
                         diagnostic.update(details)
                     record('retrieval', query=question.query, scope='internal', status='ok', context=text, **details)
         else:
-            docs = await EnhancedRetrieval(vector_store, data).search(question.query, context, question.k, diagnostics=diagnostic)
+            docs = await EnhancedRetrieval(vector_store, data, reranker=reranker, cache=cache).search(
+                question.query, context, question.k, diagnostics=diagnostic
+            )
             text = format_documents(docs)
         return {'context': text, **({'diagnostics': diagnostic} if diagnostic is not None else {})}
 

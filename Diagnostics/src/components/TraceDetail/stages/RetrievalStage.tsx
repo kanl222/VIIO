@@ -39,6 +39,11 @@ const Fragments = memo(function Fragments({ items, label }: FragmentsProps) {
                       #{item.context_position} в контексте
                     </span>
                   ) : null}
+                  {item.cross_encoder_score !== undefined ? (
+                    <span className="badge-highlight good" style={{ fontSize: '11px', padding: '1px 5px' }} title="Cross-Encoder Relevance Logit">
+                      ONNX: {item.cross_encoder_score.toFixed(2)}
+                    </span>
+                  ) : null}
                   {item.selection_reason ? (
                     <span className="badge-highlight" style={{ fontSize: '11px', padding: '1px 5px' }}>
                       {item.selection_reason === 'procedural_neighbor' ? 'сосед' : 'ранжирован'}
@@ -64,6 +69,15 @@ const Fragments = memo(function Fragments({ items, label }: FragmentsProps) {
 
                   {item.score !== undefined ? (
                     <dl className="score-breakdown">
+                      {item.cross_encoder_score !== undefined ? (
+                        <>
+                          <dt>Cross-Encoder (ONNX):</dt>
+                          <dd>
+                            <strong style={{ color: 'var(--color-success, #16a34a)' }}>{item.cross_encoder_score.toFixed(4)}</strong>
+                            {' '}(модель: {item.reranker_model || 'bge-reranker-v2-m3'}, ранг: {item.reranker_rank ?? '—'})
+                          </dd>
+                        </>
+                      ) : null}
                       <dt>Итоговый балл:</dt>
                       <dd>
                         <strong>{scoreLabel.format(item.score)}</strong> = {item.term_score ?? 0} (слова) + {scoreLabel.format(item.rrf_score ?? 0)} (RRF ранг)
@@ -113,6 +127,16 @@ export const RetrievalStage = memo(function RetrievalStage({ event }: { event: T
     <div className="stage-retrieval">
       <div className="retrieval-query">
         <strong>Поисковый запрос:</strong> <span className="query-text">{event.query}</span>
+        {event.from_cache ? (
+          <span className="badge-highlight good" style={{ marginLeft: 8 }}>
+            ⚡ Из кэша {event.cache_backend === 'redis' ? 'Redis' : 'памяти'}
+          </span>
+        ) : null}
+        {event.reranker_model || event.reranker_used ? (
+          <span className="badge-highlight" style={{ marginLeft: 8 }}>
+            🎯 Реранкер: {event.reranker_model || event.reranker_used}
+          </span>
+        ) : null}
       </div>
 
       {isError ? (

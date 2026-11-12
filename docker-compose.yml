@@ -48,6 +48,24 @@ services:
     environment:
     - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:?Configure QDRANT_API_KEY in .env}
     - QDRANT__SERVICE__READ_ONLY_API_KEY=${QDRANT_READ_KEY:?Configure QDRANT_READ_KEY in .env}
+  redis:
+    image: redis:7.2-alpine
+    container_name: viio_redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "volatile-lru"]
+    mem_limit: 512m
+    ports:
+    - 127.0.0.1:${REDIS_PORT:-6379}:6379
+    volumes:
+    - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+    - viio_net
   document-worker:
     image: viio-documents:latest
     cpus: ${DOCUMENT_WORKER_CPUS:-1}
@@ -163,6 +181,10 @@ services:
     - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
     - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:?Configure CONSULTANT_SOURCE_KEY in .env}
+    - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    - RERANKER_ENABLED=${RERANKER_ENABLED:-true}
+    - RERANKER_MODEL=${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
+    - RERANKER_TOP_K=${RERANKER_TOP_K:-25}
     - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
@@ -170,6 +192,8 @@ services:
       postgres:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
@@ -342,6 +366,7 @@ services:
     - DOCUMENTS_ADMIN_KEY=${DOCUMENTS_ADMIN_KEY:?Configure DOCUMENTS_ADMIN_KEY in .env}
     - CHAT_API_KEY_PREVIOUS=${CHAT_API_KEY_PREVIOUS:-}
     - AGENT_MAX_TOOL_CALLS=${AGENT_MAX_TOOL_CALLS:-24}
+    - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
     - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
@@ -349,6 +374,8 @@ services:
       documents:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
     - assistant_traces:/traces
@@ -586,6 +613,7 @@ networks:
   consultant_net:
     driver: bridge
 volumes:
+  redis_data: {}
   qdrant_storage: {}
   postgres_data: {}
   docling_models: {}

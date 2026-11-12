@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     rag_yandex_manifest: str = '/data/rag-state/yandex-rag-runtime.json'
     rag_yandex_assistant_prompt: str = ASSISTANT_YANDEX_RAG_PROMPT
     rag_yandex_consultant_prompt: str = CONSULTANT_YANDEX_RAG_PROMPT
+    redis_url: str | None = 'redis://localhost:6379/0'
+    redis_enabled: bool = True
+    redis_cache_ttl: int = 86400
+    reranker_enabled: bool = True
+    reranker_model: str = 'BAAI/bge-reranker-v2-m3'
+    reranker_top_k: int = 25
 
     @model_validator(mode='after')
     def collections_differ(self):

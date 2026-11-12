@@ -116,9 +116,11 @@ def reorder_lost_in_the_middle(documents: Sequence[Any]) -> list[Any]:
 
 
 class EnhancedRetrieval:
-    def __init__(self, vector_store: Any, data: Any) -> None:
+    def __init__(self, vector_store: Any, data: Any, reranker: Any = None, cache: Any = None) -> None:
         self.vector_store: Any = vector_store
         self.data: Any = data
+        self.reranker: Any = reranker
+        self.cache: Any = cache
 
     async def search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
         with capture('search', query) as trace:
@@ -139,12 +141,36 @@ class EnhancedRetrieval:
 
     async def _search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
         names = ['semantic', 'lexical']
-        searches = [
-            anyio.to_thread.run_sync(partial(self.vector_store.similarity_search, query=query, k=max(k * 3, 12), filter=build_access_filter(context))),
-            self.data.lexical(query, context)]
+        candidate_pool_size = max(k * 4, getattr(self.reranker, 'top_k', 25) if self.reranker else 25, 12)
+
+        async def fetch_semantic():
+            if self.cache is not None:
+                cache_key = f"viio:candidates:{query.strip().lower()}:{candidate_pool_size}"
+                cached = await self.cache.get_json(cache_key)
+                if cached:
+                    if diagnostics is not None:
+                        diagnostics['from_cache'] = True
+                        diagnostics['cache_backend'] = 'redis' if getattr(self.cache, 'is_redis_active', False) else 'memory'
+                    return [
+                        Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
+                        for item in cached
+                    ]
+            docs = await anyio.to_thread.run_sync(
+                partial(self.vector_store.similarity_search, query=query, k=candidate_pool_size, filter=build_access_filter(context))
+            )
+            if self.cache is not None and docs:
+                cache_key = f"viio:candidates:{query.strip().lower()}:{candidate_pool_size}"
+                await self.cache.set_json(
+                    cache_key,
+                    [fragment_snapshot(d) for d in docs],
+                    ttl=1800,
+                )
+            return docs
+
+        searches = [fetch_semantic(), self.data.lexical(query, context)]
         if getattr(self.data, 'public_index', None) is not None:
             names.append('public')
-            searches.append(self.data.public_vectors(query, max(k * 3, 12)))
+            searches.append(self.data.public_vectors(query, candidate_pool_size))
         timings = {}
         if diagnostics is not None:
             async def measured(name, search):
@@ -181,7 +207,18 @@ class EnhancedRetrieval:
         candidates = await self.data.authorized_candidates(candidates, context)
         details = [] if diagnostics is not None else None
         min_score = 1
-        ranked = rank_documents(query, candidates, k, min_score=min_score, rrf_scores=rrf_map, details=details)
+
+        # Reranker stage (Cross-Encoder ONNX vs Lexical RRF fallback)
+        if self.reranker is not None and getattr(self.reranker, 'enabled', False):
+            if details is not None:
+                # Pre-populate term score details for diagnostic visibility
+                _ = rank_documents(query, candidates, len(candidates), min_score=0, rrf_scores=rrf_map, details=details)
+            ranked = await self.reranker.rerank(query, candidates, k, rrf_scores=rrf_map, details=details)
+            ranking_name = f"cross-encoder reranking ({self.reranker.model_name})"
+        else:
+            ranked = rank_documents(query, candidates, k, min_score=min_score, rrf_scores=rrf_map, details=details)
+            ranking_name = 'lexical term score with document diversity'
+
         expanded = await self._expand_procedural_neighbors(ranked, context)
         selected = reorder_lost_in_the_middle(expanded)
         if diagnostics is not None:
@@ -193,6 +230,14 @@ class EnhancedRetrieval:
                             positions[fragment_key(doc)].setdefault(name, []).append(rank)
             final_ranks = {fragment_key(doc): rank for rank, doc in enumerate(selected, 1)}
             ranked_keys = {fragment_key(doc) for doc in ranked}
+
+            reranker_info = {}
+            if self.reranker is not None and getattr(self.reranker, 'enabled', False):
+                reranker_info = {
+                    'reranker_model': self.reranker.model_name,
+                    'reranker_used': 'bge-reranker-v2-m3' if not getattr(self.reranker, '_failed_init', False) else 'lexical_fallback',
+                }
+
             # Только кандидаты, прошедшие актуальную проверку ACL, могут покидать сервис документов.
             diagnostics.update(
                 candidates=[dict(fragment_snapshot(doc, include_text=False), **detail,
@@ -203,13 +248,17 @@ class EnhancedRetrieval:
                                selection_reason='ranked' if fragment_key(doc) in ranked_keys else 'procedural_neighbor',
                                context_position=pos + 1)
                           for pos, doc in enumerate(selected)],
-                ranking='lexical term score with document diversity', k=k,
+                ranking=ranking_name, k=k,
                 ranking_details=dict(query_terms=query_terms(query), min_score=min_score, rrf_k=RRF_K,
                                      text_weight=TEXT_WEIGHT, title_or_filename_weight=TITLE_WEIGHT,
                                      before_access_check=candidate_count, after_access_check=len(candidates),
+                                     candidate_pool_size=candidate_pool_size,
                                      lost_in_the_middle_reordered=len(selected) > 2,
-                                     reordered_count=len(selected)),
+                                     reordered_count=len(selected),
+                                     **reranker_info),
+                **reranker_info,
             )
+        return selected
         return selected
 
     async def _expand_procedural_neighbors(self, selected, context, max_chars=8000):

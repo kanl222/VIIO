@@ -10,6 +10,7 @@ export interface Fragment {
   diversity_rank?: number; final_rank?: number | null; deferred_for_diversity?: boolean;
   matched_text?: string[]; matched_title?: string[]; matched_filename?: string[];
   branch_ranks?: Record<string, number[]>; selection_reason?: string; context_position?: number;
+  cross_encoder_score?: number; reranker_model?: string; reranker_rank?: number;
 }
 export interface ModelMessage { role: string; content: unknown; tool_calls?: unknown[] }
 export interface TraceEvent {
@@ -42,6 +43,8 @@ export interface TraceEvent {
   eval_output?: string; method?: string; strategy?: string;
   draft_snippet?: string; draft_chars?: number; context_chars?: number;
   faithfulness_score?: number; lost_in_the_middle_reordered?: boolean; reordered_count?: number;
+  reranker_used?: string; reranker_model?: string; cache_backend?: string;
+  from_cache?: boolean; candidate_pool_size?: number;
   usage?: {
     input_tokens?: number; prompt_tokens?: number;
     output_tokens?: number; completion_tokens?: number;

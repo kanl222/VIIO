@@ -5,6 +5,8 @@ services:
     ports: !reset []
   qdrant:
     ports: !reset []
+  redis:
+    ports: !reset []
   assistent:
     ports: !reset []
   documents:
