@@ -79,13 +79,7 @@ def readable_reference(reference: str, max_chars: int | None = None, *, include_
     return "\n\n".join(reordered_excerpts)[:max_chars]
 
 
-def strip_thinking(text: str) -> str:
-    """Remove model reasoning/thinking blocks like <think>...</think> from text."""
-    if not text or not isinstance(text, str):
-        return text or ""
-    cleaned = re.sub(r"(?is)<(?:think|thought|reasoning)>.*?</(?:think|thought|reasoning)>\s*", "", text)
-    cleaned = re.sub(r"(?is)<(?:think|thought|reasoning)>.*$", "", cleaned)
-    return cleaned.strip()
+from viio_core.text.strip_thinking import strip_thinking
 
 
 def clean_answer(text: str, sources: list[AnswerSource]) -> str:

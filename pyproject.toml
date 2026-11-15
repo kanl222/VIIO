@@ -10,10 +10,11 @@ package = false
 
 [tool.uv.workspace]
 members = [
-    "Assistent",
-    "Consultant",
-    "Documents",
-    "RAG",
+    "packages/viio-core",
+    "services/assistent",
+    "services/consultant",
+    "services/documents",
+    "services/rag",
 ]
 
 [dependency-groups]

@@ -1,0 +1,13 @@
+[project]
+name = "viio-core"
+version = "0.1.0"
+description = "VIIO Core — Shared domain logic, models, and cloud utilities"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.10.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"

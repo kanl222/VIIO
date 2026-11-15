@@ -92,7 +92,7 @@ services:
     mem_limit: ${DOCUMENT_WORKER_MEMORY:-2g}
     build:
       context: .
-      dockerfile: Documents/Dockerfile
+      dockerfile: services/documents/Dockerfile
     container_name: viio_document_worker
     environment:
     - LLM_PROVIDER=${LOCAL_LLM_PROVIDER:-lmstudio}
@@ -169,7 +169,7 @@ services:
     image: viio-rag:latest
     build:
       context: .
-      dockerfile: RAG/Dockerfile
+      dockerfile: services/rag/Dockerfile
     container_name: viio_rag
     command: [uvicorn, 'viio_rag.app:create_app', --factory, --host, 0.0.0.0, --port, '8000']
     environment:
@@ -234,14 +234,14 @@ services:
     pids_limit: 128
     mem_limit: 768m
     volumes:
-    - ./RAG/state:/data/rag-state:ro
+    - ./services/rag/state:/data/rag-state:ro
     - rag_traces:/traces
     user: 65532:65532
   documents:
     image: viio-documents:latest
     build:
       context: .
-      dockerfile: Documents/Dockerfile
+      dockerfile: services/documents/Dockerfile
     container_name: viio_documents
     ports:
     - 127.0.0.1:${DOCUMENTS_PORT:-8002}:8000
@@ -326,8 +326,8 @@ services:
   assistent:
     image: viio-assistent:latest
     build:
-      context: ./Assistent
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/assistent/Dockerfile
     container_name: viio_assistent
     ports:
     - 127.0.0.1:${ASSISTENT_PORT:-${API_PORT:-8000}}:8000
@@ -440,8 +440,8 @@ services:
   consultant:
     image: viio-consultant:latest
     build:
-      context: ./Consultant
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/consultant/Dockerfile
     container_name: viio_consultant
     ports:
     - ${CONSULTANT_PORT:-8001}:8000
@@ -500,7 +500,7 @@ services:
   webchat:
     image: viio-webchat:latest
     build:
-      context: ./WebChat
+      context: ./apps/webchat
       dockerfile: Dockerfile
     container_name: viio_webchat
     ports:
@@ -565,7 +565,7 @@ services:
     - PGSQL_PASSWORD=${PGSQL_PASSWORD:-}
     - PGSQL_SSLMODE=${PGSQL_SSLMODE:-prefer}
     volumes:
-    - ./postgres-tool/start.py:/viio/start.py:ro
+    - ./workers/postgres-tool/start.py:/viio/start.py:ro
     extra_hosts:
     - host.docker.internal:host-gateway
     restart: unless-stopped
@@ -573,7 +573,7 @@ services:
     - viio_net
   pdf-worker:
     image: viio-pdf-worker:latest
-    build: ./pdf-worker
+    build: ./workers/pdf-worker
     environment:
     - INTERNAL_API_KEY=${DOCLING_API_KEY:?Configure DOCLING_API_KEY in .env}
     - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}
@@ -609,7 +609,7 @@ services:
     user: 65532:65532
   diagnostics:
     image: viio-diagnostics:latest
-    build: ./Diagnostics
+    build: ./services/diagnostics
     container_name: viio_diagnostics
     ports:
     - 127.0.0.1:${DIAGNOSTICS_PORT:-3010}:3010
