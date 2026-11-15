@@ -1,0 +1,23 @@
+[project]
+name = "viio"
+version = "0.1.0"
+description = "VIIO — AI Assistant & Knowledge Base Platform"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "Assistent",
+    "Consultant",
+    "Documents",
+    "RAG",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
