@@ -12,6 +12,7 @@ Nodes:
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -48,7 +49,9 @@ from assistent.services.agent_runtime import build_runtime
 from assistent.services.request_policy import is_coding_request
 from assistent.services.database_agent import is_database_request
 from assistent.services.dialogue_summary import compact_dialogue
-from assistent.services.diagnostics import record
+from assistent.services.answer_sources import strip_thinking
+from asyncio import timeout
+from assistent.services.diagnostics import model_call, record
 from assistent.security import has_role_access
 from assistent.tools.postgres_tool import DATABASE_ROLES
 
@@ -63,13 +66,17 @@ def classify_route(question: str, tools_available: set[str], user_context: dict[
         return "direct"
 
     # 2. Database inquiries (/db or question about DB/tables/schema)
-    parts = question.strip().split(maxsplit=1)
-    if (parts and parts[0].lower() == "/db") or is_database_request(question):
+    clean_q = question.strip().strip("«»\"'").strip()
+    parts = clean_q.split(maxsplit=1)
+    if parts and parts[0].lower() == "/db":
+        if "postgresql_readonly" in tools_available:
+            return "database"
+    elif is_database_request(clean_q):
         if "postgresql_readonly" in tools_available and has_role_access(user_context, DATABASE_ROLES):
             return "database"
 
     # 3. Coding requests (/code or coding intent)
-    if (parts and parts[0].lower() == "/code") or is_coding_request(question):
+    if (parts and parts[0].lower() == "/code") or is_coding_request(clean_q):
         if any(t in tools_available for t in ("github_repository", "coding_agent")):
             return "coding"
 
@@ -93,6 +100,7 @@ def build_supervisor_graph(
     max_tool_calls: int = 6,
     corrective_rag: bool = False,
     database_analyst: bool = True,
+    routing_llm: BaseChatModel | None = None,
     **extra_kwargs: Any,
 ) -> CompiledStateGraph:
     """Constructs a Supervisor StateGraph that orchestrates specialized sub-runtimes."""
@@ -101,9 +109,10 @@ def build_supervisor_graph(
     all_tool_names = set(tools_by_name.keys())
 
     # Build specialized sub-runtimes with isolated tools & prompts
-    # 1. Knowledge Specialist (search_knowledge_base, list_documents, search_document_content, manage_plan, save_knowledge)
+    # 1. Knowledge Specialist (search_knowledge_base, search_knowledge_graph, list_documents, search_document_content, manage_plan, save_knowledge, skills)
     knowledge_tools = [t for t in active_tools if t.name in (
-        "search_knowledge_base", "list_documents", "search_document_content", "manage_plan", "save_knowledge"
+        "search_knowledge_base", "search_knowledge_graph", "list_documents", "search_document_content", "manage_plan", "save_knowledge",
+        "list_agent_skills", "activate_agent_skill"
     )]
     if corrective_rag:
         from assistent.services.corrective_rag import build_corrective_rag_graph
@@ -130,8 +139,11 @@ def build_supervisor_graph(
             max_tool_calls=max_tool_calls,
         )
 
-    # 2. Coding Specialist (github_repository, coding_agent, manage_plan)
-    coding_tools = [t for t in active_tools if t.name in ("github_repository", "coding_agent", "manage_plan")]
+    # 2. Coding Specialist can consult indexed code, GitHub, and procedural skills.
+    coding_tools = [t for t in active_tools if t.name in (
+        "github_repository", "coding_agent", "search_knowledge_base", "manage_plan",
+        "list_agent_skills", "activate_agent_skill"
+    )]
     coding_runtime = build_runtime(
         llm=llm,
         tools=coding_tools,
@@ -184,19 +196,63 @@ def build_supervisor_graph(
     )
 
     # Supervisor Node: Route determination
-    def route_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    async def route_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
         history, boundary = history_for_turn(state, runtime)
         question = last_question(history)
         user_context = ctx(runtime).get("user_context", {})
         decision = classify_route(question, all_tool_names, user_context)
-        record("route", mode=decision, supervisor=True, tools=sorted(all_tool_names), branch=decision)
-        return {**boundary}
+        origin = 'rules'
+        if routing_llm is not None and decision != 'direct' and not question.lstrip().startswith('/'):
+            choices = ['knowledge', 'direct']
+            if {'github_repository', 'coding_agent'} & all_tool_names:
+                choices.append('coding')
+            if 'postgresql_readonly' in all_tool_names and has_role_access(user_context, DATABASE_ROLES):
+                choices.append('database')
+            try:
+                async with timeout(5):
+                    examples: list[str] = []
+                    if 'direct' in choices:
+                        examples.append('Запрос: Привет -> direct')
+                        examples.append('Запрос: Расскажи шутку или анекдот -> direct')
+                    if 'knowledge' in choices:
+                        examples.append('Запрос: Как оформить отпуск по регламенту? -> knowledge')
+                    if 'coding' in choices:
+                        examples.append('Запрос: Напиши функцию на python -> coding')
+                    if 'database' in choices:
+                        examples.append('Запрос: Покажи таблицы базы данных -> database')
+
+                    prompt_parts = [
+                        '/no_think',
+                        'Ты — классификатор запросов. Верни ровно одну метку из: ' + ', '.join(choices) + '.',
+                        'knowledge — регламенты, документы компании.',
+                        'direct — разговоры, шутки, общие вопросы.',
+                    ]
+                    if 'coding' in choices:
+                        prompt_parts.append('coding — написание и просмотр кода.')
+                    if 'database' in choices:
+                        prompt_parts.append('database — таблицы и схемы БД.')
+                    if examples:
+                        prompt_parts.append('\nПримеры:\n' + '\n'.join(examples))
+                    prompt_parts.append('\nВерни ТОЛЬКО ОДНО СЛОВО метки из списка.')
+
+                    result = await model_call(routing_llm, [
+                        SystemMessage(content='\n'.join(prompt_parts)),
+                        HumanMessage(content=question),
+                    ])
+                clean_content = strip_thinking(str(result.content)).strip().lower()
+                if clean_content in choices:
+                    decision, origin = clean_content, 'model'
+                else:
+                    match = re.search(r'\b(' + '|'.join(re.escape(c) for c in choices) + r')\b', clean_content)
+                    if match:
+                        decision, origin = match.group(1), 'model'
+            except Exception as error:
+                logger.warning('Routing model unavailable: %s', type(error).__name__)
+        record("route", mode=decision, supervisor=True, tools=sorted(all_tool_names), branch=decision, origin=origin)
+        return {**boundary, 'supervisor_route': decision}
 
     def route_condition(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> Literal["knowledge", "coding", "database", "direct"]:
-        history, _ = history_for_turn(state, runtime)
-        question = last_question(history)
-        user_context = ctx(runtime).get("user_context", {})
-        return classify_route(question, all_tool_names, user_context)
+        return state['supervisor_route']
 
     # Specialist Nodes
     async def knowledge_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
