@@ -99,9 +99,13 @@ class DocumentService(IDocumentService):
 
         code_parts = split_code(content, str(custom_metadata.get('filename', title))) if custom_metadata.get('kind') == 'code' else None
         parts = [] if code_parts else list(document_chunks(clean_content, self._chunk_size, self._chunk_overlap, self._chunk_unit))
-        chunks = [part[0] for part in code_parts] if code_parts else [part[0] for part in parts]
-        if not chunks:
-            chunks = [clean_content]
+        if code_parts:
+            chunks = [part[0] for part in code_parts]
+        elif parts:
+            chunks = [part[0] for part in parts]
+        else:
+            raw_fallback = split_document_text(clean_content, self._chunk_size, self._chunk_overlap, self._chunk_unit)
+            chunks = raw_fallback or [clean_content[:self._chunk_size]]
 
         roles = allowed_roles if allowed_roles is not None else ["employee"]
         depts = allowed_departments if allowed_departments is not None else ["general"]
@@ -157,6 +161,3 @@ class DocumentService(IDocumentService):
 
     def set_document_active(self, identifier, active):
         self._vector_store.set_document_active(identifier, active)
-
-    def existing_document_metadata(self):
-        return self._vector_store.document_metadata()

@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     assistant_rag_backend: Literal['local', 'yandex'] = 'local'
     chat_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     chat_model: str | None = None
+    chat_timeout_seconds: int = Field(default=120, ge=5, le=600)
+    rag_timeout_seconds: int = Field(default=120, ge=5, le=600)
     routing_model: str | None = None
     routing_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     routing_max_tokens: int = Field(default=128, ge=16, le=1024)
@@ -163,6 +165,7 @@ class Settings(BaseSettings):
 
     service_role: Literal['assistent'] = 'assistent'
     documents_url: str = 'http://localhost:8002'
+    rag_url: str = 'http://localhost:8000'
 
     api_host: str = Field(
         default="0.0.0.0",

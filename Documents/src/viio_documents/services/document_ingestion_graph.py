@@ -22,7 +22,8 @@ from viio_documents.services.code_documents import split_code
 from viio_documents.services.office_extraction import OfficeExtractionService, OFFICE_MIMES
 from viio_documents.services.pdf_extraction import PdfExtractionService
 from viio_documents.services.text_normalization import normalize_document_text
-from viio_rag.chunks import document_chunks
+from viio_documents.services.graph_sync import GraphSyncService
+from viio_rag.chunks import document_chunks, split_document_text
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class IngestionState(TypedDict, total=False):
     embedded_documents: list[Document]
     embeddings_ready: bool
     persisted: bool
+    graph_synced: bool
     status: str
     error: str | None
 
@@ -206,8 +208,13 @@ def build_document_ingestion_graph(
             ]
         else:
             doc_parts = list(document_chunks(content, c_size, c_overlap, c_unit))
-            chunks = [part[0] for part in doc_parts] if doc_parts else [content]
-            extra_info = [part[1] for part in doc_parts] if doc_parts else [{}]
+            if doc_parts:
+                chunks = [part[0] for part in doc_parts]
+                extra_info = [part[1] for part in doc_parts]
+            else:
+                raw_fallback = split_document_text(content, c_size, c_overlap, c_unit)
+                chunks = raw_fallback or [content[:c_size]]
+                extra_info = [{}] * len(chunks)
             roles = state.get("allowed_roles") if state.get("allowed_roles") is not None else ["employee"]
             depts = state.get("allowed_departments") if state.get("allowed_departments") is not None else ["general"]
             chunk_metas = [
@@ -281,6 +288,8 @@ def build_document_ingestion_graph(
                 await anyio.to_thread.run_sync(document_service.delete_document, doc_id)
             except (AttributeError, NotImplementedError):
                 pass
+        sync_service = getattr(document_service, "graph_sync", None) or GraphSyncService(settings=settings)
+        await sync_service.delete_document(doc_id)
 
         # 2. Index in vector store / document service
         if hasattr(document_service, "index_document"):
@@ -350,6 +359,9 @@ def build_document_ingestion_graph(
         if parent and hasattr(document_service, "set_document_active"):
             await anyio.to_thread.run_sync(document_service.set_document_active, parent.id, False)
             await anyio.to_thread.run_sync(document_service.set_document_active, doc_id, True)
+            sync_service = getattr(document_service, "graph_sync", None) or GraphSyncService(settings=settings)
+            await sync_service.set_active(parent.id, False)
+            await sync_service.set_active(doc_id, True)
             if catalog is not None and hasattr(catalog, "activate_version"):
                 await catalog.activate_version(doc_id, parent.id)
         elif catalog is not None and hasattr(catalog, "update_status"):
@@ -358,6 +370,35 @@ def build_document_ingestion_graph(
         return {
             "persisted": True,
             "chunks_count": chunks_count,
+            "status": "ready",
+        }
+
+    # 7. Sync Graph Node (Memgraph Semantic GraphRAG)
+    async def sync_graph_node(state: IngestionState) -> dict[str, Any]:
+        doc_id = state.get("document_id") or "doc-unknown"
+        title = state.get("title") or ""
+        filename = state.get("filename") or "document.txt"
+        content = state.get("normalized_text") or state.get("extracted_text") or ""
+        chunks_count = state.get("chunks_count", 0)
+        is_public = state.get("is_public", False)
+        roles = state.get("allowed_roles") or ["employee"]
+        depts = state.get("allowed_departments") or ["general"]
+        version = state.get("version", 1)
+
+        sync_service = getattr(document_service, "graph_sync", None) or GraphSyncService(settings=settings)
+        synced = await sync_service.sync_document(
+            doc_id=doc_id,
+            title=title,
+            filename=filename,
+            content=content,
+            chunks_count=chunks_count,
+            is_public=is_public,
+            allowed_roles=roles,
+            allowed_departments=depts,
+            version=version,
+        )
+        return {
+            "graph_synced": synced,
             "status": "ready",
         }
 
@@ -372,6 +413,7 @@ def build_document_ingestion_graph(
     builder.add_node("chunk", chunk_node)
     builder.add_node("embed", embed_node, retry_policy=retry_io)
     builder.add_node("persist", persist_node, retry_policy=retry_persist)
+    builder.add_node("sync_graph", sync_graph_node)
 
     builder.add_edge(START, "validate")
     builder.add_conditional_edges("validate", validate_condition, {"extract": "extract", "__end__": END})
@@ -379,6 +421,7 @@ def build_document_ingestion_graph(
     builder.add_edge("normalize", "chunk")
     builder.add_edge("chunk", "embed")
     builder.add_edge("embed", "persist")
-    builder.add_edge("persist", END)
+    builder.add_edge("persist", "sync_graph")
+    builder.add_edge("sync_graph", END)
 
     return builder.compile()

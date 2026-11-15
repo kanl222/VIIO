@@ -11,3 +11,9 @@ services:
     ports: !reset []
   documents:
     ports: !reset []
+  webchat:
+    ports: !reset []
+  consultant:
+    ports: !reset []
+  diagnostics:
+    ports: !reset []

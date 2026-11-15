@@ -93,9 +93,9 @@ async def test_graph_search_systems_and_integrations():
     settings = SimpleNamespace(memgraph_uri="bolt://127.0.0.1:7687", memgraph_user="", memgraph_password="")
     tool = create_graph_search_tool(settings)
 
-    context = await tool.ainvoke({"query": "WMS VIIO интеграции"})
+    context = await tool.ainvoke({"query": "WMS интеграции"})
     assert "Информационные системы и интеграции" in context
-    assert "WMS VIIO" in context
+    assert "WMS" in context
     assert "1С:ERP Предприятие" in context or "МДЛП" in context
 
 

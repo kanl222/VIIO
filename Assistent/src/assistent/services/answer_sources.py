@@ -95,6 +95,11 @@ def clean_answer(text: str, sources: list[AnswerSource]) -> str:
     sections = re.split(r"(```[\s\S]*?```)", text)
     for index in range(0, len(sections), 2):
         part = sections[index]
+        # Strip synthetic user/assistant dialogue turn headers leaked by the model
+        part = re.sub(r"(?im)\n\s*(?:user|human|assistant|ai)\s*:\s*.*$", "", part)
+        part = re.sub(r"(?im)\n\s*(?:user|human|assistant|ai)\s*\n.*$", "", part)
+        # Strip CJK hallucinated characters outside code blocks
+        part = re.sub(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+", "", part)
         part = re.sub(r"(?im)^\s*(?:источник[и]?|документ[ы]?):[^\n]*(?:knowledge_reference|<context|doc_id)[^\n]*\n?", "", part)
         part = re.sub(r"</?(?:knowledge_reference|context)\b[^>]*>", "", part, flags=re.I)
         part = re.sub(r"\bknowledge_reference\b", "", part)

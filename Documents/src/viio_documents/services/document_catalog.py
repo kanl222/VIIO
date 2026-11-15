@@ -194,28 +194,12 @@ class DocumentCatalogService:
         logger.info("Каталог: создан документ %s (%s)", doc_id, title)
         return DocumentRecord.from_row(row)
 
-    async def update_storage_key(self, doc_id: str, storage_key: str) -> None:
-        """Сохранить путь к оригиналу после загрузки файла."""
-        async with self._pool.connection() as conn:
-            await conn.execute(
-                "UPDATE documents SET storage_key=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
-                (storage_key, doc_id),
-            )
-
     async def update_status(self, doc_id: str, status: str) -> None:
         """Обновить статус документа (queued / processing / ready / error)."""
         async with self._pool.connection() as conn:
             await conn.execute(
                 "UPDATE documents SET status=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
                 (status, doc_id),
-            )
-
-    async def update_chunks_count(self, doc_id: str, chunks_count: int) -> None:
-        """Обновить число чанков после индексации."""
-        async with self._pool.connection() as conn:
-            await conn.execute(
-                "UPDATE documents SET chunks_count=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
-                (chunks_count, doc_id),
             )
 
     async def delete(self, doc_id: str) -> bool:
@@ -240,24 +224,6 @@ class DocumentCatalogService:
             cur = await conn.execute(
                 "SELECT * FROM documents WHERE id=%s", (doc_id,)
             )
-            row = await cur.fetchone()
-        return DocumentRecord.from_row(row) if row else None
-
-    async def find_by_sha256(
-        self, sha256: str, *, owner_id: str | None = None
-    ) -> DocumentRecord | None:
-        """Найти документ по хешу (обнаружение дубликата в пределах прав владельца)."""
-        async with self._pool.connection() as conn:
-            conn.row_factory = dict_row
-            if owner_id:
-                cur = await conn.execute(
-                    "SELECT * FROM documents WHERE sha256=%s AND owner_id=%s LIMIT 1",
-                    (sha256, owner_id),
-                )
-            else:
-                cur = await conn.execute(
-                    "SELECT * FROM documents WHERE sha256=%s LIMIT 1", (sha256,)
-                )
             row = await cur.fetchone()
         return DocumentRecord.from_row(row) if row else None
 

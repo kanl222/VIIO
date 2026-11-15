@@ -40,7 +40,6 @@ def create_api_router(agent_service, settings, consultant_service=None):
         if not x_internal_token or not any(compare_digest(key.encode(), x_internal_token.encode()) for key in accepted):
             raise HTTPException(401, 'Необходим ключ чата')
 
-    RequireAuth = Annotated[None, Depends(authorize)]
     @router.get('/health')
     async def health():
         provider = settings.chat_provider or settings.llm_provider

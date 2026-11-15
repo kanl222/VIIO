@@ -73,3 +73,5 @@ Diagnostics/PRODUCT.md
 /docs/rag-article-779526.md
 /docs/rag-big-rag-comparison.md
 .agents/skills/*
+scripts/verify_warehouse_graph.py
+scripts/test_live_agent_and_consultant.py

@@ -66,6 +66,26 @@ services:
     restart: unless-stopped
     networks:
     - viio_net
+  memgraph:
+    image: memgraph/memgraph-platform:latest
+    container_name: viio_memgraph
+    mem_limit: 2048m
+    ports:
+    - 127.0.0.1:${MEMGRAPH_PORT:-7687}:7687
+    - 127.0.0.1:${MEMGRAPH_LAB_PORT:-3001}:3000
+    environment:
+    - MEMGRAPH="--log-level=WARNING --telemetry-enabled=false --data-recovery-on-startup=true"
+    volumes:
+    - memgraph_data:/var/lib/memgraph
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'RETURN 1;' | mgconsole || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+    - viio_net
   document-worker:
     image: viio-documents:latest
     cpus: ${DOCUMENT_WORKER_CPUS:-1}
@@ -362,10 +382,13 @@ services:
     - PGSQL_MAX_ROWS=${PGSQL_MAX_ROWS:-100}
     - PGSQL_MAX_CHARS=${PGSQL_MAX_CHARS:-12000}
     - PGSQL_TIMEOUT_SECONDS=${PGSQL_TIMEOUT_SECONDS:-40}
-    - MEMGRAPH_ENABLED=${MEMGRAPH_ENABLED:-true}
+    - MEMGRAPH_ENABLED=${MEMGRAPH_ENABLED:-false}
     - MEMGRAPH_URI=${MEMGRAPH_URI:-bolt://memgraph:7687}
     - SERVICE_ROLE=assistent
     - DOCUMENTS_URL=http://documents:8000
+    - RAG_URL=http://rag:8000
+    - RAG_TIMEOUT_SECONDS=${RAG_TIMEOUT_SECONDS:-120}
+    - CHAT_TIMEOUT_SECONDS=${CHAT_TIMEOUT_SECONDS:-120}
     - SECURE_RUNTIME=true
     - DATABASE_MIGRATIONS_ENABLED=false
     - CHAT_API_KEY=${CHAT_API_KEY:?Configure CHAT_API_KEY in .env}
@@ -617,12 +640,41 @@ services:
       retries: 3
     networks:
     - viio_net
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: viio_nginx
+    ports:
+    - "${GATEWAY_PORT:-80}:80"
+    - "${DIAGNOSTICS_PROXY_PORT:-8080}:8080"
+    volumes:
+    - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      webchat:
+        condition: service_healthy
+      assistent:
+        condition: service_healthy
+      documents:
+        condition: service_healthy
+    networks:
+    - viio_net
+    - consultant_net
+    mem_limit: 256m
+    cpus: 1
+    security_opt:
+    - no-new-privileges:true
 networks:
   viio_net:
     driver: bridge
   consultant_net:
     driver: bridge
 volumes:
+  memgraph_data: {}
   redis_data: {}
   qdrant_storage: {}
   postgres_data: {}

@@ -37,6 +37,7 @@ class NodeLabel(str, Enum):
     CHUNK = "Chunk"
     MENU_PATH = "MenuPath"       # для навигации в интерфейсе
     OPERATION = "Operation"       # совместимость
+    ABBREVIATION = "Abbreviation" # Сокращения и термины онтологии
 
     # Товары и склад
     PRODUCT = "Product"
@@ -124,6 +125,12 @@ class RelationType(str, Enum):
     HAS_SYSTEM_ROLE = "HAS_SYSTEM_ROLE"           # (Employee) -> (SystemRole)
     IN_SYSTEM = "IN_SYSTEM"                       # (SystemRole) -> (System)
     HAS_MENU = "HAS_MENU"                         # (System) -> (MenuPath)
+
+    # Аббревиатуры и термины
+    EXPANDS_TO = "EXPANDS_TO"                     # (Abbreviation) -> (System|Regulation|Category|Process|DataEntity)
+    REFERS_TO = "REFERS_TO"                       # (Abbreviation) -> (System|Regulation|Category|Process|DataEntity|Department)
+    HAS_ABBREVIATION = "HAS_ABBREVIATION"         # (System|Regulation|Category|Process|Document) -> (Abbreviation)
+    SYNONYM_OF = "SYNONYM_OF"                     # (Abbreviation) -> (Abbreviation)
 
 
 class SystemType(str, Enum):
@@ -215,13 +222,17 @@ class ConceptNode(BaseGraphNode):
     name: str
 
 
+class AbbreviationNode(BaseGraphNode):
+    name: str                                     # Например, "ИСЛО", "МДЛП", "GDP"
+    full_name: str                                # Полная расшифровка
+    short_form: str | None = None                 # Альтернативная форма, например "ИС ЛО"
+    description: str | None = None                # Контекст и значение термина
+    category: str | None = "Общее"                # Система, Норматив, Категория, Склад, Организация
+
+
 class MenuPathNode(BaseGraphNode):
     full_path: str
     section_name: str | None = None
-
-    def get_leaf(self) -> str:
-        parts = [p.strip() for p in self.full_path.replace("->", ">").split(">")]
-        return parts[-1] if parts else self.full_path
 
 
 class OperationNode(BaseGraphNode):
@@ -413,14 +424,6 @@ class GraphFact(BaseModel):
     menu_path: str | None = None
     condition: str | None = None
     weight: int = 1
-
-    def to_bullet_point(self) -> str:
-        res = f"- {self.subject} [{self.relation}] -> {self.target}"
-        if self.menu_path:
-            res += f" (Раздел: {self.menu_path})"
-        if self.condition:
-            res += f" [УСЛОВИЕ: {self.condition}]"
-        return res
 
 
 class GraphRetrievalResult(BaseModel):

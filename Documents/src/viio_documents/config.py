@@ -97,6 +97,24 @@ class Settings(BaseSettings):
         description="Максимальное число параллельных фоновых воркеров очереди.",
     )
 
+    # Настройки графа знаний Memgraph (Semantic GraphRAG)
+    memgraph_enabled: bool = Field(
+        default=False,
+        description="Включить синхронизацию документов с графом знаний Memgraph.",
+    )
+    memgraph_uri: str = Field(
+        default="bolt://memgraph:7687",
+        description="Bolt URI подключения к Memgraph.",
+    )
+    memgraph_user: str = Field(
+        default="",
+        description="Пользователь Memgraph.",
+    )
+    memgraph_password: str = Field(
+        default="",
+        description="Пароль Memgraph.",
+    )
+
     pdf_engine: Literal["auto", "pypdf", "docling"] = "auto"
     pdf_max_bytes: int = Field(default=32 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024)
     pdf_max_pages: int = Field(default=200, ge=1, le=200)

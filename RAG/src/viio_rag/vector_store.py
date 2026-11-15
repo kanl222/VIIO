@@ -318,25 +318,6 @@ class QdrantVectorStoreAdapter(IVectorStore):
             points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
             key='metadata', wait=True)
 
-    def document_metadata(self):
-        if not self._client.collection_exists(self._collection_name):
-            return []
-        found = {}
-        offset = None
-        while True:
-            points, offset = self._client.scroll(self._collection_name, offset=offset, limit=100, with_vectors=False)
-            for point in points:
-                meta = (point.payload or {}).get('metadata', {})
-                identifier = meta.get('document_id')
-                if identifier and meta.get('ingestion_ready') is not False:
-                    record = found.setdefault(identifier, {**meta, 'chunks_count': 0, '_search_parts': []})
-                    record['chunks_count'] += 1
-                    record.setdefault('_search_parts', []).append((meta.get('chunk_index', 0), (point.payload or {}).get('page_content', '')))
-            if offset is None:
-                for record in found.values():
-                    record['search_text'] = '\n\n'.join(text for _, text in sorted(record.pop('_search_parts')))
-                return list(found.values())
-
     def get_chunks(self, doc_chunks: list[tuple[str, int]]) -> list[Document]:
         """Прямое извлечение чанков по парам (document_id, chunk_index) через детерминированные ID."""
         if not doc_chunks or not self._client.collection_exists(self._collection_name):
