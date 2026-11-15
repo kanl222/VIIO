@@ -32,7 +32,7 @@ dependencies = [
 [project.scripts]
 
 [tool.uv.sources]
-viio-rag = { path = "../RAG" }
+viio-rag = { workspace = true }
 
 
 [build-system]

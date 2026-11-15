@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "neo4j>=6.4.1",
+# ]
+# ///
 """Скрипт прикрепления данных к графу знаний Memgraph (Semantic GraphRAG).
 
 Добавляет и связывает:

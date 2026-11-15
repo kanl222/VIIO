@@ -2,7 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     "httpx>=0.28.0",
-#     "neo4j>=5.15.0",
+#     "neo4j>=6.4.1",
 # ]
 # ///
 """
