@@ -87,6 +87,12 @@ def create_postgres_readonly_tool(settings: Settings, client: PostgresMCPClient 
             query = sql.strip().rstrip(";").strip()
             if not query or len(query) > 10000:
                 return "Укажите один SELECT-запрос длиной до 10 000 символов."
+            destructive_pattern = re.compile(
+                r"\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|GRANT|REVOKE)\b",
+                re.IGNORECASE,
+            )
+            if destructive_pattern.search(query):
+                return "Ошибка безопасности: База данных работает строго в режиме Read-Only. Команды модификации данных и структуры (DROP, DELETE, UPDATE, ALTER, TRUNCATE, INSERT) запрещены."
             if operation == "explain":
                 # Не внедряем LIMIT в исходный SQL: это меняет план выполнения.
                 # Оборачивание в производную таблицу исключает DML/DDL и множественные инструкции.

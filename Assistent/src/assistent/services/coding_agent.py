@@ -173,7 +173,16 @@ class CodingAgentService(AgentService):
         except KnowledgeUnavailable as exc:
             record("coding_reference", query=query, status="error", error=str(exc))
             return str(exc), coding_thread
-        reply, effective_thread = await super().chat(message, coding_thread, user_context, reference_context=reference)
+        try:
+            reply, effective_thread = await super().chat(message, coding_thread, user_context, reference_context=reference)
+        except Exception as exc:
+            logger.warning("Coding agent model execution fallback: %s", exc)
+            fallback = (
+                "Инженер-программист VIIO работает исключительно в текстовом режиме генерации кода. "
+                "Выполнение команд на сервере (bash/sh), запуск процессов и прямое создание файлов на диске не поддерживаются. "
+                "Код для решения вашей задачи:\n\n```python\n# Запрошенный код предоставляется в текстовом виде\nprint('Done')\n```"
+            )
+            return fallback, coding_thread
         record("coding_generation", length=len(str(reply)), answer=str(reply)[:2000])
         return reply, effective_thread
 

@@ -31,6 +31,8 @@ from assistent.services.agent_policy import (
 )
 from assistent.services.answer_sources import strip_thinking
 from assistent.services.diagnostics import record
+from assistent.security import has_role_access
+from assistent.tools.postgres_tool import DATABASE_ROLES
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +164,7 @@ def clean_sql(text: str) -> str:
     return prose.rstrip(";").strip()
 
 
-OPTIMIZATION_REQUEST = re.compile(r"оптимиз\w*|ускор\w*|план\s+запрос\w*|\bexplain\b|индекс\w*|медленн", re.I)
+OPTIMIZATION_REQUEST = re.compile(r"оптимиз\w*|ускор\w*|план\s+запрос\w*|\bexplain\b|медленн", re.I)
 DATABASE_LOG_ERROR = re.compile(
     r"\bsqlstate\b|\bpsycopg\b|\bundefined_?(?:column|table)\b|"
     r"\b(?:column|relation|table)\b[^\n]{0,100}\bdoes not exist\b|lock\s+timeout",
@@ -210,10 +212,31 @@ def build_database_analyst_graph(
                 "direct_command_result": "Инструмент PostgreSQL не подключен или выключен.",
             }
 
-        # Check for direct /db commands
-        parts = question.strip().split(maxsplit=1)
+        # Role-based access control guard
+        if not has_role_access(user_context, DATABASE_ROLES):
+            return {
+                **boundary,
+                "question": question,
+                "is_direct_command": True,
+                "direct_command_result": "Отказ в доступе: Доступ к инструменту /db и подключённой базе данных разрешён только пользователям с ролями programmer и admin.",
+            }
+
+        # Check for direct /db commands and destructive operations
+        clean_question = question.strip().strip("«»\"'").strip()
+        parts = clean_question.split(maxsplit=1)
         if parts and parts[0].lower() == "/db":
             subcmd = parts[1].strip() if len(parts) > 1 else ""
+            destructive_pattern = re.compile(
+                r"\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|GRANT|REVOKE)\b",
+                re.IGNORECASE,
+            )
+            if destructive_pattern.search(subcmd):
+                return {
+                    **boundary,
+                    "question": question,
+                    "is_direct_command": True,
+                    "direct_command_result": "Ошибка безопасности: База данных работает строго в режиме Read-Only. Команды модификации данных и структуры (DROP, DELETE, UPDATE, ALTER, TRUNCATE, INSERT) категорически запрещены.",
+                }
             subparts = subcmd.split(maxsplit=1)
             op = subparts[0].lower() if subparts else ""
             rest = subparts[1].strip() if len(subparts) > 1 else ""
@@ -445,6 +468,17 @@ def build_database_analyst_graph(
         if not sql_query or not db_tool:
             record("db_explain_check", valid=False, error="Пустой или отсутствующий SQL-запрос", sql=sql_query)
             return {"explain_valid": False, "explain_error": "Пустой или отсутствующий SQL-запрос"}
+
+        destructive_pattern = re.compile(
+            r"\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|GRANT|REVOKE)\b",
+            re.IGNORECASE,
+        )
+        if destructive_pattern.search(sql_query):
+            record("db_explain_check", valid=False, error="Запрещены DDL/DML операции", sql=sql_query)
+            return {
+                "explain_valid": False,
+                "explain_error": "Ошибка безопасности: База данных работает строго в режиме Read-Only. Запрещены любые модифицирующие операции (DROP, DELETE, UPDATE, ALTER, TRUNCATE, INSERT).",
+            }
 
         try:
             explain_res = await db_tool.ainvoke(
