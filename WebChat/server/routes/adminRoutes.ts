@@ -76,13 +76,16 @@ export function createAdminRouter(
     }
     try {
       const pool = poolProvider();
-      // Поиск по точной подстроке: пользовательский ввод не становится выражением с подстановочными знаками.
+      const whereClause = search ? 'WHERE strpos(lower(username), lower($1)) > 0' : '';
+      const listParams = search ? [search, (page - 1) * 20] : [(page - 1) * 20];
+      const countParams = search ? [search] : [];
+      const offsetPlaceholder = search ? '$2' : '$1';
+
       const [users, total] = await Promise.all([
         pool.query(`SELECT ${userColumns} FROM users
-          WHERE strpos(lower(username), lower($1)) > 0
-          ORDER BY created_at DESC, id LIMIT 20 OFFSET $2`, [search, (page - 1) * 20]),
-        pool.query(`SELECT COUNT(*)::int AS count FROM users
-          WHERE strpos(lower(username), lower($1)) > 0`, [search]),
+          ${whereClause}
+          ORDER BY created_at DESC, id LIMIT 20 OFFSET ${offsetPlaceholder}`, listParams),
+        pool.query(`SELECT COUNT(*)::int AS count FROM users ${whereClause}`, countParams),
       ]);
       res.json({ users: users.rows, total: total.rows[0].count, page, page_size: 20 });
     } catch {

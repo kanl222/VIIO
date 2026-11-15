@@ -123,3 +123,13 @@ async def test_cross_encoder_graceful_fallback_when_disabled():
     reranked = await reranker.rerank("отпуск", [doc1, doc2], 2)
     assert len(reranked) == 1  # doc2 filtered out by lexical min_score
     assert reranked[0].metadata["document_id"] == "doc1"
+
+
+def test_cross_encoder_cache_key_collision_avoidance():
+    reranker = CrossEncoderReranker(enabled=False)
+    prefix = "A" * 150
+    text1 = prefix + " variant_one"
+    text2 = prefix + " variant_two"
+    key1 = reranker._cache_key("test query", text1)
+    key2 = reranker._cache_key("test query", text2)
+    assert key1 != key2, "Cache keys must not collide on matching 128-char prefixes"

@@ -64,6 +64,8 @@ export function createChatRouter(
     }
     const cleanAttachments = Array.isArray(attachments) ? attachments : [];
     const pool = poolProvider();
+    let userMsgId: string | undefined;
+    let assistantMsgSaved = false;
 
     try {
       // 1. Проверяем существование диалога и права пользователя
@@ -80,12 +82,14 @@ export function createChatRouter(
       const conversation = convResult.rows[0];
 
       // 2. Сохраняем сообщение пользователя в БД
-      await pool.query(
+      const userMsgResult = await pool.query(
         `INSERT INTO messages (conversation_id, sender, text, attachments)
-         VALUES ($1, $2, $3, $4)`,
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
         [conversation_id, 'user', databaseRequest ? '[Запрос PostgreSQL — не сохраняется]' : cleanMessage,
           JSON.stringify(databaseRequest ? [] : cleanAttachments)]
       );
+      userMsgId = userMsgResult.rows[0]?.id;
 
       // 3. Вызываем сервис диалогового агента assistent
       const agentBaseUrl = agentUrlProvider().replace(/\/+$/, '');
@@ -120,6 +124,9 @@ export function createChatRouter(
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(streaming ? 300_000 : 120_000)]),
         });
       } catch (networkErr: any) {
+        if (userMsgId) {
+          await pool.query('DELETE FROM messages WHERE id = $1', [userMsgId]).catch(() => {});
+        }
         console.error('[Chat] Network error connecting to assistent:', networkErr.message);
         res.status(502).json({
           detail: 'Сервис диалогового агента assistent недоступен. Попробуйте позже.',
@@ -128,6 +135,9 @@ export function createChatRouter(
       }
 
       if (!agentResponse.ok) {
+        if (userMsgId) {
+          await pool.query('DELETE FROM messages WHERE id = $1', [userMsgId]).catch(() => {});
+        }
         let errDetail = 'Ошибка при генерации ответа агентом.';
         try {
           const errData = (await agentResponse.json()) as { detail?: string } | undefined;
@@ -174,6 +184,7 @@ export function createChatRouter(
          RETURNING id, created_at`,
         [conversation_id, 'assistant', databaseRequest ? '[Ответ PostgreSQL показан без сохранения. Повторите /db запрос при необходимости.]' : replyText, JSON.stringify(sourceAttachments)]
       );
+      assistantMsgSaved = true;
 
       // 5. Обновляем время активности диалога
       await pool.query(
@@ -193,6 +204,9 @@ export function createChatRouter(
       } else res.json(result);
     } catch (err: any) {
       console.error('[Chat] Error processing chat message:', err.message);
+      if (userMsgId && !assistantMsgSaved) {
+        await pool.query('DELETE FROM messages WHERE id = $1', [userMsgId]).catch(() => {});
+      }
       if (res.headersSent) {
         if (!res.destroyed) res.end(`data: ${JSON.stringify({ type: 'error', detail: 'Ответ прерван или не сохранён. Повторите запрос.' })}\n\n`);
         return;

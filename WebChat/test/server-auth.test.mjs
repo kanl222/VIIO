@@ -181,6 +181,13 @@ class MockPool {
       return { rowCount: msgs.length, rows: msgs };
     }
 
+    if (s.startsWith('DELETE FROM messages WHERE id = $1')) {
+      const msgId = params[0];
+      const initialLen = this.messages.length;
+      this.messages = this.messages.filter(m => m.id !== msgId);
+      return { rowCount: initialLen - this.messages.length, rows: [] };
+    }
+
     if (s.startsWith('INSERT INTO messages')) {
       const [conversation_id, sender, text, attachments] = params;
       const id = 'msg-' + Math.random().toString(36).slice(2, 10);
@@ -941,6 +948,51 @@ test('HTTP API: Security: Passes X-Internal-Token and user_context to assistent'
     assert.ok(capturedHeaders['X-Internal-Token'], 'Должен передаваться заголовок X-Internal-Token');
     assert.equal(capturedBody.user_context.role, 'employee');
     assert.deepEqual(capturedBody.user_context.departments, ['general']);
+  } finally {
+    await close();
+  }
+});
+
+test('HTTP API: Chat endpoint removes user message from DB if assistent is offline', async () => {
+  const pool = new MockPool();
+
+  const mockFailingFetch = async () => {
+    throw new Error('Connection refused');
+  };
+
+  const app = createApp({ pool, fetchFn: mockFailingFetch });
+  const { request, close } = await startServer(app);
+
+  try {
+    const regRes = await request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'offline_user', password: 'password12345' }),
+    });
+    const cookie = regRes.headers.get('set-cookie');
+
+    const createConvRes = await request('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ title: 'Тестовый диалог' }),
+    });
+    const { conversation } = await createConvRes.json();
+
+    const chatRes = await request('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        conversation_id: conversation.id,
+        message: 'Сообщение, которое не должно зависнуть',
+      }),
+    });
+    assert.equal(chatRes.status, 502);
+
+    const getRes = await request(`/api/conversations/${conversation.id}`, {
+      headers: { Cookie: cookie },
+    });
+    const convData = await getRes.json();
+    assert.equal(convData.messages.length, 0, 'User message must be deleted when assistent call fails');
   } finally {
     await close();
   }
