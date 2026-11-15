@@ -63,3 +63,48 @@ async def test_agent_graph_with_graph_tool():
 
     assert "Инвентаризация на складах" in answer
     assert fake_llm.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_search_processes_and_steps():
+    settings = SimpleNamespace(memgraph_uri="bolt://127.0.0.1:7687", memgraph_user="", memgraph_password="")
+    tool = create_graph_search_tool(settings)
+
+    context = await tool.ainvoke({"query": "приёмка лекарственных препаратов"})
+    assert "Бизнес-процессы и шаги алгоритмов" in context
+    assert "Приёмка лекарственных препаратов" in context
+    assert "Входной документарный контроль" in context
+    assert "Фармацевт-контролёр" in context or "Кладовщик" in context
+
+
+@pytest.mark.asyncio
+async def test_graph_search_storage_conditions():
+    settings = SimpleNamespace(memgraph_uri="bolt://127.0.0.1:7687", memgraph_user="", memgraph_password="")
+    tool = create_graph_search_tool(settings)
+
+    context = await tool.ainvoke({"query": "Гам-КОВИД-Вак режим хранения"})
+    assert "Режимы хранения" in context
+    assert "Холодовая цепь 2–8 °C" in context
+    assert "Вакцина Гам-КОВИД-Вак" in context
+
+
+@pytest.mark.asyncio
+async def test_graph_search_systems_and_integrations():
+    settings = SimpleNamespace(memgraph_uri="bolt://127.0.0.1:7687", memgraph_user="", memgraph_password="")
+    tool = create_graph_search_tool(settings)
+
+    context = await tool.ainvoke({"query": "WMS VIIO интеграции"})
+    assert "Информационные системы и интеграции" in context
+    assert "WMS VIIO" in context
+    assert "1С:ERP Предприятие" in context or "МДЛП" in context
+
+
+@pytest.mark.asyncio
+async def test_graph_search_regulations():
+    settings = SimpleNamespace(memgraph_uri="bolt://127.0.0.1:7687", memgraph_user="", memgraph_password="")
+    tool = create_graph_search_tool(settings)
+
+    context = await tool.ainvoke({"query": "GDP требования"})
+    assert "Нормативные требования" in context
+    assert "GDP" in context
+    assert "дистрибьюторской практики" in context
