@@ -35,29 +35,24 @@ logger = logging.getLogger("import_index_kb")
 
 NEW_DOCUMENTS = [
     {
-        "id": "doc-kontakty-tehpodderzhki-islo-oas",
-        "file": "70_kontakty_i_reglament_tehpodderzhki_is_lo_oas.md",
-        "title": "Регламент и контакты технической поддержки ИС «Лекарственное обеспечение» и ГАУЗ «ОАС»",
+        "id": "doc-federalnye-zakony-323-61-178-3-fz",
+        "file": "75_federalnye_zakony_323_61_178_3_fz_lekarstvennoe_obespechenie.md",
+        "title": "Справочник законодательства РФ: Федеральные законы № 323-ФЗ, № 61-ФЗ, № 178-ФЗ и № 3-ФЗ",
     },
     {
-        "id": "doc-elektronny-recept-karta-orenburzhtsa",
-        "file": "71_elektronny_recept_karta_zhitelya_orenburzhtsa.md",
-        "title": "Регламент работы с электронными рецептами и «Универсальной картой оренбуржца»",
+        "id": "doc-postanovleniya-pravitelstva-rf-890-1556",
+        "file": "76_postanovleniya_pravitelstva_rf_890_1556_lgoty_i_markirovka.md",
+        "title": "Постановления Правительства РФ № 890 и № 1556: Региональные льготы и система маркировки МДЛП",
     },
     {
-        "id": "doc-prikazy-mz-rf-1094n-1093n-pravila-otpuska",
-        "file": "72_prikazy_mz_rf_1094n_1093n_pravila_naznacheniya_i_otpuska.md",
-        "title": "Нормативно-правовое регулирование: Приказы Минздрава России № 1094н, № 1093н, № 947н и № 911н",
+        "id": "doc-regionalnye-akty-oo-postanovleniya-528-597",
+        "file": "77_regionalnye_akty_orenburgskoy_oblasti_postanovleniya_528_597.md",
+        "title": "Нормативные акты Оренбургской области: Постановления Правительства № 528-пп и № 597-пп",
     },
     {
-        "id": "doc-mdlp-shemy-vybytiya-registrator-vybytiya",
-        "file": "73_mdlp_shemy_vybytiya_registrator_vybytiya_10521_10531.md",
-        "title": "Регламент МДЛП «Честный Знак»: Регистраторы выбытия, схемы льготного отпуска 10521 и списания 10531",
-    },
-    {
-        "id": "doc-goryachie-linii-lekarstvennogo-obespecheniya-oo",
-        "file": "74_goryachie_linii_i_marshruty_obrascheniy_lekarstva_oo.md",
-        "title": "Горячие линии и маршрутизация обращений по льготному лекарственному обеспечению в Оренбургской области",
+        "id": "doc-regionalnye-rasporyazheniya-mz-oo-reestry",
+        "file": "78_regionalnye_rasporyazheniya_mz_oo_lgotnye_programmy_reestry.md",
+        "title": "Сводный реестр распоряжений Минздрава Оренбургской области: Программы БСК, коды льгот и мониторинг",
     },
 ]
 
@@ -243,6 +238,25 @@ async def main():
 
         # 3. Публикация в knowledge_public для Consultant
         await pub_index.put({"id": pub_id, "document_id": doc_id, "title": title, "content": content})
+
+        # 3.1. Синхронизация с онтологическим графом знаний Memgraph
+        try:
+            from viio_documents.services.graph_sync import GraphSyncService
+            sync_service = GraphSyncService(uri=os.getenv("MEMGRAPH_URI", "bolt://memgraph:7687"))
+            await sync_service.sync_document(
+                doc_id=doc_id,
+                title=title,
+                filename=filename,
+                content=content,
+                chunks_count=len(points),
+                is_public=True,
+                allowed_roles=["employee", "programmer", "admin"],
+                allowed_departments=[],
+                version=1,
+            )
+            sync_service.close()
+        except Exception as e:
+            logger.warning("Синхронизация с Memgraph пропущена: %s", e)
 
         imported_docs.append((doc_id, title, len(points)))
         logger.info("Успешно проиндексирован: '%s' -> %d чанков", title, len(points))

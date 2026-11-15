@@ -170,18 +170,22 @@ class VIIOPolicy(AgentMiddleware):
                tool_calls=getattr(answer, 'tool_calls', []),
                usage=usage)
 
-        if (self.model_first and self.routing and isinstance(answer, AIMessage)
-                and not answer.tool_calls):
-            if mode == 'knowledge' and CODER_TOOL in self.names and is_coding_request(question):
+        if self.model_first and isinstance(answer, AIMessage) and not answer.tool_calls:
+            if self.routing and mode == 'knowledge' and CODER_TOOL in self.names and is_coding_request(question):
                 return ModelResponse(result=[forced_tool_call(
                     CODER_TOOL, {'task': question}, FALLBACK_CODE_PREFIX)])
-            searched = any(call.get('name') in {SEARCH_TOOL, 'search_document_content'} for call in calls)
-            content_question = bool(re.search(r'\b(как|почему|зачем|где|что такое)\b', question, re.I))
+            searched = any(call.get('name') in {SEARCH_TOOL, 'search_knowledge_graph', 'search_document_content'} for call in calls)
+            content_question = bool(re.search(r'\b(как|почему|зачем|где|что такое|расшифровка|аббревиатур|термин)\b', question, re.I))
             catalog_only = calls and all(call.get('name') == 'list_documents' for call in calls)
-            if (not searched and (not calls or catalog_only and content_question)
-                    and SEARCH_TOOL in self.names and needs_automatic_search(question)):
-                return ModelResponse(result=[forced_tool_call(
-                    SEARCH_TOOL, {'query': question}, AUTO_CALL_PREFIX)])
+            if not searched and (not calls or catalog_only and content_question):
+                preferred_tool = None
+                if "search_knowledge_graph" in self.names and re.search(r'\b(что такое|расшифровка|аббревиатур|термин|кто такой|где находится|в какой системе)\b', question, re.I):
+                    preferred_tool = "search_knowledge_graph"
+                elif SEARCH_TOOL in self.names:
+                    preferred_tool = SEARCH_TOOL
+                if preferred_tool and needs_automatic_search(question):
+                    return ModelResponse(result=[forced_tool_call(
+                        preferred_tool, {'query': question}, AUTO_CALL_PREFIX)])
 
         if isinstance(answer, AIMessage) and not answer.tool_calls:
             sources, active = turn_provenance(history)

@@ -38,7 +38,7 @@ def search_knowledge_base(query: str) -> str:
 async def test_tools_filtered_per_request_and_role_downgrade_clears_history():
     settings = Settings(_env_file=None, github_mcp_enabled=True, github_repository='*',
                         github_mcp_token='test', pgsql_enabled=True)
-    model = RecordingModel(messages=iter([AIMessage(content='Answer') for _ in range(5)]))
+    model = RecordingModel(messages=iter([AIMessage(content='Answer') for _ in range(10)]))
     service = AgentService(build_agent_graph(model, [search_knowledge_base,
         create_github_tool(settings), create_postgres_readonly_tool(settings)],
         checkpointer=MemorySaver(), system_prompt=UNIFIED_SYSTEM_PROMPT,

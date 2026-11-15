@@ -148,10 +148,6 @@ class KnowledgeData:
                 ON CONFLICT(document_id) DO UPDATE SET content=EXCLUDED.content,filename=EXCLUDED.filename,title=EXCLUDED.title''',
                 (identifier, content, filename, title))
 
-    async def has_text(self, identifier):
-        async with self.catalog.pool.connection() as conn:
-            return bool(await (await conn.execute('SELECT 1 FROM document_contents WHERE document_id=%s', (identifier,))).fetchone())
-
     async def lexical(self, query, context, limit=15):
         expression = tsquery(query)
         if not expression:

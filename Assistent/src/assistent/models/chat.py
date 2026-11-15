@@ -39,6 +39,11 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
             max_retries=0,
             use_responses_api=False,
         )
+    stop_sequences = [
+        "<end_of_turn>", "<eos>", "<|im_end|>", "<|endoftext|>",
+        "\nuser\n", "\nUser:", "\nAssistant:", "\nassistant\n", "\nmodel\n"
+    ]
+    timeout_seconds = getattr(settings, 'chat_timeout_seconds', 120)
     if provider == "lmstudio":
         return ChatOpenAI(
             stream_usage=True,
@@ -50,6 +55,8 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
+            stop=stop_sequences,
+            timeout=timeout_seconds,
         )
     return ChatOllama(
         metadata={'viio_provider': provider},
@@ -59,4 +66,6 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
         temperature=temperature,
         top_p=top_p,
         num_predict=max_tokens,
+        stop=stop_sequences,
+        timeout=timeout_seconds,
     )

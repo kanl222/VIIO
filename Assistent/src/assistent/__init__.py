@@ -87,7 +87,6 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
             max_tool_calls=app_settings.agent_max_tool_calls,
             context_max_chars=app_settings.rag_context_max_chars,
             model_first_tools=True,
-            document_search_first=True,
             summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
             history_max_chars=app_settings.conversation_history_max_chars,
             supervisor=app_settings.supervisor_enabled or routing_llm is not None,

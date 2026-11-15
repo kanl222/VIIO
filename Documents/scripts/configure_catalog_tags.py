@@ -10,13 +10,13 @@ import psycopg
 from psycopg.rows import dict_row
 
 DOCUMENTS_URL = os.environ.get("DOCUMENTS_URL", "http://127.0.0.1:8002").rstrip("/")
-ADMIN_KEY = os.environ.get("DOCUMENTS_ADMIN_KEY", "c65c3a79e6e93be3a94b16897521395e598954d2bf00d138005aaf2a2f5570d2")
-READ_KEY = os.environ.get("DOCUMENTS_READ_KEY", "de88512a06cf719f4a4da038e7757104825b95d68702661dd7f2a4afb4bb0116")
+ADMIN_KEY = os.environ.get("DOCUMENTS_ADMIN_KEY", "")
+READ_KEY = os.environ.get("DOCUMENTS_READ_KEY", "")
 PG_HOST = os.environ.get("POSTGRES_HOST", "127.0.0.1")
 PG_PORT = os.environ.get("POSTGRES_PORT", "5432")
 PG_DB = os.environ.get("POSTGRES_DB", "agent_db")
 PG_USER = os.environ.get("POSTGRES_USER", "postgres")
-PG_PASS = os.environ.get("POSTGRES_PASSWORD", "8eea8394a309b5824fe6c2e33220829e3491279b9f8ca34ce9def049051a2c7d")
+PG_PASS = os.environ.get("POSTGRES_PASSWORD", "")
 
 METADATA_MAP = {
     "doc-ffdccd3b632d5d3ba0bf4eb32b9227b7": {

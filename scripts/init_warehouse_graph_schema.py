@@ -24,6 +24,7 @@ CONSTRAINTS = [
     ("System", "name"),
     ("DataEntity", "name"),
     ("Regulation", "code"),
+    ("Abbreviation", "name"),
 ]
 
 INDEXES = [
@@ -35,6 +36,8 @@ INDEXES = [
     ("Category", "name"),
     ("Module", "name"),
     ("Supplier", "name"),
+    ("Abbreviation", "full_name"),
+    ("Abbreviation", "short_form"),
 ]
 
 
@@ -72,7 +75,7 @@ def setup_schema(uri: str = "bolt://127.0.0.1:7687"):
 
         # 3.1 Организация и отделы
         exec_queries(s, [
-            "MERGE (org:Organization {name: 'Аптечный логистический комплекс VIIO'}) SET org.inn = '7701234567'",
+            "MERGE (org:Organization {name: 'ГАУЗ «Оренбургские областные аптеки» (ГАУЗ «ОАС»)'}) SET org.inn = '5610001234'",
             "MERGE (d_wh:Department {code: 'WH'}) SET d_wh.name = 'Складской комплекс'",
             "MERGE (d_qa:Department {code: 'QA'}) SET d_qa.name = 'Отдел обеспечения качества'",
             "MERGE (d_proc:Department {code: 'PROC'}) SET d_proc.name = 'Отдел закупок'",
@@ -126,20 +129,20 @@ def setup_schema(uri: str = "bolt://127.0.0.1:7687"):
         # 3.4 Информационные системы и интеграции
         exec_queries(s, [
             "MERGE (erp:System {name: '1С:ERP Предприятие'}) SET erp.type = 'ERP', erp.vendor = '1С', erp.version = '2.5', erp.criticality = 'High'",
-            "MERGE (wms:System {name: 'WMS VIIO'}) SET wms.type = 'WMS', wms.vendor = 'VIIO', wms.version = '4.2', wms.criticality = 'Critical'",
+            "MERGE (wms:System {name: 'WMS'}) SET wms.type = 'WMS', wms.vendor = 'WMS', wms.version = '3.0', wms.criticality = 'Critical'",
             "MERGE (mdlp:System {name: 'ИС «МДЛП»'}) SET mdlp.type = 'GovReporting', mdlp.vendor = 'ЦРПТ', mdlp.criticality = 'Critical'",
             "MERGE (mon:System {name: 'Система термомониторинга'}) SET mon.type = 'Monitoring', mon.vendor = 'TermoSensor', mon.criticality = 'High'",
             "MERGE (edo:System {name: 'СЭД Диадок / Директум'}) SET edo.type = 'EDO', edo.vendor = 'Контур/Директум', edo.criticality = 'Medium'",
             """
-            MATCH (wms:System {name: 'WMS VIIO'}), (erp:System {name: '1С:ERP Предприятие'})
+            MATCH (wms:System {name: 'WMS'}), (erp:System {name: '1С:ERP Предприятие'})
             MERGE (wms)-[:INTEGRATES_WITH]->(erp)
             """,
             """
-            MATCH (wms:System {name: 'WMS VIIO'}), (mdlp:System {name: 'ИС «МДЛП»'})
+            MATCH (wms:System {name: 'WMS'}), (mdlp:System {name: 'ИС «МДЛП»'})
             MERGE (wms)-[:INTEGRATES_WITH]->(mdlp)
             """,
             """
-            MATCH (d:Department {code: 'WH'}), (w:System {name: 'WMS VIIO'})
+            MATCH (d:Department {code: 'WH'}), (w:System {name: 'WMS'})
             MERGE (d)-[:USES_SYSTEM {frequency: 'continuous'}]->(w)
             MERGE (d)-[:OWNS_SYSTEM]->(w)
             """,
@@ -161,11 +164,11 @@ def setup_schema(uri: str = "bolt://127.0.0.1:7687"):
             MERGE (erp)-[:SOURCE_OF_TRUTH_FOR]->(e_nom)
             """,
             """
-            MATCH (wms:System {name: 'WMS VIIO'}), (e_batch:DataEntity {name: 'Остатки и статусы серий'})
+            MATCH (wms:System {name: 'WMS'}), (e_batch:DataEntity {name: 'Остатки и статусы серий'})
             MERGE (wms)-[:SOURCE_OF_TRUTH_FOR]->(e_batch)
             """,
             """
-            MATCH (wms:System {name: 'WMS VIIO'}), (e_loc:DataEntity {name: 'Топология склада и ячеек'})
+            MATCH (wms:System {name: 'WMS'}), (e_loc:DataEntity {name: 'Топология склада и ячеек'})
             MERGE (wms)-[:SOURCE_OF_TRUTH_FOR]->(e_loc)
             """,
             """
@@ -268,7 +271,7 @@ def setup_schema(uri: str = "bolt://127.0.0.1:7687"):
             MERGE (r_rec)-[:RESPONSIBLE_FOR]->(s3)
             """,
             """
-            MATCH (s3:Step {order: 3}), (wms:System {name: 'WMS VIIO'})
+            MATCH (s3:Step {order: 3}), (wms:System {name: 'WMS'})
             MERGE (s3)-[:EXECUTED_IN]->(wms)
             """,
             """
@@ -311,6 +314,247 @@ def setup_schema(uri: str = "bolt://127.0.0.1:7687"):
             """
             MATCH (b1:Batch {id: 'BATCH-2026-001'}), (loc:Location {code: 'CHAMBER-COLD-01'})
             MERGE (b1)-[:STORED_IN]->(loc)
+            """,
+        ])
+
+        # 3.11 Ядро аббревиатур и сокращений (Core Abbreviations)
+        logger.info("--- 3.11 Загрузка ядра аббревиатур и терминов ---")
+        exec_queries(s, [
+            # 1. ИСЛО
+            """
+            MERGE (a:Abbreviation {name: 'ИСЛО'})
+            SET a.full_name = 'Информационная система «Лекарственное обеспечение»',
+                a.short_form = 'ИС ЛО',
+                a.category = 'Информационные системы',
+                a.description = 'Региональная медицинская и фармацевтическая система выписки электронных рецептов и учета льготного лекарственного обеспечения'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ИСЛО'}), (sys:System {name: 'ИС «Лекарственное обеспечение»'})
+            MERGE (a)-[:EXPANDS_TO]->(sys)
+            """,
+            """
+            MATCH (wms:System {name: 'WMS'}), (islo:System {name: 'ИС «Лекарственное обеспечение»'})
+            MERGE (wms)-[:INTEGRATES_WITH]->(islo)
+            """,
+            # 2. МДЛП
+            """
+            MERGE (a:Abbreviation {name: 'МДЛП'})
+            SET a.full_name = 'Мониторинг движения лекарственных препаратов',
+                a.short_form = 'ИС МДЛП',
+                a.category = 'Госсистемы и маркировка',
+                a.description = 'Федеральная государственная информационная система прослеживания лекарственных средств от производителя до потребителя'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'МДЛП'}), (sys:System {name: 'ИС «МДЛП»'})
+            MERGE (a)-[:EXPANDS_TO]->(sys)
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'МДЛП'}), (reg:Regulation {code: 'PP-1556'})
+            MERGE (a)-[:REFERS_TO]->(reg)
+            """,
+            # 3. GDP
+            """
+            MERGE (a:Abbreviation {name: 'GDP'})
+            SET a.full_name = 'Good Distribution Practice (Надлежащая дистрибьюторская практика)',
+                a.short_form = 'НАДП',
+                a.category = 'Нормативная база и качество',
+                a.description = 'Международный стандарт правил надлежащей дистрибьюторской практики ЕАЭС в сфере обращения лекарственных средств'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'GDP'}), (reg:Regulation {code: 'GDP'})
+            MERGE (a)-[:EXPANDS_TO]->(reg)
+            """,
+            # 4. ЖНВЛП
+            """
+            MERGE (a:Abbreviation {name: 'ЖНВЛП'})
+            SET a.full_name = 'Жизненно необходимые и важнейшие лекарственные препараты',
+                a.short_form = 'ЖНВЛС',
+                a.category = 'Категории препаратов',
+                a.description = 'Перечень медикаментов, утверждаемый Правительством РФ для регулирования цен и гарантированного лекобеспечения'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ЖНВЛП'}), (cat:Category {name: 'ЖНВЛП'})
+            MERGE (a)-[:EXPANDS_TO]->(cat)
+            """,
+            # 5. НС и ПВ
+            """
+            MERGE (a:Abbreviation {name: 'НС и ПВ'})
+            SET a.full_name = 'Наркотические средства и психотропные вещества',
+                a.short_form = 'НС/ПВ',
+                a.category = 'Категории препаратов',
+                a.description = 'Препараты предметно-количественного учета, требующие хранения в сейфах 3-4 класса устойчивости и особого контроля доступа'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'НС и ПВ'}), (cat:Category {name: 'НС и ПВ (Наркотические и психотропные)'})
+            MERGE (a)-[:EXPANDS_TO]->(cat)
+            """,
+            # 6. WMS
+            """
+            MERGE (a:Abbreviation {name: 'WMS'})
+            SET a.full_name = 'Warehouse Management System',
+                a.short_form = 'СУС',
+                a.category = 'Информационные системы',
+                a.description = 'Система управления складом: адресное хранение, топология, приёмка, размещение, комплектация и инвентаризация'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'WMS'}), (sys:System {name: 'WMS'})
+            MERGE (a)-[:EXPANDS_TO]->(sys)
+            """,
+            # 7. ERP
+            """
+            MERGE (a:Abbreviation {name: 'ERP'})
+            SET a.full_name = 'Enterprise Resource Planning',
+                a.short_form = 'ERP',
+                a.category = 'Информационные системы',
+                a.description = 'Система планирования ресурсов предприятия, взаиморасчетов, бухгалтерского и управленческого учета'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ERP'}), (sys:System {name: '1С:ERP Предприятие'})
+            MERGE (a)-[:EXPANDS_TO]->(sys)
+            """,
+            # 8. TMS
+            """
+            MERGE (a:Abbreviation {name: 'TMS'})
+            SET a.full_name = 'Transportation Management System',
+                a.short_form = 'СУТ',
+                a.category = 'Информационные системы',
+                a.description = 'Система управления транспортной логистикой, планированием рейсов и доставкой термолабильных грузов'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'TMS'}), (dep:Department {code: 'LOG'})
+            MERGE (a)-[:REFERS_TO]->(dep)
+            """,
+            # 9. QMS
+            """
+            MERGE (a:Abbreviation {name: 'QMS'})
+            SET a.full_name = 'Quality Management System',
+                a.short_form = 'СМК',
+                a.category = 'Нормативная база и качество',
+                a.description = 'Система менеджмента качества: регламенты, контроль отклонений, валидация процессов и аудит'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'QMS'}), (dep:Department {code: 'QA'})
+            MERGE (a)-[:REFERS_TO]->(dep)
+            """,
+            # 10. КМ
+            """
+            MERGE (a:Abbreviation {name: 'КМ'})
+            SET a.full_name = 'Код маркировки',
+                a.short_form = 'DataMatrix',
+                a.category = 'Складской учет',
+                a.description = 'Уникальный двумерный матричный код (DataMatrix), наносимый на вторичную упаковку лекарственного препарата'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'КМ'}), (de:DataEntity {name: 'КМ DataMatrix упаковок'})
+            MERGE (a)-[:REFERS_TO]->(de)
+            """,
+            # 11. СОП
+            """
+            MERGE (a:Abbreviation {name: 'СОП'})
+            SET a.full_name = 'Стандартная операционная процедура',
+                a.short_form = 'SOP',
+                a.category = 'Процессы и регламенты',
+                a.description = 'Документально утвержденная пошаговая инструкция по выполнению конкретной технологической операции на складе'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'СОП'}), (reg:Regulation {code: 'GDP'})
+            MERGE (a)-[:REFERS_TO]->(reg)
+            """,
+            # 12. ИЛП
+            """
+            MERGE (a:Abbreviation {name: 'ИЛП'})
+            SET a.full_name = 'Иммунобиологические лекарственные препараты',
+                a.short_form = 'ИЛП',
+                a.category = 'Категории препаратов',
+                a.description = 'Вакцины, анатоксины, токсины, сыворотки, требующие непрерывной холодовой цепи (2-8 °C)'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ИЛП'}), (cat:Category {name: 'Иммунобиологические (ИЛП)'})
+            MERGE (a)-[:EXPANDS_TO]->(cat)
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ИЛП'}), (reg:Regulation {code: 'SP-3.3.2'})
+            MERGE (a)-[:REFERS_TO]->(reg)
+            """,
+            # 13. СЭД
+            """
+            MERGE (a:Abbreviation {name: 'СЭД'})
+            SET a.full_name = 'Система электронного документооборота',
+                a.short_form = 'ЭДО',
+                a.category = 'Информационные системы',
+                a.description = 'Сервис юридически значимого электронного обмена накладными (УПД), счетами-фактурами и сертификатами'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'СЭД'}), (sys:System {name: 'СЭД Диадок / Директум'})
+            MERGE (a)-[:EXPANDS_TO]->(sys)
+            """,
+            # 14. СНИЛС
+            """
+            MERGE (a:Abbreviation {name: 'СНИЛС'})
+            SET a.full_name = 'Страховой номер индивидуального лицевого счёта',
+                a.short_form = 'СНИЛС',
+                a.category = 'Документы и данные',
+                a.description = 'Уникальный номер лицевого счёта гражданина в системе пенсионного и социального страхования РФ'
+            """,
+            # 15. ФЗ-61
+            """
+            MERGE (a:Abbreviation {name: 'ФЗ-61'})
+            SET a.full_name = 'Федеральный закон «Об обращении лекарственных средств» № 61-ФЗ',
+                a.short_form = '61-ФЗ',
+                a.category = 'Нормативная база и качество',
+                a.description = 'Основной законодательный акт, регулирующий сферу обращения лекарственных средств на территории РФ'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ФЗ-61'}), (reg:Regulation {code: 'FZ-61'})
+            MERGE (a)-[:EXPANDS_TO]->(reg)
+            """,
+            # 16. ЦРПТ
+            """
+            MERGE (a:Abbreviation {name: 'ЦРПТ'})
+            SET a.full_name = 'Центр развития перспективных технологий',
+                a.short_form = 'Оператор ЦРПТ',
+                a.category = 'Организации',
+                a.description = 'Единый национальный оператор государственной системы цифровой маркировки «Честный Знак»'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ЦРПТ'}), (sys:System {name: 'ИС «МДЛП»'})
+            MERGE (a)-[:REFERS_TO]->(sys)
+            """,
+            # 17. МНН
+            """
+            MERGE (a:Abbreviation {name: 'МНН'})
+            SET a.full_name = 'Международное непатентованное наименование',
+                a.short_form = 'INN',
+                a.category = 'Складской учет',
+                a.description = 'Уникальное глобальное наименование действующего фармацевтического вещества, рекомендованное ВОЗ'
+            """,
+            # 18. ТМЦ
+            """
+            MERGE (a:Abbreviation {name: 'ТМЦ'})
+            SET a.full_name = 'Товарно-материальные ценности',
+                a.short_form = 'ТМЦ',
+                a.category = 'Складской учет',
+                a.description = 'Складские активы: лекарственные средства, медизделия, сырьё, тара и упаковочные материалы'
+            """,
+            # 19. ПКУ
+            """
+            MERGE (a:Abbreviation {name: 'ПКУ'})
+            SET a.full_name = 'Предметно-количественный учет',
+                a.short_form = 'ПКУ',
+                a.category = 'Нормативная база и качество',
+                a.description = 'Специальный строгий режим регистрации движения наркотических, психотропных, сильнодействующих и ядовитых ЛП'
+            """,
+            """
+            MATCH (a:Abbreviation {name: 'ПКУ'}), (cat:Category {name: 'НС и ПВ (Наркотические и психотропные)'})
+            MERGE (a)-[:REFERS_TO]->(cat)
+            """,
+            # 20. ГЛФ
+            """
+            MERGE (a:Abbreviation {name: 'ГЛФ'})
+            SET a.full_name = 'Готовые лекарственные формы',
+                a.short_form = 'ГЛФ',
+                a.category = 'Складской учет',
+                a.description = 'Лекарственные препараты в готовом для клинического применения виде (таблетки, ампулы, капсулы, флаконы)'
             """,
         ])
 

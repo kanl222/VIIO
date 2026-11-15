@@ -6,15 +6,16 @@ via list_agent_skills and activate_agent_skill without explicit user prompts.
 
 from __future__ import annotations
 
+import os
 import httpx
 import json
 import time
 import functools
 print = functools.partial(print, flush=True)
 
-BASE_URL = "http://127.0.0.1:8000"
-DIAGNOSTICS_URL = "http://127.0.0.1:3010"
-CHAT_API_KEY = "931a4b22b1403af97688211012170b332fc78ec21ccde08d8af3eee783007570"
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000")
+DIAGNOSTICS_URL = os.environ.get("DIAGNOSTICS_URL", "http://127.0.0.1:3010")
+CHAT_API_KEY = os.environ.get("CHAT_API_KEY", "")
 
 TEST_CASES = [
     {

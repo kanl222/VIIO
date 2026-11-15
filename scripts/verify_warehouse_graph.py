@@ -37,7 +37,7 @@ def run_full_verification(uri: str = "bolt://127.0.0.1:7687"):
             "Organization", "Department", "Role",
             "Process", "Step", "Document", "Regulation",
             "Product", "Batch", "Location", "StorageCondition", "Category",
-            "System", "DataEntity", "MenuPath", "Operation"
+            "System", "DataEntity", "MenuPath", "Operation", "Abbreviation"
         ]
         for lbl in core_labels:
             cnt = label_counts.get(lbl, 0)
@@ -54,12 +54,13 @@ def run_full_verification(uri: str = "bolt://127.0.0.1:7687"):
         print(f"\n[4] ТЕСТИРОВАНИЕ ОГРАНИЧЕНИЙ УНИКАЛЬНОСТИ:")
         constraints_to_test = [
             ("Department", "code", "WH"),
-            ("System", "name", "WMS VIIO"),
+            ("System", "name", "1С:ERP Предприятие"),
             ("Regulation", "code", "GDP"),
             ("Product", "id", "PROD-001"),
             ("Batch", "id", "BATCH-2026-001"),
             ("Location", "code", "CHAMBER-COLD-01"),
             ("DataEntity", "name", "Остатки и статусы серий"),
+            ("Abbreviation", "name", "ИСЛО"),
         ]
         for lbl, prop, val in constraints_to_test:
             try:
@@ -136,6 +137,21 @@ def run_full_verification(uri: str = "bolt://127.0.0.1:7687"):
         for r in regs:
             t_str = ", ".join(r["targets"]) if r["targets"] else "Общий стандарт"
             print(f"     • [{r['code']}] {r['title']} -> Связанные сущности: {t_str}")
+
+        # Д. Аббревиатуры и сокращения (Core Abbreviations)
+        abbrs = s.run(
+            """
+            MATCH (a:Abbreviation)
+            OPTIONAL MATCH (a)-[r:EXPANDS_TO|REFERS_TO]->(target)
+            RETURN a.name AS name, a.short_form AS short, a.full_name AS full_name,
+                   collect(labels(target)[0] + ': ' + coalesce(target.name, target.code, target.title)) AS links;
+            """
+        ).data()
+        print(f"\n  Д. Ядро аббревиатур (Core Abbreviations, {len(abbrs)} сущностей):")
+        for a in abbrs[:8]:
+            short_str = f" ({a['short']})" if a.get("short") and a["short"] != a["name"] else ""
+            links_str = " -> " + ", ".join(a["links"]) if a.get("links") and any(a["links"]) else ""
+            print(f"     • {a['name']}{short_str}: {a['full_name']}{links_str}")
 
         # 6. Проверка изолированных узлов новой онтологии
         orphan_check = s.run(
