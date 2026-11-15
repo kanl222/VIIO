@@ -1,5 +1,6 @@
 """Read document metadata and selected document text with current catalog ACLs."""
 from urllib.parse import quote
+import re
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -11,6 +12,7 @@ from viio_rag.knowledge_data import excerpt
 
 
 async def list_documents(data, request):
+    query = re.sub(r'\bис\s*ло\b', 'ИС ЛО', request.query, flags=re.I)
     context = request.user_context.model_dump() if request.user_context else {}
     role = str(context.get('role', 'guest')).lower()
     roles = [role, 'employee'] if role == 'programmer' else [role]
@@ -28,7 +30,9 @@ async def list_documents(data, request):
             ), filtered AS (
                 SELECT * FROM accessible
                 WHERE (%s='' OR strpos(lower(title || ' ' ||
-                    COALESCE(metadata->>'description','')), lower(%s))>0)
+                    COALESCE(metadata->>'description','')), lower(%s))>0
+                    OR to_tsvector('russian', title || ' ' ||
+                        COALESCE(metadata->>'description','')) @@ plainto_tsquery('russian', %s))
                 AND COALESCE(metadata->'tags', '[]'::jsonb) @> %s
             ), page AS (
                 SELECT * FROM filtered ORDER BY lower(title), id LIMIT %s OFFSET %s
@@ -40,7 +44,7 @@ async def list_documents(data, request):
                          '[]'::jsonb) AS items
             """, (role in {'admin', 'programmer'}, role == 'admin', roles,
                   context.get('departments') or [], context.get('user_id'),
-                  request.query, request.query, Jsonb(sorted({tag.strip().lower() for tag in request.tags if tag.strip()})),
+                  query, query, query, Jsonb(sorted({tag.strip().lower() for tag in request.tags if tag.strip()})),
                   request.limit, request.offset))).fetchone()
     items = [
         dict(document_id=item['id'], title=item['title'][:300],

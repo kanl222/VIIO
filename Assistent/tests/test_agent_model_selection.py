@@ -5,7 +5,7 @@ from assistent.models.chat import create_chat_model
 from assistent.models.coder import create_coding_model
 
 
-@pytest.mark.parametrize('role', ['chat', 'coding', 'database'])
+@pytest.mark.parametrize('role', ['chat', 'coding', 'database', 'routing'])
 def test_independent_agent_selection(role):
     settings = Settings(_env_file=None, llm_provider='lmstudio',
         **{f'{role}_provider': 'ollama', f'{role}_model': 'selected-model'})

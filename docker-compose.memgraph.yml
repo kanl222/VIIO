@@ -1,0 +1,29 @@
+services:
+  memgraph:
+    image: memgraph/memgraph-platform:latest
+    container_name: viio_memgraph
+    mem_limit: 2048m
+    ports:
+      - "127.0.0.1:${MEMGRAPH_PORT:-7687}:7687"
+      - "127.0.0.1:${MEMGRAPH_LAB_PORT:-3001}:3000"
+    environment:
+      - MEMGRAPH="--log-level=WARNING --telemetry-enabled=false --data-recovery-on-startup=true"
+    volumes:
+      - memgraph_data:/var/lib/memgraph
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'RETURN 1;' | mgconsole || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - viio_net
+
+networks:
+  viio_net:
+    name: viio_viio_net
+    external: true
+
+volumes:
+  memgraph_data: {}

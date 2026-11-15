@@ -15,9 +15,12 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
     top_p = settings.coding_top_p if coding else settings.chat_top_p
     max_tokens = settings.coding_max_tokens if coding else settings.chat_max_tokens
     role = 'coding' if coding else agent
-    if role not in ('chat', 'coding', 'database'):
+    if role not in ('chat', 'coding', 'database', 'routing'):
         raise ValueError('Unknown agent model role')
     provider = getattr(settings, f'{role}_provider') or settings.llm_provider
+    if role == 'routing':
+        max_tokens = getattr(settings, 'routing_max_tokens', 128)
+        temperature = 0
     model_name = model_name or getattr(settings, f'{role}_model')
     if provider == "yandex":
         name = (model_name or settings.yandex_model).strip()
@@ -38,6 +41,7 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
         )
     if provider == "lmstudio":
         return ChatOpenAI(
+            stream_usage=True,
             metadata={'viio_provider': provider},
             callbacks=[token_usage],
             base_url=settings.lmstudio_base_url,

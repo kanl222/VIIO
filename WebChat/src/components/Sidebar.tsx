@@ -45,9 +45,14 @@ export const Sidebar: React.FC<SidebarProps> = memo(({
             <X size={18} />
           </button>
         </div>
-        <button className="button button-primary new-chat" onClick={onCreateConversation}>
-          <Plus size={18} aria-hidden="true" />
-          Новый диалог
+        <button className="button button-primary new-chat flex items-center justify-between" onClick={onCreateConversation}>
+          <div className="flex items-center gap-2">
+            <Plus size={18} aria-hidden="true" />
+            <span>Новый диалог</span>
+          </div>
+          <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono tracking-wider bg-white/20 dark:bg-black/25 rounded">
+            Ctrl K
+          </kbd>
         </button>
         <label className="search-field sidebar-search">
           <Search size={16} aria-hidden="true" />

@@ -4,7 +4,7 @@ from hmac import compare_digest
 import httpx
 import time
 import json
-from assistent.services.diagnostics import enabled, record
+from assistent.services.diagnostics import enabled, record, trace_headers
 from assistent.services.answer_sources import readable_reference, sources_from_reference
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -25,7 +25,7 @@ def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base
     async def search_knowledge_base(query: str, config: RunnableConfig, document_ids: list[str] | None = None) -> tuple[str, dict]:
         """Поиск ответа по содержимому документов. Для перечня и поиска названий используйте list_documents.
 
-        document_ids: Точные doc_id из результатов поиска или каталога, до 8. При указании поиск ограничен ими.
+        document_ids: Массив точных doc_id из поиска или каталога, например ["doc-123"], до 8. Поиск ограничен указанными документами.
         """
         context = (config or {}).get('configurable', {}).get('user_context') or {}
         # Личные заметки и данные диалогов никогда не попадают в поиск документов.
@@ -34,7 +34,10 @@ def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base
         try:
             async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
                 response = await client.post(settings.documents_url.rstrip('/') + '/api/v1/knowledge/search',
-                    headers={'X-Internal-Token': settings.documents_read_key or (settings.internal_api_key if not settings.secure_runtime else '') or ''},
+                    headers={
+                        'X-Internal-Token': settings.documents_read_key or (settings.internal_api_key if not settings.secure_runtime else '') or '',
+                        **trace_headers(),
+                    },
                     json={'query': query, 'k': k, 'user_context': context or None,
                           **({'document_ids': document_ids} if document_ids is not None else {}),
                           **({'diagnostics': True} if enabled() else {})})
@@ -64,7 +67,7 @@ def create_document_list_tool(settings):
 
         Для вопросов о доступных документах, инструкциях и руководствах, поиска названий и ссылок.
         query: Подстрока названия или описания, пустая строка для полного перечня.
-        tags: Все требуемые теги, например инструкция, ис ло. Теги могут быть не заполнены.
+        tags: Массив требуемых тегов, например ["инструкция", "ис ло"]. Необязательный аргумент.
         offset: Начало страницы. Продолжение по next_offset только по просьбе пользователя.
         Возвращает одну страницу, total, next_offset и untagged_count. Один вызов за ход.
         """
@@ -73,8 +76,11 @@ def create_document_list_tool(settings):
         try:
             async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
                 response = await client.post(settings.documents_url.rstrip('/') + '/api/v1/knowledge/documents',
-                    headers={'X-Internal-Token': settings.documents_read_key or
-                             (settings.internal_api_key if not settings.secure_runtime else '') or ''},
+                    headers={
+                        'X-Internal-Token': settings.documents_read_key or
+                                             (settings.internal_api_key if not settings.secure_runtime else '') or '',
+                        **trace_headers(),
+                    },
                     json={'query': query, 'tags': tags or [], 'offset': offset, 'limit': 20,
                           'user_context': context or None})
                 response.raise_for_status()

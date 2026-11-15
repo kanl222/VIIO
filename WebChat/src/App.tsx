@@ -15,6 +15,8 @@ const useCallback: <T extends (...args: any[]) => any>(callback: T, deps: any[])
   React.useCallback ?? ((fn: any) => fn);
 const useMemo: <T>(factory: () => T, deps: any[]) => T =
   React.useMemo ?? ((fn: any) => fn());
+const useEffect: (effect: React.EffectCallback, deps?: React.DependencyList) => void =
+  React.useEffect ?? (() => {});
 const Suspense: React.FC<{ fallback?: React.ReactNode; children?: React.ReactNode }> =
   React.Suspense ?? (({ children }) => <>{children}</>);
 
@@ -66,23 +68,40 @@ export const App: React.FC = () => {
   }, [createConversation]);
 
   const handleSendMessage = useCallback(
-    async (text: string, options?: import('./api/chat').RagOptions) => {
+    async (
+      text: string,
+      options?: import('./api/chat').RagOptions,
+      attachments?: import('./types').MessageAttachment[]
+    ) => {
       if (!currentId) {
         try {
           const title = text.slice(0, 30) + (text.length > 30 ? '...' : '');
           const newConv = await createConversation(title);
           if (newConv) {
-            await sendMessage(text, newConv.id, options);
+            await sendMessage(text, newConv.id, options, attachments);
           }
         } catch {
           // обрабатывается в хуке
         }
       } else {
-        await sendMessage(text, currentId, options);
+        await sendMessage(text, currentId, options, attachments);
       }
     },
     [currentId, createConversation, sendMessage]
   );
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        void handleCreateNewChat();
+      } else if (e.key === 'Escape' && sidebarOpen) {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleCreateNewChat, sidebarOpen]);
 
   const handleQuickPrompt = useCallback(
     (prompt: string) => {

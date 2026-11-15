@@ -53,7 +53,15 @@ async def test_remote_search_sends_only_trusted_scope_and_no_personal_notes(monk
         return httpx.Response(200,json={'context':'<context source="Guide">Allowed text</context>'})
     monkeypatch.setattr('assistent.services.documents_client.httpx.AsyncClient',
         lambda **kwargs: original(**kwargs,transport=httpx.MockTransport(handle)))
-    tool=create_remote_search_tool(Settings(documents_url='http://documents:8000',internal_api_key='service-secret'),3)
+    tool = create_remote_search_tool(
+        Settings(
+            _env_file=None,
+            documents_url='http://documents:8000',
+            internal_api_key='service-secret',
+            documents_read_key='service-secret',
+        ),
+        3,
+    )
     result=await tool.ainvoke({'query':'правила'},config={'configurable':{'user_context':context}})
     assert 'Allowed text' in result
 
@@ -62,7 +70,12 @@ async def test_remote_search_sends_only_trusted_scope_and_no_personal_notes(monk
 @pytest.mark.parametrize('path',['/api/v1/documents','/api/v1/documents/extract-office'])
 async def test_document_api_forwards_heavy_work_but_retains_control_routes(monkeypatch,path):
     app=FastAPI()
-    app.state.settings=DocumentSettings(service_role='documents',internal_api_key='service-secret')
+    app.state.settings = DocumentSettings(
+        _env_file=None,
+        service_role='documents',
+        internal_api_key='service-secret',
+        document_worker_url='http://document-worker:8000',
+    )
     app.state.remote_documents=False
     app.state.catalog_service=MagicMock(available=True)
     app.state.vector_store=MagicMock()

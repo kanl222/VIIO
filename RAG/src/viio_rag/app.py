@@ -90,7 +90,7 @@ def create_app(settings=None, *, data=None, vector_store=None):
         return {
             'status': 'healthy',
             'service': 'rag',
-            'redis': cache.is_redis_active,
+            'redis': await cache.ping(),
             'reranker': reranker.model_name if reranker.enabled else None,
         }
 
@@ -105,11 +105,12 @@ def create_app(settings=None, *, data=None, vector_store=None):
         return await answer(s, data, question, 'consultant')
 
     @app.post('/api/v1/knowledge/search', dependencies=[Depends(internal)])
-    async def search(question: KnowledgeQuestion):
+    async def search(question: KnowledgeQuestion, req: Request):
         context = question.user_context.model_dump() if question.user_context else None
         diagnostic = {} if question.diagnostics else None
+        parent_trace_id = req.headers.get('x-trace-id')
         if question.document_ids is not None:
-            with capture('search', question.query) as trace:
+            with capture('search', question.query, parent_trace_id=parent_trace_id) as trace:
                 record('search_request', query=question.query, scope='internal', lookup_mode='document_ids')
                 try:
                     docs = await search_selected_documents(data, question.query, question.document_ids, context)
@@ -120,6 +121,7 @@ def create_app(settings=None, *, data=None, vector_store=None):
                 text = format_documents(docs)
                 if diagnostic is not None or trace is not None:
                     details = dict(lookup_mode='document_ids', requested_documents=len(question.document_ids),
+                                   reranker_status='skipped', cache_status='skipped',
                                    selected=[dict(fragment_snapshot(doc), selection_reason='document_id') for doc in docs])
                     if trace is not None:
                         details['search_trace_id'] = trace['id']
@@ -128,7 +130,7 @@ def create_app(settings=None, *, data=None, vector_store=None):
                     record('retrieval', query=question.query, scope='internal', status='ok', context=text, **details)
         else:
             docs = await EnhancedRetrieval(vector_store, data, reranker=reranker, cache=cache).search(
-                question.query, context, question.k, diagnostics=diagnostic
+                question.query, context, question.k, diagnostics=diagnostic, parent_trace_id=parent_trace_id
             )
             text = format_documents(docs)
         return {'context': text, **({'diagnostics': diagnostic} if diagnostic is not None else {})}

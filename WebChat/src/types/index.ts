@@ -18,6 +18,8 @@ export interface MessageAttachment {
   name?: string;
   type?: string;
   url?: string;
+  size?: number;
+  content_base64?: string;
   data?: any;
 }
 

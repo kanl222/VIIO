@@ -8,7 +8,7 @@ export function useTraces() {
   const [items, setItems] = useState<TraceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const [selectedId, setSelectedId] = useState('');
   const [trace, setTrace] = useState<Trace | null>(null);
@@ -20,12 +20,12 @@ export function useTraces() {
   const detailAbortRef = useRef<AbortController | null>(null);
 
   // Fetch summaries list
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (quiet = false) => {
     summaryAbortRef.current?.abort();
     const controller = new AbortController();
     summaryAbortRef.current = controller;
 
-    setLoading(true);
+    if (!quiet) setLoading(true);
     setError('');
 
     try {
@@ -50,15 +50,37 @@ export function useTraces() {
     return () => summaryAbortRef.current?.abort();
   }, [refresh]);
 
-  // Auto-refresh interval
+  // Real-time SSE streaming with polling fallback
   useEffect(() => {
     if (!autoRefresh) return;
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/traces/stream');
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'traces_updated' || payload.type === 'review_saved') {
+            void refresh(true);
+          }
+        } catch {
+          void refresh(true);
+        }
+      };
+      eventSource.onerror = () => {
+        // EventSource automatically retries connection
+      };
+    } catch {}
+
     const timer = setInterval(() => {
       if (!document.hidden && !summaryAbortRef.current) {
-        void refresh();
+        void refresh(true);
       }
-    }, 10000);
-    return () => clearInterval(timer);
+    }, 4000);
+
+    return () => {
+      eventSource?.close();
+      clearInterval(timer);
+    };
   }, [autoRefresh, refresh]);
 
   // Fetch trace detail when selectedId or detailRevision changes
@@ -100,6 +122,7 @@ export function useTraces() {
         }
       })
       .finally(() => {
+        if (detailAbortRef.current === controller) detailAbortRef.current = null;
         if (!controller.signal.aborted) {
           setDetailLoading(false);
         }
@@ -109,6 +132,14 @@ export function useTraces() {
   }, [selectedId, detailRevision]);
 
   // Update review locally in list & cached trace
+  useEffect(() => {
+    if (trace?.status !== 'running') return;
+    const timer = setInterval(() => {
+      if (!document.hidden && !detailAbortRef.current) setDetailRevision(value => value + 1);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [trace?.status]);
+
   const handleReviewSaved = useCallback((id: string, review: Review) => {
     setItems(prev => prev.map(item => (item.id === id ? { ...item, review } : item)));
 

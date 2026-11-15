@@ -66,14 +66,20 @@ class MockDocumentService(IDocumentService):
 @pytest.fixture
 def client() -> TestClient:
     """Фикстура тестового клиента FastAPI с мок-сервисами."""
-    settings = Settings(lmstudio_model="test-model", llm_provider="lmstudio", documents_catalog_enabled=False, internal_api_key="unit-api-key")
+    settings = Settings(
+        lmstudio_model="test-model",
+        llm_provider="lmstudio",
+        documents_catalog_enabled=False,
+        internal_api_key="unit-api-key",
+        chat_api_key="unit-api-key",
+    )
     agent_svc = MockAgentService()
     doc_svc = MockDocumentService()
     app = create_app(
         settings=settings,
         agent_service=agent_svc,
     )
-    return TestClient(app,headers={"X-Internal-Token":"unit-api-key"})
+    return TestClient(app, headers={"X-Internal-Token": "unit-api-key"})
 
 
 @pytest.fixture
@@ -142,7 +148,11 @@ def test_chat_endpoint_service_error_handling() -> None:
     agent_svc.should_fail = True
     doc_svc = MockDocumentService()
     app = create_app(
-        settings=Settings(documents_catalog_enabled=False, internal_api_key="unit-api-key"),
+        settings=Settings(
+            documents_catalog_enabled=False,
+            internal_api_key="unit-api-key",
+            chat_api_key="unit-api-key",
+        ),
         agent_service=agent_svc,
     )
     custom_client = TestClient(app,headers={"X-Internal-Token":"unit-api-key"})

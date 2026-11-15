@@ -10,6 +10,7 @@ import { CodingStage } from './stages/CodingStage';
 import { CragStage } from './stages/CragStage';
 import { ModelStage } from './stages/ModelStage';
 import { OcrStage } from './stages/OcrStage';
+import { GraphStage } from './stages/GraphStage';
 import { AnswerStage } from './AnswerStage';
 
 interface EventCardProps {
@@ -43,6 +44,10 @@ const EventContent = memo(function EventContent({ event }: { event: TraceEvent }
 
   if (stage === 'retrieval' || stage === 'search_request') {
     return <RetrievalStage event={event} />;
+  }
+
+  if (stage === 'graph_search') {
+    return <GraphStage event={event} />;
   }
 
   if (stage === 'answer') {
@@ -132,20 +137,23 @@ const EventContent = memo(function EventContent({ event }: { event: TraceEvent }
 export const EventCard = memo(function EventCard({ event, index, traceId }: EventCardProps) {
   const isError = event.status === 'error' || event.stage === 'error' || Boolean(event.error);
   const isBlocked = event.status === 'blocked';
+  const isNested = Boolean(event.parent_span_id);
   const stageTitle =
     event.scope === 'publication_gateway'
       ? 'Поиск опубликованных материалов'
-      : eventNames[event.stage] || event.stage;
+      : event.title || eventNames[event.stage] || event.stage;
 
   return (
     <LazyDetails
-      className={`event-card ${isError ? 'has-error' : isBlocked ? 'is-blocked' : ''}`}
+      className={`event-card ${isError ? 'has-error' : isBlocked ? 'is-blocked' : ''} ${isNested ? 'is-nested' : ''}`}
       id={`${traceId}-${index}`}
       summary={
         <div className="event-summary-row">
           <div className="summary-left">
             <span className="event-step-number">{index + 1}</span>
+            {isNested ? <span className="substep-indicator" title={`Вложенный вызов (Parent Span: ${event.parent_span_id})`}>↳</span> : null}
             <span className="event-stage-name">{stageTitle}</span>
+            {event.span_id ? <span className="span-id-tag" title={`Идентификатор спана: ${event.span_id}`}>#{event.span_id.slice(0, 6)}</span> : null}
             {isBlocked ? (
               <span className="status-tag bad">блокировка</span>
             ) : isError ? (

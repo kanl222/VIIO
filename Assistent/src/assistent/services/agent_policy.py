@@ -9,7 +9,7 @@ import re
 import uuid
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, Literal, NamedTuple, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
@@ -49,6 +49,7 @@ class AgentRuntimeContext(TypedDict, total=False):
 
 
 class AgentState(MessagesState):
+    supervisor_route: Literal['knowledge', 'coding', 'database', 'direct']
     history_scope: str
     history_start: int
     dialogue_summary: str

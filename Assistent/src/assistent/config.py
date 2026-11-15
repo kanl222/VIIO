@@ -5,7 +5,7 @@
 """
 
 from typing import Literal
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     corrective_rag_enabled: bool = False
     hitl_enabled: bool = False
     text_to_sql_enabled: bool = True
+    skills_enabled: bool = False
+    skills_dir: str = "Skills"
     github_mcp_enabled: bool = False
     github_mcp_token: str = Field(default="", repr=False)
     github_repository: str = ""
@@ -58,6 +60,9 @@ class Settings(BaseSettings):
     assistant_rag_backend: Literal['local', 'yandex'] = 'local'
     chat_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     chat_model: str | None = None
+    routing_model: str | None = None
+    routing_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
+    routing_max_tokens: int = Field(default=128, ge=16, le=1024)
     coding_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     database_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     database_model: str | None = None
@@ -88,6 +93,12 @@ class Settings(BaseSettings):
     pgsql_max_rows: int = Field(default=100, ge=1, le=500)
     pgsql_max_chars: int = Field(default=12000, ge=500, le=50000)
     pgsql_timeout_seconds: int = Field(default=40, ge=5, le=90)
+
+    # Настройки графа знаний Memgraph (Semantic GraphRAG)
+    memgraph_enabled: bool = Field(default=False, description="Включить поиск по графу знаний Memgraph.")
+    memgraph_uri: str = Field(default="bolt://localhost:7687", description="Bolt URI подключения к Memgraph.")
+    memgraph_user: str = Field(default="", description="Пользователь Memgraph.")
+    memgraph_password: str = Field(default="", description="Пароль Memgraph.")
     # Настройки каталога документов и файлового хранилища
     # Массовая загрузка
 
@@ -172,14 +183,22 @@ class Settings(BaseSettings):
     documents_admin_key: str | None = Field(default=None, repr=False)
     agent_max_tool_calls: int = Field(default=24, ge=3, le=64)
 
+    @field_validator('routing_provider', mode='before')
+    @classmethod
+    def empty_routing_provider(cls, value):
+        return value or None
+
     @model_validator(mode="after")
     def validate_cloud_models(self):
+        roles = ("chat", "coding", "database")
+        if (self.routing_model or '').strip():
+            roles += ("routing",)
         providers = {role: getattr(self, f"{role}_provider") or self.llm_provider
-                     for role in ("chat", "coding", "database")}
+                     for role in roles}
         if "yandex" in providers.values():
             if not self.yandex_api_key.strip() or not self.yandex_folder_id.strip():
                 raise ValueError("Yandex requires YANDEX_API_KEY and YANDEX_FOLDER_ID")
-            for role in ("chat", "coding", "database"):
+            for role in roles:
                 if providers[role] == "yandex":
                     name = getattr(self, f"{role}_model") or self.yandex_model
                     if not name.strip():

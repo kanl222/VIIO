@@ -146,3 +146,29 @@ def test_build_agent_graph_supervisor_flag():
     )
     assert graph is not None
 
+
+@pytest.mark.asyncio
+async def test_supervisor_routing_llm_with_thinking_and_markdown():
+    # Routing LLM outputs label wrapped in thinking tags and markdown
+    routing_model = NoToolCallsModel(messages=iter([
+        AIMessage(content="<think>User wants a joke</think>\n**direct**"),
+    ]))
+    main_llm = NoToolCallsModel(messages=iter([
+        AIMessage(content="Колобок повесился"),
+    ]))
+    supervisor = build_supervisor_graph(
+        llm=main_llm,
+        tools=[],
+        checkpointer=MemorySaver(),
+        routing_llm=routing_model,
+    )
+    # Question is not an arithmetic expression or greeting rule, so routing_llm is consulted
+    res = await supervisor.ainvoke(
+        {"messages": [HumanMessage(content="Расскажи короткий смешной анекдот")]},
+        context={"user_context": {"role": "employee"}},
+        config={"configurable": {"thread_id": "route-t1"}},
+    )
+    assert res["supervisor_route"] == "direct"
+    assert "Колобок повесился" in res["messages"][-1].content
+
+

@@ -1,6 +1,7 @@
 """Ready-made LangChain agent loop; VIIO middleware supplies application policy."""
 
 import hashlib
+import re
 import time
 import uuid
 
@@ -37,11 +38,83 @@ class VIIOPolicy(AgentMiddleware):
         self.prompt, self.names = prompt, names
         self.model_first, self.routing, self.max_chars = model_first, routing, max_chars
 
+    async def awrap_tool_call(self, request, handler):
+        call = request.tool_call
+        started = time.monotonic()
+        record('tool_start', call_id=call['id'], name=call['name'], status='running')
+        try:
+            field = {'list_documents': 'tags', 'search_knowledge_base': 'document_ids'}.get(call['name'])
+            value = call['args'].get(field) if field else None
+            if isinstance(value, str) and value.strip():
+                parts = value.split(',') if field == 'tags' else [value]
+                values = [part.strip() for part in parts if part.strip()]
+                if values:
+                    request = request.override(tool_call={**call, 'args': {**call['args'], field: values}})
+                    record('tool_arguments_normalized', call_id=call['id'], name=call['name'], field=field)
+            result = await handler(request)
+        except BaseException as error:
+            record('tool_end', call_id=call['id'], name=call['name'],
+                   status='error', error=type(error).__name__,
+                   duration_ms=round((time.monotonic() - started) * 1000))
+            raise
+        if call['name'] == 'postgresql_readonly' and isinstance(result, ToolMessage):
+            from assistent.services.database_subgraph import postgres_error
+            if postgres_error(str(result.content)):
+                result = result.model_copy(update={'status': 'error'})
+        record('tool_end', call_id=call['id'], name=call['name'],
+               status=getattr(result, 'status', 'success'),
+               duration_ms=round((time.monotonic() - started) * 1000))
+        return result
+
     async def awrap_model_call(self, request, handler):
         history = request.messages
         question = last_question(history)
         turn = history[last_human_index(history) + 1:]
         calls = [call for msg in turn if isinstance(msg, AIMessage) for call in msg.tool_calls]
+        if (isinstance(history[-1], ToolMessage)
+                and history[-1].tool_call_id.startswith('database-indexes-')
+                and str(history[-1].content).strip() == '[]'):
+            return ModelResponse(result=[AIMessage(content=(
+                'В статистике доступных текущему пользователю индексов нет строк. '
+                'Определить неиспользуемые индексы по этому результату невозможно. '
+                'Проверка ограничена объектами, доступными текущему пользователю.'
+            ))])
+        if (not calls and 'postgresql_readonly' in self.names
+                and re.search(r'неиспользуем\w*', question, re.I)
+                and re.search(r'индекс\w*', question, re.I)
+                and has_role_access(ctx(request.runtime).get('user_context', {}), {'programmer', 'admin'})):
+            return ModelResponse(result=[forced_tool_call('postgresql_readonly', {
+                'operation': 'query',
+                'sql': "SELECT s.schemaname, s.relname, s.indexrelname, s.idx_scan, "
+                       "i.indisprimary, i.indisunique, d.stats_reset "
+                       "FROM pg_stat_user_indexes s JOIN pg_index i ON i.indexrelid=s.indexrelid "
+                       "LEFT JOIN pg_stat_database d ON d.datname=current_database() "
+                       "WHERE has_schema_privilege(s.schemaname,'USAGE') "
+                       "AND has_table_privilege(s.relid,'SELECT') "
+                       "ORDER BY s.idx_scan, s.schemaname, s.relname, s.indexrelname",
+            }, 'database-indexes-')])
+        if ('postgresql_readonly' in self.names
+                and re.search(r'\b(?:какие таблицы|список таблиц)\b', question, re.I)
+                and calls and calls[-1].get('name') == 'postgresql_readonly'
+                and calls[-1].get('args', {}).get('operation') == 'schemas'
+                and isinstance(history[-1], ToolMessage)
+                and has_role_access(ctx(request.runtime).get('user_context', {}), {'programmer', 'admin'})):
+            return ModelResponse(result=[forced_tool_call('postgresql_readonly', {
+                'operation': 'query',
+                'sql': "SELECT table_schema, table_name FROM information_schema.tables "
+                       "WHERE table_type = 'BASE TABLE' AND table_schema NOT IN "
+                       "('pg_catalog', 'information_schema') ORDER BY table_schema, table_name",
+            }, 'database-tables-')])
+        if (not calls and 'postgresql_readonly' in self.names
+                and (match_cols := re.search(r'(?:столбц\w*|колонк\w*|поля|структур\w*)\s+(?:у|в|для)?\s*таблиц\w*\s+([a-zA-Z0-9_]+)', question, re.I))
+                and has_role_access(ctx(request.runtime).get('user_context', {}), {'programmer', 'admin'})):
+            tbl_target = match_cols.group(1).lower()
+            return ModelResponse(result=[forced_tool_call('postgresql_readonly', {
+                'operation': 'query',
+                'sql': f"SELECT table_schema, table_name, column_name, data_type "
+                       f"FROM information_schema.columns WHERE table_name = '{tbl_target}' "
+                       f"ORDER BY table_schema, ordinal_position",
+            }, 'database-columns-')])
         delegated = next((msg for msg in reversed(turn)
                           if isinstance(msg, ToolMessage) and msg.name == CODER_TOOL), None)
         if self.model_first and delegated is not None:
@@ -102,7 +175,11 @@ class VIIOPolicy(AgentMiddleware):
             if mode == 'knowledge' and CODER_TOOL in self.names and is_coding_request(question):
                 return ModelResponse(result=[forced_tool_call(
                     CODER_TOOL, {'task': question}, FALLBACK_CODE_PREFIX)])
-            if not calls and SEARCH_TOOL in self.names and needs_automatic_search(question):
+            searched = any(call.get('name') in {SEARCH_TOOL, 'search_document_content'} for call in calls)
+            content_question = bool(re.search(r'\b(как|почему|зачем|где|что такое)\b', question, re.I))
+            catalog_only = calls and all(call.get('name') == 'list_documents' for call in calls)
+            if (not searched and (not calls or catalog_only and content_question)
+                    and SEARCH_TOOL in self.names and needs_automatic_search(question)):
                 return ModelResponse(result=[forced_tool_call(
                     SEARCH_TOOL, {'query': question}, AUTO_CALL_PREFIX)])
 

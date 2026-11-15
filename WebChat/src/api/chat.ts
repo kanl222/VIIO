@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { ChatResponse } from '../types';
+import type { ChatResponse, MessageAttachment } from '../types';
 import { ApiRequestError } from './client';
 import { readEventStream } from '../../server/eventStream';
 
@@ -12,13 +12,26 @@ export interface RagOptions {
   confirmed_public_for_external_cloud: boolean;
 }
 
-export async function sendMessage(conversationId: string, message: string, options?: RagOptions,
-  onEvent?: (event: ChatStreamEvent) => void): Promise<ChatResponse> {
+export async function sendMessage(
+  conversationId: string,
+  message: string,
+  options?: RagOptions,
+  onEvent?: (event: ChatStreamEvent) => void,
+  attachments?: MessageAttachment[]
+): Promise<ChatResponse> {
+  const payload = {
+    conversation_id: conversationId,
+    message,
+    ...options,
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
+  };
+
   if (onEvent) {
     const response = await fetch('/api/chat', {
-      method: 'POST', credentials: 'include',
+      method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ conversation_id: conversationId, message, ...options, stream: true }),
+      body: JSON.stringify({ ...payload, stream: true }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -33,10 +46,6 @@ export async function sendMessage(conversationId: string, message: string, optio
   }
   return await apiFetch<ChatResponse>('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({
-      conversation_id: conversationId,
-      message,
-      ...options,
-    }),
+    body: JSON.stringify(payload),
   });
 }
