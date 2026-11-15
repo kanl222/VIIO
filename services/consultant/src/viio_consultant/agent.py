@@ -33,10 +33,7 @@ class SearchQuestion(BaseModel):
     query: StrictStr = Field(min_length=1, max_length=4000)
 
 
-def strip_thinking(text: str) -> str:
-    cleaned = re.sub(r"(?is)<(?:think|thought|reasoning)>.*?</(?:think|thought|reasoning)>\s*", "", text)
-    cleaned = re.sub(r"(?is)<(?:think|thought|reasoning)>.*$", "", cleaned)
-    return cleaned.strip()
+from viio_core.text.strip_thinking import strip_thinking
 
 
 def clean_reply(content: Any, documents: list[dict[str, Any]]) -> str:

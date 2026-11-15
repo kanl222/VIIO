@@ -23,10 +23,14 @@ dependencies = [
     "fastmcp>=4.1.6,<5",
     "redis>=5.0.0",
     "neo4j>=6.4.1",
+    "viio-core",
 ]
 
 [project.scripts]
 assistent = "assistent:main"
+
+[tool.uv.sources]
+viio-core = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]
