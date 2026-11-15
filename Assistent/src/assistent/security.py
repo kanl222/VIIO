@@ -28,7 +28,11 @@ def has_role_access(context: dict | None, allowed_roles: Iterable[str]) -> bool:
     if not context or not context.get("user_id"):
         return False
     role = context.get("role")
-    return bool(role and role in set(allowed_roles))
+    if not role:
+        return False
+    # Программисты и администраторы имеют права сотрудников (employee) по умолчанию
+    effective_roles = {role, "employee"} if role in {"admin", "programmer"} else {role}
+    return bool(effective_roles.intersection(allowed_roles))
 
 
 def ensure_role_access(

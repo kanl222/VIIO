@@ -813,6 +813,23 @@ fieldset {
   margin: 4px 0 0;
 }
 
+.payload-truncated-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid var(--amber, #f59e0b);
+  color: var(--amber-text, #b45309);
+  border-radius: var(--radius-md);
+  margin-bottom: 22px;
+}
+
+.payload-truncated-banner p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
 /* Config disclosure */
 .config-disclosure-card {
   margin-bottom: 18px;
@@ -1075,8 +1092,52 @@ fieldset {
   color: var(--accent);
 }
 
-.pipeline-nav-btn.disabled .nav-btn-icon {
-  color: var(--muted);
+.pipeline-nav-btn.review-nav-btn {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.pipeline-nav-btn.review-nav-btn:hover {
+  border-color: rgba(245, 158, 11, 0.7);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.nav-count-badge.reviewed-badge {
+  background: #10b981;
+  color: #fff;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.copy-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.copy-header-btn:hover {
+  background: var(--subtle);
+  border-color: var(--muted);
+}
+
+.message-bubble-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
 }
 
 .nav-count-badge {
@@ -1119,6 +1180,27 @@ fieldset {
   background: var(--surface);
   overflow: hidden;
   transition: border-color 0.15s ease;
+}
+
+.event-card.is-nested {
+  margin-left: 18px;
+  border-left: 3px solid var(--accent, #3b82f6);
+}
+
+.substep-indicator {
+  font-weight: 700;
+  color: var(--accent, #3b82f6);
+  margin-right: 4px;
+}
+
+.span-id-tag {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--subtle);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 6px;
 }
 
 .event-card.has-error {

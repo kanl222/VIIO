@@ -1,6 +1,20 @@
 {
   "version": 2,
   "skills": {
+    "1c-bsl-code-generation": {
+      "source": "diegosouzapw/awesome-omni-skill",
+      "sourceType": "github",
+      "skillPath": "skills/development/1c-bsl-code-generation/SKILL.md",
+      "computedHash": "afe1597fe2cea14ec6d9d695232bcf4147187a5df89b471d804b08ab758bfe09",
+      "installMode": "copy"
+    },
+    "1c-query-opt": {
+      "source": "Arman-Kudaibergenov/1c-ai-development-kit",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/1c-query-opt/SKILL.md",
+      "computedHash": "d4181bf60784670500f9aa0334ecf440a478f50ba7ea3fb2670db412136e6251",
+      "installMode": "copy"
+    },
     "ai-prompt-engineering-safety-review": {
       "source": "github/awesome-copilot",
       "sourceType": "github",
@@ -36,6 +50,13 @@
       "sourceType": "github",
       "skillPath": "skills/finalize-agent-prompt/SKILL.md",
       "computedHash": "c1be30c7f5a74aa475d09a85a3cc93c44774ac28e4f3b9d4821788a5aa780c10"
+    },
+    "google-agents-cli-eval": {
+      "source": "google/agents-cli",
+      "sourceType": "github",
+      "skillPath": "skills/google-agents-cli-eval/SKILL.md",
+      "computedHash": "9c67485b3fbc7f8bcee03a236b30c21109c90bd7d2d9b1c3b2a42f55ae7e0d4d",
+      "installMode": "copy"
     },
     "langchain-rag": {
       "source": "langchain-ai/langchain-skills",
@@ -102,6 +123,27 @@
       "sourceType": "github",
       "skillPath": "plugins/llm-application-dev/skills/rag-implementation/SKILL.md",
       "computedHash": "f488cd68c88657f8e0fb6476b4b6acf0142ab4aa17ceb036f0106829a94935ab"
+    },
+    "sql-optimization-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/developer-essentials/skills/sql-optimization-patterns/SKILL.md",
+      "computedHash": "99731ea4f27308d7082ae2931a08159e6e91352a5b7658b0b1f68a9e677abd4c",
+      "installMode": "copy"
+    },
+    "sqli-sql-injection": {
+      "source": "yaklang/hack-skills",
+      "sourceType": "github",
+      "skillPath": "skills/sqli-sql-injection/SKILL.md",
+      "computedHash": "3e6fafc1f8750032041b17aeeb26a38d870e334f17b17f7e8d6c892f8ad01587",
+      "installMode": "copy"
+    },
+    "supabase-postgres-best-practices": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
+      "computedHash": "3eb972c2d7c818e544e35cc33ea8d7147d4d78ae08142ef40037b0fbac7a2505",
+      "installMode": "copy"
     },
     "vercel-react-best-practices": {
       "source": "vercel-labs/agent-skills",

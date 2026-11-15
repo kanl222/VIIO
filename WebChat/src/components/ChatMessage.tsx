@@ -1,5 +1,5 @@
 import React, { useState, memo } from 'react';
-import { User, Bot, Copy, Check, Info } from 'lucide-react';
+import { User, Bot, Copy, Check, Info, Sparkles, FileText, ThumbsUp, ThumbsDown } from 'lucide-react';
 import type { Message } from '../types';
 
 interface ChatMessageProps {
@@ -126,72 +126,136 @@ function renderInline(text: string): React.ReactNode {
   return parts.length > 0 ? parts : text;
 }
 
+function isTableSeparator(line: string): boolean {
+  return /^\|?\s*:?-+:?\s*(\|?\s*:?-+:?\s*)+\|?$/.test(line.trim());
+}
+
+function parseTableRow(line: string): string[] {
+  return line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+}
+
 function renderTextLines(section: string, keyPrefix: string): React.ReactNode {
   const lines = section.split('\n');
-  return (
-    <div key={keyPrefix} className="space-y-1">
-      {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          return <div key={idx} className="h-1.5" />;
-        }
-        if (line.startsWith('### ')) {
-          return (
-            <h3 key={idx} className="text-xs font-bold text-gray-900 dark:text-zinc-100 mt-2 mb-1">
-              {renderInline(line.slice(4))}
-            </h3>
-          );
-        }
-        if (line.startsWith('## ')) {
-          return (
-            <h2 key={idx} className="text-sm font-bold text-gray-900 dark:text-zinc-100 mt-2.5 mb-1 border-b border-gray-200 dark:border-zinc-800 pb-0.5">
-              {renderInline(line.slice(3))}
-            </h2>
-          );
-        }
-        if (line.startsWith('# ')) {
-          return (
-            <h1 key={idx} className="text-base font-extrabold text-gray-900 dark:text-zinc-100 mt-3 mb-1.5 border-b border-gray-200 dark:border-zinc-800 pb-1">
-              {renderInline(line.slice(2))}
-            </h1>
-          );
-        }
-        if (line.startsWith('> ')) {
-          return (
-            <blockquote
-              key={idx}
-              className="border-l-2 border-indigo-500 pl-2.5 italic text-gray-600 dark:text-zinc-400 my-1 text-xs"
-            >
-              {renderInline(line.slice(2))}
-            </blockquote>
-          );
-        }
-        if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-          return (
-            <div key={idx} className="flex items-start space-x-1.5 ml-2 text-xs">
-              <span className="text-indigo-500 shrink-0 select-none">•</span>
-              <span>{renderInline(trimmed.slice(2))}</span>
-            </div>
-          );
-        }
-        const orderedMatch = trimmed.match(ORDERED_REGEX);
-        if (orderedMatch) {
-          return (
-            <div key={idx} className="flex items-start space-x-1.5 ml-2 text-xs">
-              <span className="font-semibold text-indigo-500 shrink-0 select-none">{orderedMatch[1]}.</span>
-              <span>{renderInline(orderedMatch[2])}</span>
-            </div>
-          );
-        }
+  const elements: React.ReactNode[] = [];
+  let i = 0;
 
-        return (
-          <p key={idx} className="text-xs leading-relaxed">
-            {renderInline(line)}
-          </p>
-        );
-      })}
-    </div>
-  );
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Таблицы Markdown
+    if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const headers = parseTableRow(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].trim().includes('|') && lines[i].trim() !== '') {
+        rows.push(parseTableRow(lines[i]));
+        i++;
+      }
+      elements.push(
+        <div key={`table-${i}`} className="my-2.5 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700/80 shadow-xs">
+          <table className="min-w-full divide-y divide-zinc-200 dark:divide-zinc-700 text-xs">
+            <thead className="bg-zinc-100 dark:bg-zinc-800/80 font-semibold text-zinc-900 dark:text-zinc-100">
+              <tr>
+                {headers.map((h, colIdx) => (
+                  <th key={colIdx} className="px-3 py-2 text-left font-medium">
+                    {renderInline(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 bg-white dark:bg-zinc-900">
+              {rows.map((row, rIdx) => (
+                <tr key={rIdx} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx} className="px-3 py-1.5 text-zinc-700 dark:text-zinc-300">
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    if (!trimmed) {
+      elements.push(<div key={i} className="h-1.5" />);
+      i++;
+      continue;
+    }
+    if (line.startsWith('### ')) {
+      elements.push(
+        <h3 key={i} className="text-xs font-bold text-gray-900 dark:text-zinc-100 mt-2 mb-1">
+          {renderInline(line.slice(4))}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      elements.push(
+        <h2 key={i} className="text-sm font-bold text-gray-900 dark:text-zinc-100 mt-2.5 mb-1 border-b border-gray-200 dark:border-zinc-800 pb-0.5">
+          {renderInline(line.slice(3))}
+        </h2>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith('# ')) {
+      elements.push(
+        <h1 key={i} className="text-base font-extrabold text-gray-900 dark:text-zinc-100 mt-3 mb-1.5 border-b border-gray-200 dark:border-zinc-800 pb-1">
+          {renderInline(line.slice(2))}
+        </h1>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith('> ')) {
+      elements.push(
+        <blockquote
+          key={i}
+          className="border-l-2 border-indigo-500 pl-2.5 italic text-gray-600 dark:text-zinc-400 my-1 text-xs"
+        >
+          {renderInline(line.slice(2))}
+        </blockquote>
+      );
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      elements.push(
+        <div key={i} className="flex items-start space-x-1.5 ml-2 text-xs">
+          <span className="text-indigo-500 shrink-0 select-none">•</span>
+          <span>{renderInline(trimmed.slice(2))}</span>
+        </div>
+      );
+      i++;
+      continue;
+    }
+    const orderedMatch = trimmed.match(ORDERED_REGEX);
+    if (orderedMatch) {
+      elements.push(
+        <div key={i} className="flex items-start space-x-1.5 ml-2 text-xs">
+          <span className="font-semibold text-indigo-500 shrink-0 select-none">{orderedMatch[1]}.</span>
+          <span>{renderInline(orderedMatch[2])}</span>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    elements.push(
+      <p key={i} className="text-xs leading-relaxed">
+        {renderInline(line)}
+      </p>
+    );
+    i++;
+  }
+
+  return <div key={keyPrefix} className="space-y-1">{elements}</div>;
 }
 
 function renderMarkdown(content: string): React.ReactNode {
@@ -270,9 +334,71 @@ export function stripDuplicateSources(text: string, titles: string[]): string {
 export const ChatMessage: React.FC<ChatMessageProps> = memo(({ message }) => {
   const isUser = message.sender === 'user';
   const isSystem = message.sender === 'system';
+  const userAttachments = isUser ? (message.attachments || []).filter(item => item.name && item.type !== 'knowledge_source') : [];
   const sourceEntries = !isUser ? (message.attachments || []).filter(item => item.type === 'knowledge_source' && item.name) : [];
   const sources = Array.from(new Map(sourceEntries.map(source => [source.data?.document_id || source.name, source])).values());
   const displayText = stripDuplicateSources(message.text, sources.map(source => source.name || ''));
+
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<'like' | 'dislike' | null>(() => {
+    try {
+      return (localStorage.getItem(`feedback_${message.id}`) as 'like' | 'dislike') || null;
+    } catch {
+      return null;
+    }
+  });
+  const [showReviewInput, setShowReviewInput] = useState(false);
+  const [reviewComment, setReviewComment] = useState(() => {
+    try {
+      return localStorage.getItem(`feedback_comment_${message.id}`) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [reviewSaved, setReviewSaved] = useState(false);
+
+  const handleCopyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(message.text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = message.text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleFeedback = (type: 'like' | 'dislike') => {
+    const next = feedback === type ? null : type;
+    setFeedback(next);
+    try {
+      if (next) {
+        localStorage.setItem(`feedback_${message.id}`, next);
+      } else {
+        localStorage.removeItem(`feedback_${message.id}`);
+      }
+    } catch {}
+    if (next) setShowReviewInput(true);
+  };
+
+  const handleSaveReview = () => {
+    try {
+      if (reviewComment.trim()) {
+        localStorage.setItem(`feedback_comment_${message.id}`, reviewComment.trim());
+      }
+    } catch {}
+    setReviewSaved(true);
+    setTimeout(() => {
+      setReviewSaved(false);
+      setShowReviewInput(false);
+    }, 1500);
+  };
 
   if (isSystem) {
     return (
@@ -308,6 +434,18 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({ message }) => {
                 : 'bg-white dark:bg-zinc-800 text-gray-900 dark:text-zinc-100 border border-gray-200/80 dark:border-zinc-700/80 rounded-tl-none'
             }`}
           >
+            {/* Файловые вложения пользователя */}
+            {userAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2 pb-2 border-b border-indigo-400/40">
+                {userAttachments.map((att, i) => (
+                  <div key={i} className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-white/20 text-white text-[11px]">
+                    <FileText size={12} className="shrink-0" />
+                    <span className="truncate max-w-[150px] font-medium" title={att.name}>{att.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {isUser ? (
               <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>
             ) : (
@@ -319,22 +457,110 @@ export const ChatMessage: React.FC<ChatMessageProps> = memo(({ message }) => {
             <div className="mt-2 text-xs text-gray-600 dark:text-zinc-400" aria-label="Предоставленные материалы">
               <p className="font-medium">Предоставленные материалы</p>
               <ul className="mt-1 space-y-1 list-disc pl-4">
-                {sources.map((source, index) => (
-                  <li className="break-words" key={source.data?.document_id || source.name || index}>
-                    {source.name}
-                  </li>
-                ))}
+                {sources.map((source, index) => {
+                  const isSkill = (source.name || '').toLowerCase().includes('скилл') || (source.name || '').toLowerCase().includes('skill');
+                  return (
+                    <li className="break-words" key={source.data?.document_id || source.name || index}>
+                      {isSkill ? (
+                        <span className="inline-flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400">
+                          <Sparkles size={12} className="shrink-0" />
+                          {source.name}
+                        </span>
+                      ) : (
+                        source.name
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
 
-          {/* Timestamp */}
-          {message.created_at && (
-            <span
-              className={`text-[10px] text-gray-400 dark:text-zinc-500 mt-1 px-1 ${
-                isUser ? 'text-right' : 'text-left'
-              }`}
-            >
+          {/* Action bar for assistant message */}
+          {!isUser && (
+            <div className="flex items-center gap-2 mt-1.5 px-0.5 select-none">
+              <button
+                type="button"
+                onClick={handleCopyMessage}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                title="Скопировать ответ в буфер обмена"
+              >
+                {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                <span>{copied ? 'Скопировано!' : 'Копировать'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowReviewInput(prev => !prev)}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                  feedback || reviewComment
+                    ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 font-medium'
+                    : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                }`}
+                title="Оставить отзыв"
+              >
+                <ThumbsUp size={12} className={feedback === 'like' ? 'text-emerald-500' : ''} />
+                <span>{feedback === 'like' ? 'Полезно' : feedback === 'dislike' ? 'Замечание' : 'Отзыв'}</span>
+              </button>
+
+              {message.created_at && (
+                <span className="text-[10px] text-zinc-400 dark:text-zinc-500 ml-auto">
+                  {formatTime(message.created_at)}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Inline Review Form */}
+          {!isUser && showReviewInput && (
+            <div className="mt-1.5 p-2 rounded-lg bg-zinc-50 dark:bg-zinc-800/90 border border-zinc-200 dark:border-zinc-700 text-xs shadow-sm space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-zinc-700 dark:text-zinc-200 text-[11px]">Оценка ответа:</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleFeedback('like')}
+                    className={`p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition ${
+                      feedback === 'like' ? 'text-emerald-600 bg-emerald-100 dark:bg-emerald-950/60' : 'text-zinc-400'
+                    }`}
+                    title="Хороший ответ"
+                  >
+                    <ThumbsUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFeedback('dislike')}
+                    className={`p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition ${
+                      feedback === 'dislike' ? 'text-rose-600 bg-rose-100 dark:bg-rose-950/60' : 'text-zinc-400'
+                    }`}
+                    title="Есть неточности или ошибки"
+                  >
+                    <ThumbsDown size={12} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={reviewComment}
+                  onChange={e => setReviewComment(e.target.value)}
+                  placeholder="Ваш комментарий или пожелание..."
+                  className="flex-1 px-2 py-1 text-xs rounded border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveReview}
+                  className="px-2 py-1 text-xs rounded bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition shrink-0"
+                >
+                  {reviewSaved ? 'Сохранено!' : 'Отправить'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* User timestamp */}
+          {isUser && message.created_at && (
+            <span className="text-[10px] text-gray-400 dark:text-zinc-500 mt-1 px-1 text-right">
               {formatTime(message.created_at)}
             </span>
           )}

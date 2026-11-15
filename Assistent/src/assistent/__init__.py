@@ -53,6 +53,8 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
     consultant=None
     if agent_service is None:
         llm = create_chat_model(app_settings)
+        routing_llm = (create_chat_model(app_settings, agent='routing')
+                       if (app_settings.routing_model or '').strip() else None)
 
         from assistent.services.documents_client import create_remote_search_tool, create_document_list_tool
         search_tool = create_remote_search_tool(app_settings, 5, tool_name='search_knowledge_base')
@@ -61,6 +63,9 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
         initial_checkpointer = checkpointer or MemorySaver()
 
         active_tools = [search_tool, create_document_list_tool(app_settings), manage_plan]
+        if app_settings.skills_enabled:
+            from assistent.tools.skills_tool import create_skills_tools
+            active_tools.extend(create_skills_tools(skills_dir=app_settings.skills_dir))
         if app_settings.documents_admin_key:
             active_tools.append(create_knowledge_write_tool(app_settings))
         if app_settings.github_mcp_enabled:
@@ -69,6 +74,9 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
                 active_tools.append(tool)
         if app_settings.pgsql_enabled:
             active_tools.append(create_postgres_readonly_tool(app_settings))
+        if app_settings.memgraph_enabled:
+            from assistent.tools.graph_tool import create_graph_search_tool
+            active_tools.append(create_graph_search_tool(app_settings))
 
         graph = build_agent_graph(
             llm=llm,
@@ -82,7 +90,8 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
             document_search_first=True,
             summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
             history_max_chars=app_settings.conversation_history_max_chars,
-            supervisor=app_settings.supervisor_enabled,
+            supervisor=app_settings.supervisor_enabled or routing_llm is not None,
+            routing_llm=routing_llm,
             corrective_rag=app_settings.corrective_rag_enabled,
             database_analyst=app_settings.text_to_sql_enabled,
             database_diagnostics=app_settings.text_to_sql_enabled,

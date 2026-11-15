@@ -46,10 +46,13 @@ export const agentName = (value: string): string => {
 };
 
 export const eventNames: Record<string, string> = {
+  tool_start: 'Запуск инструмента',
+  tool_end: 'Завершение инструмента',
   route: 'Выбор маршрута супервизором',
   specialist_dispatch: 'Передача ветке / специалисту',
   supervisor_review: 'Итоговая проверка супервизора',
   retrieval: 'Поиск и отбор фрагментов',
+  graph_search: 'Поиск по графу знаний (Memgraph)',
   context: 'Вход модели',
   generation: 'Результат модели',
   guard: 'Проверка доступа',
@@ -79,6 +82,14 @@ export const eventNames: Record<string, string> = {
   ocr_request: 'Параметры распознавания PDF',
   ocr_result: 'Результат распознавания PDF',
   search_request: 'Обращение к поиску',
+};
+
+export const getEventName = (event: { stage: string; supervisor?: boolean; title?: string }): string => {
+  if (event.title) return event.title;
+  if (event.stage === 'route') {
+    return event.supervisor ? 'Выбор маршрута супервизором' : 'Маршрутизация запроса (Единый агент)';
+  }
+  return eventNames[event.stage] || event.stage;
 };
 
 export const roleNames: Record<string, string> = {

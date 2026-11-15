@@ -1,5 +1,6 @@
 """Merge bounded lexical and semantic candidates without another model call."""
 import asyncio
+import hashlib
 import logging
 import time
 from functools import partial
@@ -125,8 +126,8 @@ class EnhancedRetrieval:
         self.reranker: Any = reranker
         self.cache: Any = cache
 
-    async def search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
-        with capture('search', query) as trace:
+    async def search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None, parent_trace_id: str | None = None) -> list[Document]:
+        with capture('search', query, parent_trace_id=parent_trace_id) as trace:
             diagnostic = diagnostics if diagnostics is not None else ({} if trace is not None else None)
             if trace is not None:
                 diagnostic['search_trace_id'] = trace['id']
@@ -143,28 +144,36 @@ class EnhancedRetrieval:
             return selected
 
     async def _search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
+        if diagnostics is not None:
+            diagnostics['cache_status'] = 'disabled' if self.cache is None else 'miss'
         names = ['semantic', 'lexical']
         candidate_pool_size = max(k * 4, getattr(self.reranker, 'top_k', 25) if self.reranker else 25, 12)
+        access_filter = build_access_filter(context)
+        scope = access_filter.model_dump_json() if access_filter is not None else 'unrestricted'
+        cache_suffix = hashlib.sha256(
+            repr((scope, query, candidate_pool_size)).encode()
+        ).hexdigest()
+        semantic_key = f'viio:candidates:v2:{cache_suffix}'
+        sparse_key = f'viio:sparse:v2:{cache_suffix}'
 
         async def fetch_semantic():
             if self.cache is not None:
-                cache_key = f"viio:candidates:{query.strip().lower()}:{candidate_pool_size}"
-                cached = await self.cache.get_json(cache_key)
+                cached = await self.cache.get_json(semantic_key)
                 if cached:
                     if diagnostics is not None:
                         diagnostics['from_cache'] = True
+                        diagnostics['cache_status'] = 'hit'
                         diagnostics['cache_backend'] = 'redis' if getattr(self.cache, 'is_redis_active', False) else 'memory'
                     return [
                         Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
                         for item in cached
                     ]
             docs = await anyio.to_thread.run_sync(
-                partial(self.vector_store.similarity_search, query=query, k=candidate_pool_size, filter=build_access_filter(context))
+                partial(self.vector_store.similarity_search, query=query, k=candidate_pool_size, filter=access_filter)
             )
             if self.cache is not None and docs:
-                cache_key = f"viio:candidates:{query.strip().lower()}:{candidate_pool_size}"
                 await self.cache.set_json(
-                    cache_key,
+                    semantic_key,
                     [fragment_snapshot(d) for d in docs],
                     ttl=1800,
                 )
@@ -176,19 +185,17 @@ class EnhancedRetrieval:
 
             async def fetch_sparse():
                 if self.cache is not None:
-                    cache_key = f"viio:sparse:{query.strip().lower()}:{candidate_pool_size}"
-                    cached = await self.cache.get_json(cache_key)
+                    cached = await self.cache.get_json(sparse_key)
                     if cached:
                         return [
                             Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
                             for item in cached
                         ]
                 docs = await anyio.to_thread.run_sync(
-                    partial(self.vector_store.sparse_search, query=query, k=candidate_pool_size, filter=build_access_filter(context))
+                    partial(self.vector_store.sparse_search, query=query, k=candidate_pool_size, filter=access_filter)
                 )
                 if self.cache is not None and docs:
-                    cache_key = f"viio:sparse:{query.strip().lower()}:{candidate_pool_size}"
-                    await self.cache.set_json(cache_key, [fragment_snapshot(d) for d in docs], ttl=1800)
+                    await self.cache.set_json(sparse_key, [fragment_snapshot(d) for d in docs], ttl=1800)
                 return docs
 
             searches.append(fetch_sparse())
@@ -256,12 +263,14 @@ class EnhancedRetrieval:
             final_ranks = {fragment_key(doc): rank for rank, doc in enumerate(selected, 1)}
             ranked_keys = {fragment_key(doc) for doc in ranked}
 
-            reranker_info = {}
+            reranker_info = {'reranker_status': 'disabled'}
             if self.reranker is not None and getattr(self.reranker, 'enabled', False):
-                reranker_info = {
-                    'reranker_model': self.reranker.model_name,
-                    'reranker_used': 'bge-reranker-v2-m3' if not getattr(self.reranker, '_failed_init', False) else 'lexical_fallback',
-                }
+                if not candidates:
+                    reranker_info = {'reranker_status': 'skipped'}
+                elif getattr(self.reranker, '_failed_init', False):
+                    reranker_info = {'reranker_status': 'lexical_fallback', 'reranker_used': 'lexical_fallback'}
+                else:
+                    reranker_info = {'reranker_status': 'applied', 'reranker_model': self.reranker.model_name}
 
             has_window = any(bool(d.metadata.get('window_context')) for d in selected)
             small2big_info = {}

@@ -181,10 +181,12 @@ services:
     - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
     - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:?Configure CONSULTANT_SOURCE_KEY in .env}
-    - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-    - RERANKER_ENABLED=${RERANKER_ENABLED:-true}
+    - REDIS_URL=${RAG_REDIS_URL:-redis://redis:6379/0}
+    - RERANKER_ENABLED=${RERANKER_ENABLED:-false}
     - RERANKER_MODEL=${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
     - RERANKER_TOP_K=${RERANKER_TOP_K:-25}
+    - FASTEMBED_CACHE_PATH=/tmp/fastembed
+    - HF_HOME=/tmp/huggingface
     - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
@@ -208,7 +210,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs:
-    - /tmp:size=128m
+    - /tmp:size=256m
     pids_limit: 128
     mem_limit: 768m
     volumes:
@@ -333,6 +335,9 @@ services:
     - ASSISTANT_RAG_BACKEND=${ASSISTANT_RAG_BACKEND:-local}
     - CHAT_PROVIDER=${CHAT_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
     - CHAT_MODEL=${CHAT_MODEL:-}
+    - ROUTING_PROVIDER=${ROUTING_PROVIDER:-}
+    - ROUTING_MODEL=${ROUTING_MODEL:-}
+    - ROUTING_MAX_TOKENS=${ROUTING_MAX_TOKENS:-128}
     - CODING_PROVIDER=${CODING_PROVIDER:-${LLM_PROVIDER:-lmstudio}}
     - YANDEX_API_KEY=${YANDEX_API_KEY:-}
     - YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID:-}
@@ -357,6 +362,8 @@ services:
     - PGSQL_MAX_ROWS=${PGSQL_MAX_ROWS:-100}
     - PGSQL_MAX_CHARS=${PGSQL_MAX_CHARS:-12000}
     - PGSQL_TIMEOUT_SECONDS=${PGSQL_TIMEOUT_SECONDS:-40}
+    - MEMGRAPH_ENABLED=${MEMGRAPH_ENABLED:-true}
+    - MEMGRAPH_URI=${MEMGRAPH_URI:-bolt://memgraph:7687}
     - SERVICE_ROLE=assistent
     - DOCUMENTS_URL=http://documents:8000
     - SECURE_RUNTIME=true
@@ -367,6 +374,7 @@ services:
     - CHAT_API_KEY_PREVIOUS=${CHAT_API_KEY_PREVIOUS:-}
     - AGENT_MAX_TOOL_CALLS=${AGENT_MAX_TOOL_CALLS:-24}
     - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+    - SKILLS_ENABLED=${SKILLS_ENABLED:-true}
     - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
@@ -379,6 +387,8 @@ services:
         condition: service_healthy
     volumes:
     - assistant_traces:/traces
+    - ./Skills:/app/Skills:ro
+    - ./.agents/skills:/app/.agents/skills:ro
     healthcheck:
       test:
       - CMD

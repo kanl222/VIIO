@@ -14,7 +14,7 @@ export const TraceCard = memo(function TraceCard({
   selected,
   onSelect,
 }: TraceCardProps) {
-  const isError = item.status === 'error';
+  const isError = item.status === 'error' || item.status === 'cancelled';
   const isAgentTrace = !['ocr', 'search'].includes(item.agent);
   const reviewStage = item.review?.stage;
   const reviewScore = item.review?.score;
@@ -61,7 +61,7 @@ export const TraceCard = memo(function TraceCard({
         ) : null}
 
         <span className="stat-badge card-status">
-          {isError ? (
+          {item.status === 'running' ? 'Выполняется' : isError ? (
             <CircleAlert size={14} className="bad" aria-label="Ошибка выполнения" />
           ) : (
             <CircleCheck size={14} className="good" aria-label="Выполнен" />

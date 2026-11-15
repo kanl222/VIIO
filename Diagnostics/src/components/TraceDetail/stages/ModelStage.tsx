@@ -5,12 +5,30 @@ import { roleNames, copyToClipboard } from '../../../utils/formatters';
 
 export const ModelStage = memo(function ModelStage({ event }: { event: TraceEvent }) {
   const [copiedHash, setCopiedHash] = useState(false);
+  const [copiedContent, setCopiedContent] = useState(false);
+  const [copiedMessageIdx, setCopiedMessageIdx] = useState<number | null>(null);
 
   const copyHash = async (hash: string) => {
     const ok = await copyToClipboard(hash);
     if (ok) {
       setCopiedHash(true);
       setTimeout(() => setCopiedHash(false), 1500);
+    }
+  };
+
+  const copyContent = async (str: string) => {
+    const ok = await copyToClipboard(str);
+    if (ok) {
+      setCopiedContent(true);
+      setTimeout(() => setCopiedContent(false), 1500);
+    }
+  };
+
+  const copyMessage = async (str: string, index: number) => {
+    const ok = await copyToClipboard(str);
+    if (ok) {
+      setCopiedMessageIdx(index);
+      setTimeout(() => setCopiedMessageIdx(null), 1500);
     }
   };
 
@@ -40,13 +58,25 @@ export const ModelStage = memo(function ModelStage({ event }: { event: TraceEven
             const role = roleNames[message.role] || message.role;
             const isUser = message.role === 'human' || message.role === 'user';
             const isTool = message.role === 'tool';
+            const msgText = text(message.content);
             return (
               <div
                 key={index}
                 className={`message-bubble ${isUser ? 'user-msg' : isTool ? 'tool-msg' : 'ai-msg'}`}
               >
-                <div className="message-role-tag">{role}</div>
-                <div className="text message-content">{text(message.content)}</div>
+                <div className="message-bubble-header">
+                  <div className="message-role-tag">{role}</div>
+                  <button
+                    type="button"
+                    className="copy-mini-btn"
+                    onClick={() => copyMessage(msgText, index)}
+                    title="Скопировать текст сообщения"
+                  >
+                    {copiedMessageIdx === index ? <Check size={11} className="good" /> : <Copy size={11} />}
+                    <span>{copiedMessageIdx === index ? 'Скопировано' : 'Копировать'}</span>
+                  </button>
+                </div>
+                <div className="text message-content">{msgText}</div>
                 {message.tool_calls?.length ? (
                   <div className="tool-calls-box">
                     <strong>Вызовы инструментов:</strong>
@@ -66,13 +96,29 @@ export const ModelStage = memo(function ModelStage({ event }: { event: TraceEven
     const promptTokens = usage?.input_tokens ?? usage?.prompt_tokens;
     const completionTokens = usage?.output_tokens ?? usage?.completion_tokens;
     const totalTokens = usage?.total_tokens ?? ((promptTokens ?? 0) + (completionTokens ?? 0) || undefined);
+    const generatedText = text(event.content);
 
     return (
       <div className="stage-model-generation">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <span className="hint" style={{ margin: 0 }}>Видимый результат генерации модели:</span>
+          {generatedText ? (
+            <button
+              type="button"
+              className="copy-mini-btn"
+              onClick={() => copyContent(generatedText)}
+              title="Скопировать сгенерированный результат"
+            >
+              {copiedContent ? <Check size={11} className="good" /> : <Copy size={11} />}
+              <span>{copiedContent ? 'Скопировано' : 'Копировать'}</span>
+            </button>
+          ) : null}
+        </div>
+
         {event.error ? (
           <div className="bad error-box">Ошибка вызова модели: {event.error}</div>
         ) : (
-          <div className="text generation-content">{text(event.content)}</div>
+          <div className="text generation-content">{generatedText}</div>
         )}
 
         {event.tool_calls?.length ? (

@@ -19,7 +19,7 @@ export interface TraceEvent {
   languages?: string[]; max_pages?: number; max_chars?: number; timeout_seconds?: number; status_code?: number;
   prompt_sha256?: string;
   scope?: string; note?: string; candidate_count?: number;
-  stage: string; elapsed_ms: number; duration_ms?: number; status?: string;
+  stage: string; title?: string; span_id?: string; parent_span_id?: string; elapsed_ms: number; duration_ms?: number; status?: string;
   query?: string; context?: string; candidates?: Fragment[]; selected?: Fragment[];
   branches?: Record<string, { status: string; count: number | null; duration_ms?: number; error?: string }>;
   search_trace_id?: string; lookup_mode?: string; requested_documents?: number;
@@ -45,6 +45,8 @@ export interface TraceEvent {
   draft_snippet?: string; draft_chars?: number; context_chars?: number;
   faithfulness_score?: number; lost_in_the_middle_reordered?: boolean; reordered_count?: number;
   reranker_used?: string; reranker_model?: string; cache_backend?: string;
+  reranker_status?: 'disabled' | 'skipped' | 'lexical_fallback' | 'applied';
+  cache_status?: 'disabled' | 'skipped' | 'miss' | 'hit';
   from_cache?: boolean; candidate_pool_size?: number;
   usage?: {
     input_tokens?: number; prompt_tokens?: number;
@@ -57,11 +59,21 @@ export interface TraceSummary {
   id: string; agent: string; question: string; thread_id?: string; started_at: string;
   duration_ms: number; status: string; error?: string; searches: number;
   model_calls: number; event_count: number; total_tokens?: number | null; review: Partial<Review>;
+  payload_truncated?: boolean;
 }
-export interface Trace extends TraceSummary { events: TraceEvent[]; configuration?: Record<string, string> }
+export interface Trace extends TraceSummary { events: TraceEvent[]; configuration?: Record<string, string>; payload_truncated?: boolean; }
 export const stageNames: Record<string, string> = {
-  correct: 'Ответ верный', route: 'Маршрут', retrieval: 'Поиск', selection: 'Отбор фрагментов',
-  context: 'Контекст модели', generation: 'Формулирование', unknown: 'Причина не установлена',
+  correct: 'Ответ верный',
+  route: 'Маршрут',
+  retrieval: 'Поиск',
+  selection: 'Отбор фрагментов',
+  context: 'Контекст модели',
+  generation: 'Формулирование',
+  database: 'База данных / SQL',
+  coding: 'Кодер / разработка',
+  ocr: 'Распознавание PDF',
+  guard: 'Проверка безопасности',
+  unknown: 'Причина не установлена',
 };
 export type DiagnosticTab = 'agents' | 'ocr' | 'search';
 export const diagnosticTabs: { id: DiagnosticTab; label: string }[] = [

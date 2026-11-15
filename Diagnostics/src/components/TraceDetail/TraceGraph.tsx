@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { GitBranch, Clock, AlertTriangle, CheckCircle, Database, Search } from 'lucide-react';
 import { type TraceEvent } from '../../types';
-import { eventNames, seconds } from '../../utils/formatters';
+import { eventNames, getEventName, seconds } from '../../utils/formatters';
 
 interface TraceGraphProps {
   events: TraceEvent[];
@@ -55,12 +55,12 @@ export const TraceGraph = memo(function TraceGraph({ events, onSelectStep }: Tra
                   type="button"
                   className={`trace-graph-node-btn ${nodeStatusClass}`}
                   onClick={() => onSelectStep(index)}
-                  title={`Перейти к шагу ${index + 1}: ${eventNames[event.stage] || event.stage}`}
+                  title={`Перейти к шагу ${index + 1}: ${getEventName(event)}`}
                 >
                   <div className="node-top-row">
                     <span className="node-index">{index + 1}</span>
                     <strong className="node-title">
-                      {eventNames[event.stage] || event.stage}
+                      {getEventName(event)}
                     </strong>
                   </div>
 

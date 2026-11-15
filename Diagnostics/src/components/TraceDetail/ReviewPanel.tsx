@@ -52,7 +52,7 @@ export const ReviewPanel = memo(function ReviewPanel({ trace, onSaved }: ReviewP
   };
 
   return (
-    <section className="review-section" aria-label="Сравнение с эталоном и разбор качества">
+    <section className="review-section" id="review-section" aria-label="Сравнение с эталоном и разбор качества">
       <div className="section-header">
         <h2>Сравнение с эталоном и разбор качества</h2>
         <p className="hint">

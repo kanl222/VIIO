@@ -1,7 +1,7 @@
-import { memo, useMemo } from 'react';
-import { Download, AlertTriangle, Cpu, Terminal, ArrowRight } from 'lucide-react';
-import { type DiagnosticTab, type Review, type Trace, type TraceSummary } from '../../types';
-import { agentName, dateTime, seconds, formatTokens } from '../../utils/formatters';
+import { memo, useMemo, useState } from 'react';
+import { Download, AlertTriangle, Cpu, Terminal, ArrowRight, Copy, Check } from 'lucide-react';
+import { type DiagnosticTab, type Review, type Trace, type TraceEvent, type TraceSummary } from '../../types';
+import { agentName, dateTime, seconds, formatTokens, copyToClipboard } from '../../utils/formatters';
 import { LazyDetails } from '../../LazyDetails';
 
 import { TraceGraph } from './TraceGraph';
@@ -24,6 +24,37 @@ export const TraceDetailView = memo(function TraceDetailView({
   onSaved,
   tab = 'agents',
 }: TraceDetailViewProps) {
+  const [copiedQuestion, setCopiedQuestion] = useState(false);
+  const [copiedAnswer, setCopiedAnswer] = useState(false);
+
+  const copyQuestion = async () => {
+    if (!trace.question) return;
+    const ok = await copyToClipboard(trace.question);
+    if (ok) {
+      setCopiedQuestion(true);
+      setTimeout(() => setCopiedQuestion(false), 1500);
+    }
+  };
+
+  const copyAnswer = async () => {
+    const textToCopy = answerEvent?.reply;
+    if (!textToCopy) return;
+    const ok = await copyToClipboard(textToCopy);
+    if (ok) {
+      setCopiedAnswer(true);
+      setTimeout(() => setCopiedAnswer(false), 1500);
+    }
+  };
+
+  const jumpToReview = () => {
+    const el = document.getElementById('review-section');
+    if (el) {
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      const firstInput = el.querySelector<HTMLElement>('select, input, textarea');
+      firstInput?.focus();
+    }
+  };
+
   const exportTrace = () => {
     const jsonStr = JSON.stringify(trace, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -41,6 +72,13 @@ export const TraceDetailView = memo(function TraceDetailView({
       target.open = true;
       target.scrollIntoView({ block: 'start', behavior: 'smooth' });
       target.querySelector('summary')?.focus();
+    }
+  };
+
+  const jumpToMatcher = (matcher: (e: TraceEvent) => boolean) => {
+    const idx = trace.events.findIndex(matcher);
+    if (idx !== -1) {
+      jumpToEvent(idx);
     }
   };
 
@@ -85,9 +123,15 @@ export const TraceDetailView = memo(function TraceDetailView({
       latestRetrieval?.ranking_details?.after_access_check;
     const selectedCount = latestRetrieval?.selected?.length;
     const uShaped = latestRetrieval?.ranking_details?.lost_in_the_middle_reordered;
-    const reranker = latestRetrieval?.reranker_model || latestRetrieval?.reranker_used;
+    const rerankerStatus = latestRetrieval?.reranker_status;
+    const reranker = rerankerStatus === 'lexical_fallback' || latestRetrieval?.reranker_used === 'lexical_fallback'
+      ? 'Лексический резерв'
+      : rerankerStatus === 'disabled' ? 'Реранкер выключен'
+      : rerankerStatus === 'skipped' || latestRetrieval?.lookup_mode === 'document_ids' ? 'Переранжирование пропущено'
+      : latestRetrieval?.reranker_model || latestRetrieval?.reranker_used || 'Нет данных о реранкере';
     const cacheBackend = latestRetrieval?.cache_backend;
     const fromCache = latestRetrieval?.from_cache;
+    const cacheStatus = latestRetrieval?.cache_status;
 
     const latestGrade = cragGradeEvents[cragGradeEvents.length - 1];
     const isRelevant = latestGrade?.relevant;
@@ -117,6 +161,7 @@ export const TraceDetailView = memo(function TraceDetailView({
       reranker,
       fromCache,
       cacheBackend,
+      cacheStatus,
     };
   }, [trace.events]);
 
@@ -184,15 +229,37 @@ export const TraceDetailView = memo(function TraceDetailView({
       <header className="detail-header-card">
         <div className="title-row">
           <h2 className="trace-question-heading">{trace.question}</h2>
-          <button
-            type="button"
-            className="export-json-btn"
-            onClick={exportTrace}
-            title="Экспорт полной трассы в формате JSON"
-          >
-            <Download size={14} aria-hidden="true" />
-            <span>Экспорт JSON</span>
-          </button>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="copy-header-btn"
+              onClick={copyQuestion}
+              title="Скопировать вопрос в буфер обмена"
+            >
+              {copiedQuestion ? <Check size={13} className="good" /> : <Copy size={13} />}
+              <span>{copiedQuestion ? 'Скопировано' : 'Копировать вопрос'}</span>
+            </button>
+            {answerEvent?.reply ? (
+              <button
+                type="button"
+                className="copy-header-btn"
+                onClick={copyAnswer}
+                title="Скопировать итоговый ответ модели"
+              >
+                {copiedAnswer ? <Check size={13} className="good" /> : <Copy size={13} />}
+                <span>{copiedAnswer ? 'Скопировано' : 'Копировать ответ'}</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="export-json-btn"
+              onClick={exportTrace}
+              title="Экспорт полной трассы в формате JSON"
+            >
+              <Download size={14} aria-hidden="true" />
+              <span>Экспорт JSON</span>
+            </button>
+          </div>
         </div>
 
         <div className="metadata-pills">
@@ -233,6 +300,16 @@ export const TraceDetailView = memo(function TraceDetailView({
             <strong>Запрос завершился ошибкой:</strong>
             <p>{trace.error || 'Тип ошибки не записан'}</p>
             <span className="hint">Сохранены этапы, выполненные до возникновения сбоя.</span>
+          </div>
+        </div>
+      ) : null}
+
+      {trace.payload_truncated ? (
+        <div className="payload-truncated-banner" role="alert">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <div>
+            <strong>Трасса превысила 8 МБ (содержимое усечено):</strong>
+            <p>Часть сырых данных (большие дампы DDL схемы и фрагменты текста) была отсечена коллектором для предотвращения переполнения диска.</p>
           </div>
         </div>
       ) : null}
@@ -285,10 +362,13 @@ export const TraceDetailView = memo(function TraceDetailView({
             <div className="rag-metric">
               <dt>Переранжирование и кэш</dt>
               <dd>
-                <strong>{ragMetrics.reranker || 'Реранкер не указан'}</strong>
-                {ragMetrics.fromCache === true && (
-                  <span>Результат из кэша{ragMetrics.cacheBackend ? ` (${ragMetrics.cacheBackend})` : ''}</span>
-                )}
+                <strong>{ragMetrics.reranker}</strong>
+                <span>{ragMetrics.cacheStatus === 'hit' || ragMetrics.fromCache
+                  ? `Кандидаты из кэша${ragMetrics.cacheBackend ? ` (${ragMetrics.cacheBackend})` : ''}`
+                  : ragMetrics.cacheStatus === 'miss' ? 'Кэш кандидатов: промах'
+                  : ragMetrics.cacheStatus === 'disabled' ? 'Кэш выключен'
+                  : ragMetrics.cacheStatus === 'skipped' ? 'Кэш пропущен'
+                  : 'Нет данных о кэше'}</span>
               </dd>
             </div>
           </dl>
@@ -298,7 +378,12 @@ export const TraceDetailView = memo(function TraceDetailView({
       <TraceGraph events={trace.events} onSelectStep={jumpToEvent} />
 
       {/* Pipeline Stage Quick Navigation */}
-      <QuickNav events={trace.events} onJumpToStage={jumpToStage} />
+      <QuickNav
+        events={trace.events}
+        onJumpToMatcher={jumpToMatcher}
+        onJumpToReview={jumpToReview}
+        hasReview={Boolean(trace.review?.stage || trace.review?.score != null || trace.review?.notes)}
+      />
 
       {/* Event Timeline Stream */}
       <section className="events-stream-section" aria-label="Детальная лента событий">

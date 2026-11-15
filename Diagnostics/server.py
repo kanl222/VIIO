@@ -4,16 +4,113 @@ import os
 import re
 import threading
 import mimetypes
+import queue
+import sqlite3
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 STATIC = Path(__file__).parent / 'dist'
-ROOTS = [Path(p) for p in os.getenv('TRACE_ROOTS', '/traces/main,/traces/consultant,/traces/documents,/traces/document-worker,/traces/rag').split(',')]
-REVIEWS = Path(os.getenv('REVIEW_ROOT', '/data/reviews'))
+
+def _resolve_roots():
+    if os.getenv('TRACE_ROOTS'):
+        return [Path(p) for p in os.getenv('TRACE_ROOTS').split(',')]
+    if Path('/traces').is_dir():
+        return [Path(p) for p in ('/traces/main', '/traces/consultant', '/traces/documents', '/traces/document-worker', '/traces/rag')]
+    local_base = Path(__file__).resolve().parent.parent / 'tmp' / 'traces'
+    return [local_base / name for name in ('main', 'consultant', 'documents', 'document-worker', 'rag')]
+
+def _resolve_reviews():
+    if os.getenv('REVIEW_ROOT'):
+        return Path(os.getenv('REVIEW_ROOT'))
+    if Path('/data/reviews').parent.is_dir() and os.name != 'nt':
+        return Path('/data/reviews')
+    return Path(__file__).resolve().parent.parent / 'tmp' / 'reviews'
+
+ROOTS = _resolve_roots()
+REVIEWS = _resolve_reviews()
 ID = re.compile(r'^[a-f0-9]{32}$')
 LOCK = threading.RLock()
 CACHE = {}
+
+SUBSCRIBERS = []
+SUBSCRIBERS_LOCK = threading.Lock()
+
+SEARCH_STAGES = {'retrieval', 'crag_retrieve', 'search_request', 'graph_search'}
+SEARCH_TOOL_NAMES = {'search_knowledge_base', 'list_documents', 'search_document_content', 'search_knowledge_graph'}
+
+
+def notify_subscribers(event_type: str, data: dict):
+    with SUBSCRIBERS_LOCK:
+        dead = []
+        for q in list(SUBSCRIBERS):
+            try:
+                q.put_nowait({'type': event_type, 'data': data})
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            if q in SUBSCRIBERS:
+                SUBSCRIBERS.remove(q)
+
+
+def get_db():
+    db_path = REVIEWS.parent / 'traces_index.db'
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
+    conn.execute('PRAGMA journal_mode = WAL;')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS traces (
+            id TEXT PRIMARY KEY,
+            agent TEXT,
+            question TEXT,
+            thread_id TEXT,
+            started_at TEXT,
+            duration_ms INTEGER,
+            status TEXT,
+            error TEXT,
+            searches INTEGER,
+            model_calls INTEGER,
+            event_count INTEGER,
+            total_tokens INTEGER,
+            mtime_ns INTEGER
+        );
+    ''')
+    conn.execute('''
+        CREATE VIRTUAL TABLE IF NOT EXISTS traces_fts USING fts5(
+            id UNINDEXED,
+            question,
+            error,
+            content='traces',
+            content_rowid='rowid'
+        );
+    ''')
+    return conn
+
+
+def search_fts(query_str: str) -> set[str]:
+    conn = None
+    try:
+        conn = get_db()
+        cleaned = re.sub(r'[^a-zA-Z0-9\u0400-\u04FF]+', ' ', query_str).strip()
+        if not cleaned:
+            return set()
+        cur = conn.execute("SELECT id FROM traces_fts WHERE traces_fts MATCH ?", (f"{cleaned}*",))
+        return {row[0] for row in cur.fetchall()}
+    except Exception:
+        return set()
+    finally:
+        if conn:
+            conn.close()
+
+
+def is_search_event(event):
+    stage = event.get('stage')
+    if stage in SEARCH_STAGES:
+        return True
+    if stage == 'tool_start' and event.get('name') in SEARCH_TOOL_NAMES:
+        return True
+    return False
 
 
 def read_json(path):
@@ -30,9 +127,55 @@ def review(identifier):
     except (OSError, ValueError): return {}
 
 
-def summaries():
+def export_golden_set():
+    cases = []
+    with LOCK:
+        for rev_path in sorted(REVIEWS.glob('*.json')):
+            if not ID.fullmatch(rev_path.stem):
+                continue
+            identifier = rev_path.stem
+            try:
+                rev_data = read_json(rev_path)
+            except Exception:
+                continue
+
+            t_path = trace_path(identifier)
+            t_data = {}
+            if t_path and t_path.is_file():
+                try:
+                    t_data = read_json(t_path)
+                except Exception:
+                    pass
+
+            if not rev_data.get('expected_answer') and rev_data.get('score') is None and not rev_data.get('stage'):
+                continue
+
+            events = t_data.get('events', [])
+            actual_answer = next((e.get('reply') for e in reversed(events) if e.get('stage') == 'answer'), None)
+            if not actual_answer and events:
+                actual_answer = next((e.get('content') for e in reversed(events) if e.get('stage') == 'generation' and e.get('status') == 'ok'), None)
+
+            cases.append({
+                'id': identifier,
+                'agent': t_data.get('agent', 'main'),
+                'question': t_data.get('question', ''),
+                'expected_answer': rev_data.get('expected_answer', ''),
+                'evidence': rev_data.get('evidence', ''),
+                'document_id': rev_data.get('document_id', ''),
+                'score': rev_data.get('score'),
+                'stage': rev_data.get('stage', ''),
+                'notes': rev_data.get('notes', ''),
+                'actual_answer': actual_answer,
+                'thread_id': t_data.get('thread_id'),
+                'started_at': t_data.get('started_at'),
+            })
+    return sorted(cases, key=lambda c: c.get('started_at') or '', reverse=True)
+
+
+def summaries(search_query=None):
     with LOCK:
         existing = set()
+        changed = []
         for root in ROOTS:
             for path in root.glob('*.json'):
                 if not ID.fullmatch(path.stem): continue
@@ -43,8 +186,8 @@ def summaries():
                         item = read_json(path)
                         events = item.get('events', [])
                         summary = {k: item.get(k) for k in ('id', 'agent', 'question', 'thread_id', 'started_at', 'duration_ms', 'status', 'error')}
-                        summary['searches'] = sum(e['stage'] == 'retrieval' for e in events)
-                        summary['model_calls'] = sum(e['stage'] == 'context' for e in events)
+                        summary['searches'] = sum(1 for e in events if is_search_event(e))
+                        summary['model_calls'] = sum(e.get('stage') == 'context' for e in events)
                         summary['event_count'] = len(events)
                         total_tokens = 0
                         has_usage = False
@@ -59,11 +202,48 @@ def summaries():
                                     total_tokens += tokens
                                     has_usage = True
                         summary['total_tokens'] = total_tokens if has_usage else None
+                        summary['mtime_ns'] = stamp
                         CACHE[str(path)] = (stamp, summary)
+                        changed.append(summary)
                 except (OSError, ValueError, KeyError, TypeError): continue
         for key in list(CACHE):
             if key not in existing: del CACHE[key]
-        return sorted([{**value[1], 'review': review(value[1]['id'])} for value in CACHE.values()], key=lambda row: row['started_at'], reverse=True)
+
+        if changed:
+            conn = None
+            try:
+                conn = get_db()
+                for s in changed:
+                    conn.execute('''
+                        INSERT OR REPLACE INTO traces (
+                            id, agent, question, thread_id, started_at, duration_ms,
+                            status, error, searches, model_calls, event_count, total_tokens, mtime_ns
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        s.get('id'), s.get('agent'), s.get('question'), s.get('thread_id'),
+                        s.get('started_at'), s.get('duration_ms'), s.get('status'), s.get('error'),
+                        s.get('searches'), s.get('model_calls'), s.get('event_count'),
+                        s.get('total_tokens'), s.get('mtime_ns')
+                    ))
+                conn.execute("INSERT INTO traces_fts(traces_fts) VALUES ('rebuild');")
+                conn.commit()
+            except Exception:
+                pass
+            finally:
+                if conn:
+                    conn.close()
+
+        rows = [{**value[1], 'review': review(value[1]['id'])} for value in CACHE.values()]
+
+        if search_query:
+            matched_ids = search_fts(search_query)
+            if matched_ids:
+                rows = [r for r in rows if r['id'] in matched_ids]
+            else:
+                q_lower = search_query.lower()
+                rows = [r for r in rows if q_lower in (r.get('question') or '').lower() or q_lower in (r.get('error') or '').lower()]
+
+        return sorted(rows, key=lambda row: row.get('started_at') or '', reverse=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -96,9 +276,50 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.allowed(): return
         url = urlsplit(self.path)
+        params = parse_qs(url.query)
+
+        if url.path == '/api/traces/stream':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache, no-transform')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('X-Accel-Buffering', 'no')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            client_queue = queue.Queue(maxsize=100)
+            with SUBSCRIBERS_LOCK:
+                SUBSCRIBERS.append(client_queue)
+            try:
+                self.wfile.write(b'event: ping\ndata: {"status": "connected"}\n\n')
+                self.wfile.flush()
+                while not getattr(self.server, '_is_shut_down', threading.Event()).is_set():
+                    try:
+                        msg = client_queue.get(timeout=15.0)
+                        self.wfile.write(f'data: {json.dumps(msg, ensure_ascii=False)}\n\n'.encode('utf-8'))
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b': heartbeat\n\n')
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                with SUBSCRIBERS_LOCK:
+                    if client_queue in SUBSCRIBERS:
+                        SUBSCRIBERS.remove(client_queue)
+            return
+
         if url.path == '/api/traces':
-            rows = summaries()
+            q = params.get('q', [None])[0]
+            rows = summaries(search_query=q)
             self.send_json(200, {'items': rows, 'retention': '7 дней, до 1000 запросов на сервис'})
+        elif url.path == '/api/reviews/export-golden-set':
+            dataset = export_golden_set()
+            self.send_json(200, {
+                'count': len(dataset),
+                'items': dataset,
+                'exported_at': datetime.now(timezone.utc).isoformat()
+            })
         elif url.path.startswith('/api/traces/'):
             identifier = url.path.rsplit('/', 1)[-1]
             path = trace_path(identifier)
@@ -124,7 +345,11 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(size))
             fields = ('stage', 'expected_answer', 'evidence', 'document_id', 'notes')
             if not isinstance(data, dict) or any(not isinstance(data.get(key, ''), str) or len(data.get(key, '')) > 6000 for key in fields): raise ValueError()
-            if data.get('stage', '') not in ('', 'correct', 'route', 'retrieval', 'selection', 'context', 'generation', 'unknown'): raise ValueError()
+            allowed_stages = (
+                '', 'correct', 'route', 'retrieval', 'selection', 'context',
+                'generation', 'database', 'coding', 'ocr', 'guard', 'unknown'
+            )
+            if data.get('stage', '') not in allowed_stages: raise ValueError()
             if data.get('score') not in (None, 1, 2, 3, 4, 5) or isinstance(data.get('score'), bool): raise ValueError()
             saved = {key: data.get(key, '') for key in fields}
             saved['score'] = data.get('score')
@@ -134,6 +359,7 @@ class Handler(BaseHTTPRequestHandler):
                 temporary = target.with_suffix('.tmp')
                 temporary.write_text(json.dumps(saved, ensure_ascii=False), encoding='utf-8')
                 temporary.replace(target)
+            notify_subscribers('review_saved', {'id': identifier, 'review': saved})
             self.send_json(200, saved)
         except (ValueError, TypeError): self.send_json(400, {'detail': 'Проверьте оценку и размер полей (до 6000 символов)'})
         except OSError: self.send_json(503, {'detail': 'Не удалось сохранить разбор. Повторите попытку.'})

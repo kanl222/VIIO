@@ -94,7 +94,8 @@ h1, h2, h3 { color: var(--ink); text-wrap: balance; }
 .prompt-list small { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .welcome-note { font-size: 12px; color: var(--muted); }
 .composer-wrap { width: min(100%, 850px); padding: 16px 30px; margin: 0 auto; flex-shrink: 0; }
-.composer { display: flex; align-items: flex-end; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 4px 20px #00000005; }
+.composer { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 4px 20px #00000005; }
+.composer-row { display: flex; align-items: flex-end; padding: 12px; }
 .composer:focus-within { border-color: var(--accent); }
 .composer textarea { flex: 1; min-width: 0; resize: none; background: transparent; padding: 9px 8px; outline: none; color: var(--ink); font-size: 14px; line-height: 1.6; }
 .send-button { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; flex-shrink: 0; background: var(--accent); color: var(--surface); }

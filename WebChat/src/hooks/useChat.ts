@@ -68,7 +68,12 @@ export function useChat(
 
   // Отправка сообщения
   const sendMessage = useCallback(
-    async (text: string, targetId: string | null = conversationId, options?: import('../api/chat').RagOptions) => {
+    async (
+      text: string,
+      targetId: string | null = conversationId,
+      options?: import('../api/chat').RagOptions,
+      attachments?: import('../types').MessageAttachment[]
+    ) => {
       if (!targetId || !text.trim() || pendingSend.current) {
         return;
       }
@@ -84,6 +89,7 @@ export function useChat(
         conversation_id: targetId,
         sender: 'user',
         text: trimmedText,
+        attachments: attachments && attachments.length > 0 ? attachments : undefined,
         created_at: new Date().toISOString(),
       };
 
@@ -103,23 +109,29 @@ export function useChat(
         setProgressText('Обрабатываем запрос…');
         let partial = '';
         const streamingId = `stream-${Date.now()}`;
-        const response = await chatApi.sendMessage(targetId, trimmedText, options, event => {
-          if (!isCurrent()) return;
-          if (event.type === 'plan') setPlan(event.steps);
-          if (event.type === 'status') setProgressText(event.message);
-          if (event.type === 'reset') {
-            partial = '';
-            setHistory(pending);
-          }
-          if (event.type === 'delta') {
-            partial += event.text;
-            setProgressText('Формируем ответ…');
-            setHistory({ id: targetId, messages: [...pending.messages, {
-              id: streamingId, conversation_id: targetId, sender: 'assistant', text: partial,
-              created_at: new Date().toISOString(),
-            }] });
-          }
-        });
+        const response = await chatApi.sendMessage(
+          targetId,
+          trimmedText,
+          options,
+          event => {
+            if (!isCurrent()) return;
+            if (event.type === 'plan') setPlan(event.steps);
+            if (event.type === 'status') setProgressText(event.message);
+            if (event.type === 'reset') {
+              partial = '';
+              setHistory(pending);
+            }
+            if (event.type === 'delta') {
+              partial += event.text;
+              setProgressText('Формируем ответ…');
+              setHistory({ id: targetId, messages: [...pending.messages, {
+                id: streamingId, conversation_id: targetId, sender: 'assistant', text: partial,
+                created_at: new Date().toISOString(),
+              }] });
+            }
+          },
+          attachments
+        );
         const assistantMessage: Message = {
           id: response.message_id || `asst-${Date.now()}`,
           conversation_id: targetId,
