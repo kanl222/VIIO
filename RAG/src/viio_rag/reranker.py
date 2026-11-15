@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from collections.abc import Sequence
@@ -52,6 +53,10 @@ class CrossEncoderReranker:
                 return None
         return self._encoder
 
+    def _cache_key(self, query: str, text: str) -> str:
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        return f"viio:score:{self.model_name}:{query.strip().lower()}:{text_hash}"
+
     async def compute_scores(self, query: str, texts: Sequence[str]) -> list[float]:
         """Compute cross-encoder relevance logits for a query and list of document texts."""
         encoder = self._get_encoder()
@@ -64,7 +69,7 @@ class CrossEncoderReranker:
 
         if self.cache is not None:
             for idx, text in enumerate(texts):
-                cache_key = f"viio:score:{self.model_name}:{query.strip().lower()}:{text[:128]}"
+                cache_key = self._cache_key(query, text)
                 cached_val = await self.cache.get_json(cache_key)
                 if cached_val is not None:
                     scores[idx] = float(cached_val)
@@ -84,7 +89,7 @@ class CrossEncoderReranker:
                 for idx, score in zip(missing_indices, computed):
                     scores[idx] = float(score)
                     if self.cache is not None:
-                        cache_key = f"viio:score:{self.model_name}:{query.strip().lower()}:{texts[idx][:128]}"
+                        cache_key = self._cache_key(query, texts[idx])
                         await self.cache.set_json(cache_key, float(score), ttl=86400)
             except Exception as e:
                 logger.warning("Cross-encoder inference failed (%s). Falling back.", e)
