@@ -25,52 +25,78 @@ VIIO — платформа с веб-чатом, поиском по докум
 | Направление | Что реализовано |
 | --- | --- |
 | Веб-чат | Регистрация, вход, отдельные диалоги, история сообщений, светлая и тёмная темы, подсветка кода |
-| Ответы по документам | PDF, DOCX, ODT и текст; двухэтапный поиск (Dense + Sparse BM25 + лексика через RRF, переранжирование Cross-Encoder BAAI/bge-reranker-v2-m3 на CPU ONNX), расширение контекста Small2Big (Sentence-Window), кэширование в Redis, OCR PDF через Docling на CPU, поиск с проверкой прав и источниками |
+| Ответы по документам | PDF, DOCX, ODT и текст; двухэтапный поиск (Dense 768 + Sparse BM25 + лексика через RRF, переранжирование Cross-Encoder BAAI/bge-reranker-v2-m3 на CPU ONNX), расширение контекста Small2Big (Sentence-Window), кэширование в Redis, OCR PDF через Docling на CPU, поиск с проверкой прав и источниками |
+| Граф знаний (Онтология) | Memgraph Platform 2.x, онтология аптечного склада: бизнес-процессы (приёмка, шаги, роли), холодовая цепь (режимы 2–8 °C, верификация зон и серий), мастер-системы данных (1С:ERP, WMS, МДЛП, термомониторинг), нормативная база и словарь аббревиатур |
 | Программирование | Отдельная модель coder, автоматическая передача технических задач и прямой вызов через `/code` |
-| Тестовая PostgreSQL | Готовый Postgres MCP Pro, чтение схем и SELECT через `/db` и естественные вопросы о подключённой БД, доступ только программистам и администраторам |
-| Управление доступом | Роли пользователей, подразделения, права документов и проверка владельца диалога |
+| База данных и Text-to-SQL | Готовый Postgres MCP Pro, чтение схем и SELECT через `/db` и естественные вопросы о подключённой БД, детерминированная защита от модификаций (DROP/DELETE/INSERT), доступ только программистам и администраторам |
+| Управление доступом | Роли пользователей, подразделения, права документов (ACL) и проверка владельца диалога |
+| Диагностика и аудит | Портал диагностики (:3010), сквозные трассировки (`/traces`), замеры латентности и этапов работы агента (маршрутизация, RAG, граф, генерация) |
 | Администрирование | Состояние сервисов, счётчики, управление ролями и подразделениями, каталог и массовая загрузка PDF/TXT/Markdown с сохранением оригиналов |
-| Сохранение состояния | Данные веб-чата в `user_db`, состояние диалогового графа в `agent_db` |
+| Сохранение состояния | Данные веб-чата в `user_db`, состояние диалогового графа в `agent_db` через `AsyncPostgresSaver` |
 | Точность и контекст | Серверный калькулятор простых выражений, отдельный режим редактирования текста, продолжение задач coder и отдельный список предоставленных материалов |
 
 ## Как устроена система
 
-В корневом Docker Compose описаны четыре основных сервиса и дополнительные профили `pdf` для Docling и `postgres` для тестовой БД. Сервер моделей работает на хосте или по отдельно настроенному сетевому адресу.
+Архитектура VIIO организована в виде монорепозитория сервисов (UV Workspace), оркеструемого через Docker Compose с обратным прокси Nginx Gateway.
 
 ```mermaid
 flowchart TD
-    Browser[Браузер] -->|HTTP :3000| WebChat[WebChat · React + Express]
-    WebChat -->|Пользователи и диалоги| UserDB[(PostgreSQL · user_db)]
-    WebChat -->|Запрос и контекст пользователя| API[assistent · FastAPI + LangGraph]
-    API -->|Состояние графа| AgentDB[(PostgreSQL · agent_db)]
-    API -->|Поиск с проверкой прав| Documents[Documents API · :8002]
-    Documents -->|Прокси поиска| RAG[RAG Service · :8000]
-    Consultant[Агент-консультант · :8001] -->|Только опубликованное| Documents
-    WebChat -->|Загрузка, каталог, скачивание| Documents
-    RAG --> Qdrant[(Qdrant · Dense + Sparse BM25)]
-    RAG --> Redis[(Redis · кэш кандидатов и скоров)]
-    RAG --> PostgresRead[(PostgreSQL · каталог ACL read-only)]
-    Documents --> Worker[Document Worker · очередь и индексация]
-    Worker --> Qdrant
-    Worker --> Files[(Оригиналы документов)]
-    API --> Models[LM Studio / Ollama]
-    Models --> Chat[Модель консультанта]
-    Models --> Embeddings[Модель эмбеддингов]
+    Client[Клиент / Браузер] -->|HTTP :80 / :8080| Gateway[Nginx Gateway · Reverse Proxy]
+    
+    Gateway -->|/| WebChat[WebChat · React 18 + Express · :3000]
+    Gateway -->|/api/v1/chat| Assistent[Assistent · FastAPI + LangGraph Supervisor · :8000]
+    Gateway -->|/api/v1/documents| Documents[Documents API · FastAPI · :8002]
+    Gateway -->|/diagnostics| Diagnostics[Diagnostics Dashboard · :3010]
+
+    WebChat -->|Пользователи и сессии| UserDB[(PostgreSQL · user_db)]
+    WebChat -->|Запросы диалогов| Assistent
+
+    subgraph AgentRuntime [Оркестрация Агента Assistent]
+        Assistent -->|Состояние диалогов AsyncPostgresSaver| AgentDB[(PostgreSQL · agent_db)]
+        Assistent -->|Онтология склада search_knowledge_graph| Memgraph[(Memgraph Platform · Bolt :7687)]
+        Assistent -->|Безопасный Text-to-SQL /db| PostgresMCP[Postgres-MCP Tool · SSE :8000]
+        Assistent -->|Поиск в БЗ search_knowledge_base| Documents
+        Assistent -->|Генерация и классификация| LLM[LLM: LM Studio / Ollama / Yandex]
+    end
+
+    subgraph ConsultantRuntime [Публичный Консультант]
+        Consultant[Consultant · FastAPI + LangChain · :8001] -->|Только публичные регламенты| Documents
+        Consultant -->|Публичные ответы| LLM
+    end
+
+    subgraph RAGPipeline [Конвейер RAG и Хранилище Знаний]
+        Documents -->|Прокси поиска| RAG[RAG Service · FastAPI :8000]
+        RAG --> Qdrant[(Qdrant · Dense 768 + Sparse BM25)]
+        RAG --> Redis[(Redis · Кэш кандидатов и скоров)]
+        RAG --> PostgresACL[(PostgreSQL · Каталог и права ACL)]
+        Documents --> DocWorker[Document Worker · Очередь задач]
+        DocWorker --> PDFWorker[PDF Worker · Docling OCR]
+        DocWorker --> Qdrant
+        DocWorker --> FileStorage[(Файловое хранилище оригиналов)]
+    end
+
+    PostgresMCP -->|Read-Only SELECT| WarehouseDB[(PostgreSQL · База данных склада)]
+    Diagnostics -.->|Чтение трассировок /traces| TraceVolumes[(Тома трассировок)]
 ```
 
-| Сервис | Стек | Ответственность |
+| Сервис | Стек / Порт | Ответственность |
 | --- | --- | --- |
-| `webchat` | React 18, TypeScript, Vite, Tailwind CSS, Express; Node.js 24 в Docker | Интерфейс, пользовательские сессии, диалоги, административные маршруты и передача запросов агенту |
-| `assistent` | Python 3.12, FastAPI, LangChain, LangGraph | Основной агент, coder, диалоги и личные факты; поиск через Documents API |
-| `consultant` | FastAPI, LangChain | Самостоятельный агент-консультант; инструмент поиска разрешённых публикаций |
-| `documents` | FastAPI, PostgreSQL, Qdrant | Общий каталог, права, версии, публикации, загрузка, скачивание; совместимые поисковые URL передают запросы в RAG |
-| `rag` | FastAPI, FastEmbed (ONNX), PostgreSQL read-only, Qdrant read-only, Redis | Двухэтапный гибридный поиск (Dense + Sparse BM25 + каталог по RRF), Cross-Encoder переранжирование, Small2Big контекст, ACL и трассировка |
-| `redis` | Redis 7.2 Alpine | Высокоскоростное кэширование сырых кандидатов поиска и скоров переранжирования |
-| `document-worker` | Python, очередь PostgreSQL | Обработка файлов, PDF/OCR, индексация и синхронизация публикаций в отдельном процессе |
-| `postgres` | PostgreSQL 16 | Две базы: `user_db` для веб-чата и `agent_db` для состояния LangGraph |
-| `qdrant` | Qdrant | Хранение плотных векторов и Sparse BM25 фрагментов, поиск с фильтрацией доступа |
+| `nginx` | Nginx 1.27 Alpine · `:80`, `:8080` | Единая точка входа, обратный прокси, балансировка и маршрутизация внешнего трафика |
+| `webchat` | React 18, TypeScript, Vite, Tailwind CSS, Express · `:3000` | Интерфейс, пользовательские сессии, диалоги, административные маршруты и передача запросов агенту |
+| `assistent` | Python 3.12, FastAPI, LangGraph · `:8000` | Основной агент с Supervisor StateGraph: маршрутизация интентов, RAG, кодер, SQL-аналитик, онтология графа |
+| `consultant` | Python 3.12, FastAPI, LangChain · `:8001` | Внешний агент-консультант: ответы исключительно по утвержденным публичным регламентам (`X-Consultant-Key`) |
+| `documents` | Python 3.12, FastAPI · `:8002` | Общий каталог, права (ACL), версии, публикации, загрузка, скачивание; совместимые URL поиска передают в RAG |
+| `rag` | Python 3.12, FastAPI, FastEmbed (ONNX) | Двухэтапный гибридный поиск (Dense + Sparse BM25 + каталог через RRF), Cross-Encoder переранжирование, Small2Big |
+| `document-worker` | Python 3.12, очередь PostgreSQL | Фоновая обработка файлов, нарезка Sentence-Window, индексация и синхронизация публикаций |
+| `pdf-worker` | Python 3.12, Docling OCR (профиль `pdf`) | Высокоточный OCR-парсинг сложных PDF и сканов на CPU |
+| `diagnostics` | Python 3.12, Vanilla JS Dashboard · `:3010` | Портал телеметрии и аудита: визуализация трасс, спанов, латентности и этапов работы агентов |
+| `memgraph` | Memgraph Platform 2.x · Bolt `:7687`, Lab `:3001` | Графовая база знаний онтологии аптечного склада: бизнес-процессы, холодовая цепь, роли, мастер-системы |
+| `postgres` | PostgreSQL 16 Alpine · `:5432` | Хранение пользователей и сессий (`user_db`), чекпоинтов LangGraph и каталога (`agent_db`) |
+| `qdrant` | Qdrant 1.20 · `:6333`, `:6334` | Хранение плотных векторов (768d Cosine) и разреженных BM25 фрагментов, поиск с фильтрацией доступа |
+| `redis` | Redis 7.2 Alpine · `:6379` | Высокоскоростное кэширование сырых кандидатов поиска и скоров переранжирования |
+| `postgres-tool` | PostgreSQL MCP Pro (профиль `postgres`) | Read-Only MCP инструмент безопасного выполнения SELECT-запросов и чтения структуры схемы (`/db`) |
 
-Каталог основного проекта — `Assistent`, Python-пакет и Docker-сервис — `assistent`, контейнер — `viio_assistent`. Documents и worker используют самостоятельный пакет `viio_documents` из `Documents/src` со своими зависимостями и Docker-сборкой. Связь агентов с документами проходит только по HTTP; модели диалога/coder в Documents не создаются. У основного агента нет тома с оригиналами и обработчиков очереди. [Границы сервисов и запуск](Documents/README.md).
+Сервисы организованы в структурированный монорепозиторий: `services/assistent`, `services/consultant`, `services/documents`, `services/rag`, `services/diagnostics`, `apps/webchat`, `workers/document-worker` и общий пакет `packages/viio-core`. Связь агентов с документами проходит по HTTP; в процессе основного агента нет тома с оригиналами и обработчиков очереди. [Границы сервисов и запуск](services/documents/README.md).
 
 ### Путь запроса
 
@@ -123,14 +149,19 @@ docker compose ps
 
 | Назначение | Адрес |
 | --- | --- |
-| Веб-чат | [localhost:3000](http://localhost:3000) |
+| Nginx Gateway (единая точка входа) | [localhost:80](http://localhost:80) / [localhost:8080](http://localhost:8080) |
+| Веб-чат (пользовательский интерфейс) | [localhost:3000](http://localhost:3000) |
 | Состояние WebChat и подключения к БД | [localhost:3000/health](http://localhost:3000/health) |
-| Документация assistent | [localhost:8000/docs](http://localhost:8000/docs) |
-| Состояние assistent | [localhost:8000/health](http://localhost:8000/health) |
-| Панель Qdrant | [localhost:6333/dashboard](http://localhost:6333/dashboard) |
+| API и Swagger документация Assistent | [localhost:8000/docs](http://localhost:8000/docs) |
+| Состояние Assistent | [localhost:8000/health](http://localhost:8000/health) |
+| API и Swagger Консультанта | [localhost:8001/docs](http://localhost:8001/docs) |
+| API и Swagger сервиса Documents | [localhost:8002/docs](http://localhost:8002/docs) |
+| Портал диагностики агентов и RAG | [localhost:3010](http://localhost:3010) |
+| Memgraph Lab (веб-интерфейс графа) | [localhost:3001](http://localhost:3001) |
+| Memgraph Bolt (Bolt-протокол графа) | `localhost:7687` |
+| Панель Qdrant Dashboard | [localhost:6333/dashboard](http://localhost:6333/dashboard) |
 | PostgreSQL | `localhost:5432` |
 | Redis | `localhost:6379` |
-| Диагностика поиска и агентов | [localhost:3010](http://localhost:3010) |
 
 Порты меняются в корневом `.env`. Проверка здоровья API не заменяет проверку ответа модели: после запуска отправьте вопрос в чате.
 
@@ -227,35 +258,46 @@ docker compose down
 
 Для сервера моделей на хосте контейнер assistent использует `host.docker.internal`. Корневой Compose содержит соответствующее сопоставление для Linux. Сервер моделей должен слушать адрес, доступный контейнерам.
 
-WebChat добавляет `X-Internal-Token` к защищённым запросам assistent. Этот токен предназначен для серверного обмена, а не для входа пользователя. При прямой интеграции его требуют `POST /api/v1/chat` и `POST /api/v1/documents`; схемы и примеры — в [Assistent/README.md](Assistent/README.md).
+WebChat добавляет `X-Internal-Token` к защищённым запросам assistent. Этот токен предназначен для серверного обмена, а не для входа пользователя. При прямой интеграции его требуют `POST /api/v1/chat` и `POST /api/v1/documents`; схемы и примеры — в [services/assistent/README.md](services/assistent/README.md).
 
 ## Структура проекта
 
+Архитектура монорепозитория организована в виде UV Workspace:
+
 ```text
 VIIO/
-├── Assistent/              # Единый LangGraph-агент, диалог, coder и инструменты
-├── RAG/                    # Двухэтапный гибридный поиск, Sparse BM25, Reranker, кэш
-├── Documents/              # Каталог документов, права (ACL), очереди и worker
-├── Consultant/             # Самостоятельный агент-консультант
-├── Diagnostics/            # Веб-панель телеметрии запросов, OCR и RAG (порт 3010)
-├── WebChat/
-│   ├── src/                # React-интерфейс
-│   ├── server/             # Express, сессии, чат и администрирование
-│   └── test/
-├── init-db/                # Первичная инициализация баз PostgreSQL
-├── docs/                   # Документация системы; рабочие отчёты игнорируются Git
-├── .env.example
-└── docker-compose.yml      # Запуск всей платформы
+├── apps/
+│   └── webchat/            # React 18 + Express веб-интерфейс, сессии, чат и админка (:3000)
+├── services/
+│   ├── assistent/          # Единый LangGraph-агент, coder, SQL-аналитик, граф онтологии (:8000)
+│   ├── consultant/         # Агент-консультант по публичным материалам (:8001)
+│   ├── documents/          # Каталог документов, права (ACL), версионирование (:8002)
+│   ├── rag/                # Двухэтапный гибридный поиск (Dense+Sparse BM25+RRF), Reranker, кэш
+│   └── diagnostics/        # Веб-панель трассировки запросов, RAG и аудита (:3010)
+├── workers/
+│   ├── document-worker/    # Фоновый воркер обработки очереди и синхронизации
+│   └── pdf-worker/         # OCR и парсинг сложных PDF на базе Docling
+├── packages/
+│   └── viio-core/          # Общие типы, утилиты и модели платформы
+├── nginx/                  # Конфигурация Nginx Gateway (порты :80, :8080)
+├── scripts/                # Сквозные тесты агента, верификация графа Memgraph, RAG-инжест
+├── init-db/                # Скрипты инициализации баз данных (agent_db, user_db)
+├── .agents/skills/         # Скиллы агентов (LangGraph, 1C, SQL, RAG, Vercel React)
+├── docs/                   # Документация системы
+├── pyproject.toml          # UV Workspace конфигурация монорепозитория
+├── uv.lock                 # Зафиксированные зависимости монорепозитория
+├── .env.example            # Шаблон переменных окружения
+└── docker-compose.yml      # Комплексная оркестрация всех сервисов платформы
 ```
 
 ## Разработка и проверки
 
-Для локальной разработки нужны Node.js 22+, Python 3.12+ и `uv`, а также отдельно запущенные PostgreSQL, Qdrant и сервер моделей. Настройки подключения задаются в окружении соответствующего приложения. Корневой `.env` используется Compose и автоматически не заменяет настройки локальных процессов.
+Для локальной разработки нужны Node.js 22+, Python 3.12+ и `uv`, а также отдельно запущенные PostgreSQL, Qdrant, Memgraph и сервер моделей. Настройки подключения задаются в окружении соответствующего приложения. Корневой `.env` используется Compose и автоматически не заменяет настройки локальных процессов.
 
 Команды выполняются из указанных каталогов:
 
 ```bash
-# WebChat/
+# apps/webchat
 npm ci
 npm test
 npm run build
@@ -263,13 +305,23 @@ npm start
 ```
 
 ```bash
-# Assistent/
+# services/assistent
 uv sync
-uv run pytest tests/
+uv run pytest services/assistent/tests/
 uv run uvicorn assistent:create_app --factory --reload --port 8000
 ```
 
-Тесты и сборка проверяют приложение; фактическое качество ответов локальной модели и корректность загруженных знаний оцениваются отдельно. Инструкции компонентов: [WebChat](WebChat/README.md) и [assistent](Assistent/README.md).
+```bash
+# services/rag
+uv run pytest services/rag/tests/
+```
+
+```bash
+# services/consultant
+uv run pytest services/consultant/tests/
+```
+
+Тесты и сборка проверяют приложение; фактическое качество ответов локальной модели и корректность загруженных знаний оцениваются отдельно. Инструкции компонентов: [WebChat](apps/webchat/README.md), [assistent](services/assistent/README.md), [documents](services/documents/README.md), [RAG](services/rag/README.md), [consultant](services/consultant/README.md) и [diagnostics](services/diagnostics/README.md).
 
 Для соблюдения стандартов кодовой базы, оркестрации LangGraph, оптимизации RAG и промптов подключены [скиллы агентов](docs/agent-skills.md) в каталоге `.agents/skills`.
 
@@ -291,8 +343,12 @@ uv run uvicorn assistent:create_app --factory --reload --port 8000
 | [Модель coder](docs/mcp-integrations.md) | Настройки, доступ программистов, поиск контекста и примеры запросов |
 | [Инструмент PostgreSQL](docs/postgresql-tool.md) | Настройки тестовой БД, профиль Docker, роли, SELECT и отсутствие сохранения результатов |
 | [Обработка запросов](docs/ready-agent-components.md) | Поиск без лишних обращений, лимит контекста, параллельность coder и 140 тестов |
-| [WebChat](WebChat/README.md) | Запуск интерфейса и сервера, маршруты, сборка и проверки |
-| [assistent](Assistent/README.md) | Устройство сервиса, локальный запуск и HTTP API |
+| [WebChat](apps/webchat/README.md) | Запуск интерфейса и сервера, маршруты, сборка и проверки |
+| [assistent](services/assistent/README.md) | Устройство сервиса, локальный запуск и HTTP API |
+| [documents](services/documents/README.md) | Каталог, версионирование, проверка ACL и публикация материалов |
+| [RAG Service](services/rag/README.md) | Двухэтапный гибридный конвейер, Sparse BM25, Reranker и кэширование |
+| [consultant](services/consultant/README.md) | Публичный консультант, авторизация и изоляция данных |
+| [diagnostics](services/diagnostics/README.md) | Портал телеметрии, сбор и визуализация трассировок |
 | [Административный интерфейс](docs/admin-ui.md) | Возможности, правила доступа и результаты проверки интерфейса |
 | [Оформление интерфейса](DESIGN.md) | Цвета, компоненты и адаптивное поведение |
 | [Скиллы агентов](docs/agent-skills.md) | Каталог и использование скиллов (.agents/skills), архитектура, промпты, RAG и поиск |
@@ -303,8 +359,8 @@ uv run uvicorn assistent:create_app --factory --reload --port 8000
 
 Добавлены объединённый поиск по документам и именам исходников, загрузка кода для программистов/администраторов, сводки длинных бесед и явные личные факты (`/remember`, `/facts`, `/forget`). Внешний консультант доступен отдельным API и использует только тексты, явно опубликованные администратором. [Настройка, команды и ограничения](docs/dialogue-summarization.md).
 
-Внешний консультант вынесен в [отдельное приложение и Docker-контейнер Consultant](Consultant/README.md), порт 8001. Модель настраивается независимо; прежний адрес на порту 8000 сохранён как прокси. [Архитектура и проверки](Consultant/README.md).
+Внешний консультант вынесен в [отдельное приложение и Docker-контейнер Consultant](services/consultant/README.md), порт 8001. Модель настраивается независимо; прежний адрес на порту 8000 сохранён как прокси. [Архитектура и проверки](services/consultant/README.md).
 
-Консультант — самостоятельный агент со своей целью и инструментом `search_published_documents`. Модель сама выбирает запрос и при необходимости повторяет поиск. Он использует общую базу основного агента через серверный шлюз, который допускает только опубликованные документы. [Роль, ограничения и тесты агента](Consultant/README.md).
+Консультант — самостоятельный агент со своей целью и инструментом `search_published_documents`. Модель сама выбирает запрос и при необходимости повторяет поиск. Он использует общую базу основного агента через серверный шлюз, который допускает только опубликованные документы. [Роль, ограничения и тесты агента](services/consultant/README.md).
 
 Порядок защищённого запуска и миграции: [выпуск A](docs/release-a-2026-10-28.md).

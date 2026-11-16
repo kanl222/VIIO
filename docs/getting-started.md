@@ -4,7 +4,7 @@
 
 ## 1. Что подготовить
 
-- Исходники VIIO на компьютере. В корне должны быть `docker-compose.yml`, `.env.example`, каталоги `assistent`, `WebChat` и `init-db`.
+- Исходники VIIO на компьютере. В корне должны быть `docker-compose.yml`, `.env.example`, `pyproject.toml` (UV Workspace), каталоги `apps/`, `services/`, `workers/`, `packages/`, `nginx/` и `init-db/`.
 - Windows: [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) с Linux-контейнерами и поддержкой WSL 2. Запустите Docker Desktop до выполнения команд.
 - Linux: [Docker Engine](https://docs.docker.com/engine/install/) и [плагин Docker Compose](https://docs.docker.com/compose/install/linux/). Команды ниже предполагают доступ к Docker от текущего пользователя; при необходимости запускайте их через `sudo`.
 - Локальный сервер моделей LM Studio или Ollama, работающий вне контейнеров VIIO.
@@ -102,10 +102,16 @@ curl --fail http://localhost:8000/health
 
 | Переменная | По умолчанию | Назначение |
 | --- | --- | --- |
+| `NGINX_HTTP_PORT` | `80` | Основной входной шлюз Nginx |
+| `NGINX_METRICS_PORT` | `8080` | Метрики Nginx Prometheus /stub_status |
 | `POSTGRES_USER` | `postgres` | Пользователь PostgreSQL, не пользователь веб-чата |
 | `POSTGRES_PORT` | `5432` | Порт PostgreSQL на хосте |
 | `WEBCHAT_PORT` | `3000` | Порт веб-интерфейса |
 | `API_PORT` | `8000` | Порт assistent |
+| `CONSULTANT_PORT` | `8001` | Порт консультанта базы знаний |
+| `DOCUMENTS_PORT` | `8002` | Порт сервиса документов |
+| `DIAGNOSTICS_PORT` | `3010` | Порт портала диагностики и отладки |
+| `MEMGRAPH_PORT` | `7687` | Bolt-порт графовой базы знаний Memgraph |
 | `QDRANT_PORT` | `6333` | HTTP-порт Qdrant |
 | `QDRANT_GRPC_PORT` | `6334` | gRPC-порт Qdrant |
 | `QDRANT_COLLECTION_NAME` | `knowledge_base` | Коллекция документов |
@@ -115,9 +121,9 @@ curl --fail http://localhost:8000/health
 
 ### Как понять, что запуск завершён
 
-В `docker compose ps` должны работать `postgres`, `qdrant`, `redis`, `assistent`, `documents`, `rag`, `document-worker`, `consultant` и `webchat`. Дождитесь прохождения проверок здоровья. Консультант отвечает только при включённом `CONSULTANT_ENABLED`.
+В `docker compose ps` должны работать базовые сервисы: `nginx`, `postgres`, `qdrant`, `redis`, `memgraph`, `assistent`, `documents`, `rag`, `document-worker`, `consultant`, `diagnostics` и `webchat` (а также `postgres-tool` при включенном профиле `postgres`, и `pdf-worker` при профиле `pdf`). Дождитесь прохождения проверок здоровья. Консультант отвечает только при включённом `CONSULTANT_ENABLED`.
 
-Основной агент переименован в `Assistent`. Поиск и ранжирование выполняет отдельный сервис `rag` (двухэтапный гибридный поиск Dense + Sparse BM25 + лексика, Cross-Encoder переранжирование, Small2Big и Redis-кэш). Документы обслуживаются отдельно: API на порту 8002 и worker в отдельном контейнере. Веб-чат отправляет загрузки напрямую в Documents API. [Границы сервисов и запуск без Docker на Windows/Linux](../Documents/README.md). [Архитектура и устройство RAG](../RAG/README.md).
+Архитектура системы состоит из микросервисов в монорепозитории UV Workspace. Шлюз Nginx (порт 80) маршрутизирует трафик между WebChat, API агентов и документами. Поиск и ранжирование выполняет отдельный сервис `rag` (двухэтапный гибридный поиск Dense + Sparse BM25 + лексика, Cross-Encoder переранжирование, Small2Big и Redis-кэш). Документы обслуживаются отдельно: API на порту 8002 и worker в отдельном контейнере. Онтология склада и фармацевтики хранится в графовой базе Memgraph (порт 7687). [Границы сервисов и запуск без Docker на Windows/Linux](../services/documents/README.md). [Архитектура и устройство RAG](../services/rag/README.md).
 
 - Откройте [веб-чат](http://localhost:3000).
 - `/health` WebChat должен вернуть `db: true`.
@@ -143,7 +149,7 @@ curl --fail http://localhost:8000/health
 
 Даже если `CODING_MODEL` пуст и имя модели совпадает с консультантом, настройки генерации coder применяются отдельно. Начальные параметры не гарантируют наилучшее качество: сравнивайте варианты на одинаковых задачах. Для применения изменений выполните `docker compose up -d assistent`.
 
-Короткие системные инструкции находятся в `Assistent/src/assistent/prompts.py`: отдельно консультант, coder и делегирование. После их изменения требуется пересборка assistent.
+Короткие системные инструкции находятся в `services/assistent/src/assistent/prompts.py`: отдельно консультант, coder и делегирование. После их изменения требуется пересборка assistent.
 
 ## 5. Создать пользователя
 
@@ -283,4 +289,4 @@ docker compose up -d
 
 `INTERNAL_API_KEY` предназначен для серверного обмена, не для входа пользователей. Запросы напрямую в assistent к `/api/v1/chat` и `/api/v1/documents` требуют заголовка `X-Internal-Token`. Для обычной работы используйте веб-интерфейс.
 
-Дополнительно: [настройка coder](mcp-integrations.md), [WebChat](../WebChat/README.md), [assistent](../Assistent/README.md).
+Дополнительно: [настройка coder](mcp-integrations.md), [WebChat](../apps/webchat/README.md), [Assistent](../services/assistent/README.md), [Consultant](../services/consultant/README.md), [Documents](../services/documents/README.md), [RAG](../services/rag/README.md), [Diagnostics](../services/diagnostics/README.md).

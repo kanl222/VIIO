@@ -104,6 +104,7 @@ export const roleNames: Record<string, string> = {
 export const searchBranchNames: Record<string, string> = {
   semantic: 'По смыслу (Dense)',
   sparse_bm25: 'BM25 (Sparse)',
+  qdrant_hybrid: 'Гибридный Qdrant (Dense + BM25)',
   lexical: 'По словам',
   public: 'Публичный индекс',
 };

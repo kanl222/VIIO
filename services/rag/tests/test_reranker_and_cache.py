@@ -133,3 +133,28 @@ def test_cross_encoder_cache_key_collision_avoidance():
     key1 = reranker._cache_key("test query", text1)
     key2 = reranker._cache_key("test query", text2)
     assert key1 != key2, "Cache keys must not collide on matching 128-char prefixes"
+
+
+def test_get_reranker_attaches_cache():
+    from viio_rag.reranker import get_reranker
+    mock_cache = ViioRedisCache(enabled=False)
+    instance = get_reranker(cache=mock_cache)
+    assert instance.cache is mock_cache
+
+
+def test_in_memory_lru_eviction_order():
+    cache = InMemoryCache(max_items=3)
+    cache.set("a", "1", ttl=60)
+    cache.set("b", "2", ttl=60)
+    cache.set("c", "3", ttl=60)
+
+    # Access 'a' so it becomes most recently used
+    assert cache.get("a") == "1"
+
+    # Add 'd', which should evict 'b' (oldest), keeping 'a' and 'c'
+    cache.set("d", "4", ttl=60)
+
+    assert cache.get("b") is None
+    assert cache.get("a") == "1"
+    assert cache.get("c") == "3"
+    assert cache.get("d") == "4"

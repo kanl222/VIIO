@@ -66,6 +66,7 @@ export const stageNames: Record<string, string> = {
   correct: 'Ответ верный',
   route: 'Маршрут',
   retrieval: 'Поиск',
+  graph: 'Граф знаний / онтология',
   selection: 'Отбор фрагментов',
   context: 'Контекст модели',
   generation: 'Формулирование',

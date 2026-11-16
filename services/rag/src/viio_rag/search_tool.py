@@ -142,16 +142,17 @@ def format_documents(docs):
     for idx, doc in enumerate(docs, 1):
         title = "Без названия"
         doc_id = "unknown"
-        if hasattr(doc, "metadata") and doc.metadata:
-            title = doc.metadata.get("title", "Без названия")
-            doc_id = doc.metadata.get("document_id", "unknown")
+        meta = getattr(doc, "metadata", None) or {}
+        if meta:
+            title = meta.get("title", "Без названия")
+            doc_id = meta.get("document_id", "unknown")
         content = getattr(doc, "page_content", str(doc))
-        if hasattr(doc, "metadata") and doc.metadata:
-            window = doc.metadata.get("window_context")
+        if meta:
+            window = meta.get("window_context")
             if window and len(str(window)) > len(content):
                 content = str(window)
-        if doc.metadata.get("kind") == "code":
-            content = f"Файл: {doc.metadata.get('filename', title)}, строки {doc.metadata.get('line_start', 1)}–{doc.metadata.get('line_end', 1)}\n" + content
+        if meta.get("kind") == "code":
+            content = f"Файл: {meta.get('filename', title)}, строки {meta.get('line_start', 1)}–{meta.get('line_end', 1)}\n" + content
 
         # Защита от prompt injection: экранирование закрывающего тега
         safe_content = content.replace("</context>", "&lt;/context&gt;")

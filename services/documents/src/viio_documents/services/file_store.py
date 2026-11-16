@@ -137,3 +137,125 @@ class LocalFileStore:
             return ""
         clean = "".join(c for c in suffix if c.isascii() and c.isalnum())[:7]
         return "." + clean if clean else ""
+
+
+# ---------------------------------------------------------------------------
+# Реализация: S3-совместимое хранилище (MinIO / Ceph / AWS S3)
+# ---------------------------------------------------------------------------
+
+class S3FileStore:
+    """Хранилище файлов в S3-совместимом объектном хранилище (MinIO, Ceph, AWS S3).
+
+    Реализует протокол IFileStore. Позволяет горизонтально масштабировать воркеры
+    без разделяемых локальных Docker-томов.
+    """
+
+    def __init__(
+        self,
+        bucket: str = "documents",
+        endpoint_url: str | None = None,
+        access_key: str | None = None,
+        secret_key: str | None = None,
+        region: str = "us-east-1",
+    ) -> None:
+        self.bucket = bucket
+        self.endpoint_url = endpoint_url
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.region = region
+        self._client = None
+        try:
+            import boto3
+            self._client = boto3.client(
+                "s3",
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name=self.region,
+            )
+            try:
+                self._client.head_bucket(Bucket=self.bucket)
+            except Exception:
+                try:
+                    self._client.create_bucket(Bucket=self.bucket)
+                except Exception as e:
+                    logger.warning("Не удалось проверить или создать S3 бакет %s: %s", self.bucket, e)
+        except ImportError:
+            logger.info("boto3 не установлен; S3FileStore потребует boto3 при обращении.")
+
+    def _get_client(self):
+        if self._client is None:
+            try:
+                import boto3
+                self._client = boto3.client(
+                    "s3",
+                    endpoint_url=self.endpoint_url,
+                    aws_access_key_id=self.access_key,
+                    aws_secret_access_key=self.secret_key,
+                    region_name=self.region,
+                )
+            except ImportError:
+                raise RuntimeError("Для использования S3FileStore требуется пакет boto3 (uv add boto3)")
+        return self._client
+
+    def save(self, data: bytes, *, suffix: str = "") -> str:
+        clean_suffix = LocalFileStore._clean_suffix(suffix)
+        key = uuid.uuid4().hex + clean_suffix
+        client = self._get_client()
+        client.put_object(Bucket=self.bucket, Key=key, Body=data)
+        logger.debug("S3FileStore: сохранён %s/%s (%d байт)", self.bucket, key, len(data))
+        return key
+
+    def load(self, storage_key: str) -> bytes:
+        if not storage_key or "/" in storage_key or "\\" in storage_key or ".." in storage_key:
+            raise ValueError(f"Недопустимый storage_key: {storage_key!r}")
+        client = self._get_client()
+        try:
+            response = client.get_object(Bucket=self.bucket, Key=storage_key)
+            return response["Body"].read()
+        except Exception as e:
+            if "NoSuchKey" in str(e) or "404" in str(e):
+                raise FileNotFoundError(f"Файл не найден в S3: {storage_key!r}") from e
+            raise
+
+    def delete(self, storage_key: str) -> bool:
+        if not storage_key or "/" in storage_key or "\\" in storage_key or ".." in storage_key:
+            return False
+        client = self._get_client()
+        try:
+            if not self.exists(storage_key):
+                return False
+            client.delete_object(Bucket=self.bucket, Key=storage_key)
+            logger.debug("S3FileStore: удалён %s/%s", self.bucket, storage_key)
+            return True
+        except Exception:
+            return False
+
+    def exists(self, storage_key: str) -> bool:
+        if not storage_key or "/" in storage_key or "\\" in storage_key or ".." in storage_key:
+            return False
+        client = self._get_client()
+        try:
+            client.head_object(Bucket=self.bucket, Key=storage_key)
+            return True
+        except Exception:
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Фабрика хранилища
+# ---------------------------------------------------------------------------
+
+def create_file_store(settings: Any) -> IFileStore:
+    """Создаёт экземпляр IFileStore в зависимости от конфигурации (local или s3)."""
+    backend = getattr(settings, "documents_storage_backend", "local")
+    if backend == "s3":
+        return S3FileStore(
+            bucket=getattr(settings, "s3_bucket", "documents"),
+            endpoint_url=getattr(settings, "s3_endpoint_url", None),
+            access_key=getattr(settings, "s3_access_key", None),
+            secret_key=getattr(settings, "s3_secret_key", None),
+            region=getattr(settings, "s3_region", "us-east-1"),
+        )
+    return LocalFileStore(getattr(settings, "documents_storage_path", "data/documents"))
+

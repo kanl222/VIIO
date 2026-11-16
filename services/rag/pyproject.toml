@@ -20,7 +20,11 @@ dependencies = [
   "fastembed>=0.9.0",
   "redis>=5.0.0",
   "neo4j>=6.4.1",
+  "viio-core",
 ]
+
+[tool.uv.sources]
+viio-core = { workspace = true }
 
 [project.optional-dependencies]
 yandex = ["yandex-ai-studio-sdk==0.22.1", "openai>=3.39.0", "python-dotenv>=1.2.4"]
@@ -38,3 +42,7 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

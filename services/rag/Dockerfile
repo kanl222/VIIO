@@ -9,13 +9,15 @@ COPY --from=uv /uv /bin/uv
 
 # Копирование манифестов workspace
 COPY pyproject.toml uv.lock ./
+COPY packages/viio-core/pyproject.toml packages/viio-core/
 COPY services/rag/pyproject.toml services/rag/
 
 # Установка зависимостей пакета
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-workspace --no-dev --package viio-rag
 
-# Копирование исходного кода пакета
+# Копирование исходного кода пакетов
+COPY packages/viio-core packages/viio-core
 COPY services/rag services/rag
 
 # Сборка и установка пакета

@@ -40,6 +40,7 @@ class UploadJobs:
     async def submit(self, identifier, payload):
         async with self.catalog.pool.connection() as conn:
             await conn.execute("INSERT INTO document_upload_jobs(id,payload) VALUES (%s,%s)", (identifier, Jsonb(payload)))
+            await conn.execute("NOTIFY document_upload_jobs")
 
     async def claim(self):
         token = uuid.uuid4().hex
@@ -69,6 +70,7 @@ class UploadJobs:
     async def release(self, identifier, token):
         async with self.catalog.pool.connection() as conn:
             await conn.execute("UPDATE document_upload_jobs SET status='queued',claim_token=NULL,lease_until=NULL WHERE id=%s AND claim_token=%s", (identifier, token))
+            await conn.execute("NOTIFY document_upload_jobs")
 
     async def statuses(self, identifiers):
         async with self.catalog.pool.connection() as conn:
@@ -85,7 +87,10 @@ class UploadJobs:
     async def retry(self, identifier):
         async with self.catalog.pool.connection() as conn:
             cursor = await conn.execute("UPDATE document_upload_jobs SET status='queued',error=NULL,updated_at=now() WHERE id=%s AND status='error' RETURNING id", (identifier,))
-            return bool(await cursor.fetchone())
+            retried = bool(await cursor.fetchone())
+            if retried:
+                await conn.execute("NOTIFY document_upload_jobs")
+            return retried
 
     async def require_review(self, identifier, token, prepared):
         review = {'content': prepared.content, 'engine': prepared.engine, 'pages': prepared.pages,
@@ -108,7 +113,10 @@ class UploadJobs:
                 review=review || %s || jsonb_build_object('approved_at',now()),updated_at=now()
                 WHERE id=%s AND status='needs_review' AND review->>'token'=%s RETURNING id""",
                 (Jsonb({'content': content, 'approved': True, 'approved_by': reviewer_id}), identifier, review_token))
-            return bool(await cursor.fetchone())
+            approved = bool(await cursor.fetchone())
+            if approved:
+                await conn.execute("NOTIFY document_upload_jobs")
+            return approved
 
     async def cancel(self, identifier):
         async with self.catalog.pool.connection() as conn:

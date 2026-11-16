@@ -120,11 +120,23 @@ def reorder_lost_in_the_middle(documents: Sequence[Any]) -> list[Any]:
 
 
 class EnhancedRetrieval:
-    def __init__(self, vector_store: Any, data: Any, reranker: Any = None, cache: Any = None) -> None:
+    def __init__(
+        self,
+        vector_store: Any,
+        data: Any,
+        reranker: Any = None,
+        cache: Any = None,
+        hybrid_enabled: bool = True,
+        hybrid_fusion: str = "rrf",
+        prefetch_limit: int = 40,
+    ) -> None:
         self.vector_store: Any = vector_store
         self.data: Any = data
         self.reranker: Any = reranker
         self.cache: Any = cache
+        self.hybrid_enabled: bool = hybrid_enabled
+        self.hybrid_fusion: str = hybrid_fusion
+        self.prefetch_limit: int = prefetch_limit
 
     async def search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None, parent_trace_id: str | None = None) -> list[Document]:
         with capture('search', query, parent_trace_id=parent_trace_id) as trace:
@@ -146,7 +158,6 @@ class EnhancedRetrieval:
     async def _search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None) -> list[Document]:
         if diagnostics is not None:
             diagnostics['cache_status'] = 'disabled' if self.cache is None else 'miss'
-        names = ['semantic', 'lexical']
         candidate_pool_size = max(k * 4, getattr(self.reranker, 'top_k', 25) if self.reranker else 25, 12)
         access_filter = build_access_filter(context)
         scope = access_filter.model_dump_json() if access_filter is not None else 'unrestricted'
@@ -155,50 +166,90 @@ class EnhancedRetrieval:
         ).hexdigest()
         semantic_key = f'viio:candidates:v2:{cache_suffix}'
         sparse_key = f'viio:sparse:v2:{cache_suffix}'
+        hybrid_key = f'viio:hybrid:v2:{cache_suffix}'
 
-        async def fetch_semantic():
-            if self.cache is not None:
-                cached = await self.cache.get_json(semantic_key)
-                if cached:
-                    if diagnostics is not None:
-                        diagnostics['from_cache'] = True
-                        diagnostics['cache_status'] = 'hit'
-                        diagnostics['cache_backend'] = 'redis' if getattr(self.cache, 'is_redis_active', False) else 'memory'
-                    return [
-                        Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
-                        for item in cached
-                    ]
-            docs = await anyio.to_thread.run_sync(
-                partial(self.vector_store.similarity_search, query=query, k=candidate_pool_size, filter=access_filter)
-            )
-            if self.cache is not None and docs:
-                await self.cache.set_json(
-                    semantic_key,
-                    [fragment_snapshot(d) for d in docs],
-                    ttl=1800,
-                )
-            return docs
+        use_qdrant_hybrid = self.hybrid_enabled and hasattr(self.vector_store, 'hybrid_search')
 
-        searches = [fetch_semantic(), self.data.lexical(query, context)]
-        if hasattr(self.vector_store, 'sparse_search'):
-            names.append('sparse_bm25')
+        if use_qdrant_hybrid:
+            names = ['qdrant_hybrid', 'lexical']
 
-            async def fetch_sparse():
+            async def fetch_hybrid():
                 if self.cache is not None:
-                    cached = await self.cache.get_json(sparse_key)
+                    cached = await self.cache.get_json(hybrid_key)
                     if cached:
+                        if diagnostics is not None:
+                            diagnostics['from_cache'] = True
+                            diagnostics['cache_status'] = 'hit'
+                            diagnostics['cache_backend'] = 'redis' if getattr(self.cache, 'is_redis_active', False) else 'memory'
                         return [
                             Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
                             for item in cached
                         ]
                 docs = await anyio.to_thread.run_sync(
-                    partial(self.vector_store.sparse_search, query=query, k=candidate_pool_size, filter=access_filter)
+                    partial(
+                        self.vector_store.hybrid_search,
+                        query=query,
+                        k=candidate_pool_size,
+                        filter=access_filter,
+                        fusion=self.hybrid_fusion,
+                        prefetch_limit=self.prefetch_limit,
+                    )
                 )
                 if self.cache is not None and docs:
-                    await self.cache.set_json(sparse_key, [fragment_snapshot(d) for d in docs], ttl=1800)
+                    await self.cache.set_json(
+                        hybrid_key,
+                        [fragment_snapshot(d) for d in docs],
+                        ttl=1800,
+                    )
                 return docs
 
-            searches.append(fetch_sparse())
+            searches = [fetch_hybrid(), self.data.lexical(query, context)]
+        else:
+            names = ['semantic', 'lexical']
+
+            async def fetch_semantic():
+                if self.cache is not None:
+                    cached = await self.cache.get_json(semantic_key)
+                    if cached:
+                        if diagnostics is not None:
+                            diagnostics['from_cache'] = True
+                            diagnostics['cache_status'] = 'hit'
+                            diagnostics['cache_backend'] = 'redis' if getattr(self.cache, 'is_redis_active', False) else 'memory'
+                        return [
+                            Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
+                            for item in cached
+                        ]
+                docs = await anyio.to_thread.run_sync(
+                    partial(self.vector_store.similarity_search, query=query, k=candidate_pool_size, filter=access_filter)
+                )
+                if self.cache is not None and docs:
+                    await self.cache.set_json(
+                        semantic_key,
+                        [fragment_snapshot(d) for d in docs],
+                        ttl=1800,
+                    )
+                return docs
+
+            searches = [fetch_semantic(), self.data.lexical(query, context)]
+            if hasattr(self.vector_store, 'sparse_search'):
+                names.append('sparse_bm25')
+
+                async def fetch_sparse():
+                    if self.cache is not None:
+                        cached = await self.cache.get_json(sparse_key)
+                        if cached:
+                            return [
+                                Document(page_content=item.get('text', ''), metadata={k: v for k, v in item.items() if k != 'text'})
+                                for item in cached
+                            ]
+                    docs = await anyio.to_thread.run_sync(
+                        partial(self.vector_store.sparse_search, query=query, k=candidate_pool_size, filter=access_filter)
+                    )
+                    if self.cache is not None and docs:
+                        await self.cache.set_json(sparse_key, [fragment_snapshot(d) for d in docs], ttl=1800)
+                    return docs
+
+                searches.append(fetch_sparse())
 
         if getattr(self.data, 'public_index', None) is not None:
             names.append('public')
@@ -344,18 +395,36 @@ class EnhancedRetrieval:
         if not valid_neighbors:
             return selected
         authorized_neighbors = await self.data.authorized_candidates(valid_neighbors, context)
-        expanded = list(selected)
+        added_neighbors = {}
         for n_doc in authorized_neighbors:
             chunk_len = len(n_doc.page_content)
             if total_chars + chunk_len <= max_chars:
-                expanded.append(n_doc)
+                added_neighbors[(n_doc.metadata.get('document_id'), n_doc.metadata.get('chunk_index'))] = n_doc
                 total_chars += chunk_len
             else:
                 break
-        expanded.sort(key=lambda d: (
-            str(d.metadata.get('document_id', '')),
-            d.metadata.get('chunk_index', 0)
-        ))
+        if not added_neighbors:
+            return selected
+
+        expanded = []
+        emitted = set()
+        for doc in selected:
+            d_id = doc.metadata.get('document_id')
+            c_idx = doc.metadata.get('chunk_index')
+            if d_id is not None and c_idx is not None:
+                prev_key = (d_id, c_idx - 1)
+                if prev_key in added_neighbors and prev_key not in emitted:
+                    expanded.append(added_neighbors[prev_key])
+                    emitted.add(prev_key)
+            doc_key = (d_id, c_idx)
+            if doc_key not in emitted:
+                expanded.append(doc)
+                emitted.add(doc_key)
+            if d_id is not None and c_idx is not None:
+                next_key = (d_id, c_idx + 1)
+                if next_key in added_neighbors and next_key not in emitted:
+                    expanded.append(added_neighbors[next_key])
+                    emitted.add(next_key)
         return expanded
 
     def tool(self, original, k):

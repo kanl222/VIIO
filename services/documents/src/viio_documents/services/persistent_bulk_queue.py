@@ -17,10 +17,13 @@ logger = logging.getLogger(__name__)
 class PersistentBulkQueue:
     def __init__(self, processor, catalog, store, max_workers=1, processing_slots=None):
         self.processor = processor
+        self.catalog = catalog
         self.store = store
         self.jobs = UploadJobs(catalog)
         self.max_workers = max_workers
         self.workers = []
+        self.listener_task = None
+        self._notify_event = asyncio.Event()
         self.processing_slots = processing_slots
 
     async def setup(self):
@@ -29,8 +32,17 @@ class PersistentBulkQueue:
     def start(self):
         if not self.workers:
             self.workers = [asyncio.create_task(self._worker()) for _ in range(self.max_workers)]
+        if self.listener_task is None or self.listener_task.done():
+            self.listener_task = asyncio.create_task(self._listener())
 
     async def stop(self):
+        if self.listener_task:
+            self.listener_task.cancel()
+            try:
+                await self.listener_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self.listener_task = None
         for worker in self.workers:
             worker.cancel()
         await asyncio.gather(*self.workers, return_exceptions=True)
@@ -44,6 +56,7 @@ class PersistentBulkQueue:
         payload['storage_key'] = key
         try:
             await self.jobs.submit(task.task_id, payload)
+            self._notify_event.set()
         except BaseException:
             await anyio.to_thread.run_sync(self.store.delete, key)
             raise
@@ -54,7 +67,10 @@ class PersistentBulkQueue:
         return [BulkUploadResult(row['id'], row['payload']['filename'], row['status'], row['document_id'], row['chunks_count'], row['error']) for row in rows]
 
     async def retry(self, identifier):
-        return await self.jobs.retry(identifier)
+        retried = await self.jobs.retry(identifier)
+        if retried:
+            self._notify_event.set()
+        return retried
 
     async def cancel(self, identifier):
         return await self.jobs.cancel(identifier)
@@ -63,7 +79,10 @@ class PersistentBulkQueue:
         return await self.jobs.get_review(identifier)
 
     async def approve(self, identifier, review_token, content, reviewer_id):
-        return await self.jobs.approve(identifier, review_token, content, reviewer_id)
+        approved = await self.jobs.approve(identifier, review_token, content, reviewer_id)
+        if approved:
+            self._notify_event.set()
+        return approved
 
     async def _keep_lease(self, row):
         while True:
@@ -121,14 +140,36 @@ class PersistentBulkQueue:
             process.cancel()
             await asyncio.gather(heartbeat, process, return_exceptions=True)
 
+    async def _listener(self):
+        while True:
+            try:
+                if not getattr(self.catalog, "available", False):
+                    await asyncio.sleep(1)
+                    continue
+                async with self.catalog.pool.connection() as conn:
+                    conn.autocommit = True
+                    await conn.execute("LISTEN document_upload_jobs")
+                    async for _ in conn.notifies():
+                        self._notify_event.set()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("Сбой соединения в слушателе NOTIFY; повтор через 3с")
+                await asyncio.sleep(3)
+
     async def _worker(self):
         while True:
             try:
                 row = await self.jobs.claim()
                 if row:
                     await self._work(row)
-                else:
-                    await asyncio.sleep(0.5)
+                    continue
+                try:
+                    await asyncio.wait_for(self._notify_event.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    self._notify_event.clear()
             except asyncio.CancelledError:
                 raise
             except Exception:

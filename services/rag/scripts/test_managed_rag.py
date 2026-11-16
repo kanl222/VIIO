@@ -16,9 +16,9 @@ from yandex_ai_studio_sdk._types.operation import Operation
 from yandex_ai_studio_sdk._search_indexes.search_index import SearchIndex
 from yandex.cloud.ai.assistants.v1.searchindex.search_index_pb2 import SearchIndex as ProtoSearchIndex
 
-ROOT = Path(__file__).resolve().parents[2]
-STATE = ROOT / 'RAG/state/yandex-managed-rag-test-state.json'
-REPORT = ROOT / 'RAG/reports/yandex-managed-rag-test-2026-11-02.json'
+ROOT = Path(__file__).resolve().parents[3]
+STATE = ROOT / 'services/rag/state/yandex-managed-rag-test-state.json'
+REPORT = ROOT / 'services/rag/reports/yandex-managed-rag-test-2026-11-02.json'
 
 
 def save(state):

@@ -9,7 +9,14 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from Diagnostics import collector, server
+import sys
+_diag_dir = Path(__file__).resolve().parent.parent
+if str(_diag_dir) not in sys.path:
+    sys.path.insert(0, str(_diag_dir))
+try:
+    from Diagnostics import collector, server
+except ImportError:
+    import collector, server
 
 
 class CollectorTests(unittest.TestCase):
