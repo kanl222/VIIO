@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     qdrant_api_key: str | None = Field(default=None, repr=False)
     qdrant_collection_name: str = 'knowledge_base'
     qdrant_public_collection_name: str = 'knowledge_public'
+    qdrant_hybrid_enabled: bool = True
+    qdrant_hybrid_fusion: Literal['rrf', 'dbsf'] = 'rrf'
+    qdrant_prefetch_limit: int = Field(default=40, ge=10, le=200)
+    sparse_bm25_enabled: bool = True
+    sparse_bm25_model: str = 'Qdrant/bm25'
     postgres_host: str = 'localhost'
     postgres_port: int = 5432
     postgres_db: str = 'agent_db'

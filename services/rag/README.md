@@ -15,14 +15,14 @@
 
 ## Тест Yandex Cloud RAG
 
-Сценарии управляемого облачного RAG находятся в `RAG/scripts`,
-отчёты — в `RAG/reports`, локальное состояние облачных ресурсов — в `RAG/state`.
+Сценарии управляемого облачного RAG находятся в `services/rag/scripts`,
+отчёты — в `services/rag/reports`, локальное состояние облачных ресурсов — в `services/rag/state`.
 Подробности и результаты: [yandex-managed-rag-test.md](yandex-managed-rag-test.md).
 
 Из корня VIIO в окружении с `yandex-ai-studio-sdk`, `openai` и `python-dotenv`:
 
 ```powershell
-python RAG/scripts/test_managed_rag.py
+python services/rag/scripts/test_managed_rag.py
 ```
 
 Команда обращается к облаку и использует ключи из корневого `.env`.
@@ -33,7 +33,7 @@ python RAG/scripts/test_managed_rag.py
 
 Отдельный FastAPI-сервис `rag` / контейнер `viio_rag`. Выполняет двухэтапный гибридный поиск (Dense + Sparse BM25 + лексика через RRF), динамическую авторизацию ACL, Cross-Encoder переранжирование, Small2Big расширение контекста и Redis-кэширование.
 
-Точка входа — `viio_rag.app:create_app` в `RAG/src`. Образ собирается из `RAG/Dockerfile` и не содержит пакет Documents или обработчики PDF/Office. Documents подключает локальный пакет `viio-rag` как зависимость для общего кода индексации. В процессе RAG нет очереди обработки, миграций, оригиналов и маршрутов записи документов. Индексацию выполняет `document-worker`.
+Точка входа — `viio_rag.app:create_app` в `services/rag/src`. Образ собирается из `services/rag/Dockerfile` и не содержит пакет Documents или обработчики PDF/Office. Documents подключает локальный пакет `viio-rag` как зависимость для общего кода индексации. В процессе RAG нет очереди обработки, миграций, оригиналов и маршрутов записи документов. Индексацию выполняет `document-worker`.
 
 ### Конвейер поиска (RAG Pipeline)
 
@@ -140,17 +140,17 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compos
 ```
 
 В production сервис доступен только во внутренней сети. Для разработки из
-корня VIIO: `uv run --project RAG uvicorn viio_rag.app:create_app --factory --port 8004`
+корня VIIO: `uv run --project services/rag uvicorn viio_rag.app:create_app --factory --port 8004`
 с настройками подключений. При `SECURE_RUNTIME=false` доступен `/docs`.
 
 Тесты общей библиотеки и её интеграции с Documents из корня:
-`uv run --project Documents --group dev pytest RAG/tests Documents/tests`.
+`uv run --project services/documents --group dev pytest services/rag/tests services/documents/tests`.
 
 Запуск тестов гибридного поиска, переранжирования и кэширования:
 ```powershell
-pytest RAG/tests/test_hybrid_sparse_bm25.py
-pytest RAG/tests/test_small2big_sentence_window.py
-pytest RAG/tests/test_reranker_and_cache.py
+pytest services/rag/tests/test_hybrid_sparse_bm25.py
+pytest services/rag/tests/test_small2big_sentence_window.py
+pytest services/rag/tests/test_reranker_and_cache.py
 ```
 Для чистой проверки вне рабочего `.env` запускайте тесты из отдельной папки
 с абсолютными путями; сценарии облачных тестов, напротив, явно читают корневой `.env`.

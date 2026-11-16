@@ -10,7 +10,7 @@ class PublishedMaterial(BaseModel):
     model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
     id: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=255)
-    content: str = Field(min_length=1, max_length=50000)
+    content: str = Field(min_length=1, max_length=1_000_000)
     access_class: Literal['public', 'restricted'] = 'restricted'
 
 

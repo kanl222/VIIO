@@ -20,8 +20,12 @@ import psycopg
 from psycopg.rows import dict_row
 from qdrant_client import QdrantClient, models
 
-# Добавляем путь к viio_rag
-sys.path.insert(0, "/app/src")
+# Добавляем путь к viio_rag (поддержка хоста и Docker)
+_src_path = str(Path(__file__).resolve().parent.parent / "src")
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
+if "/app/src" not in sys.path:
+    sys.path.insert(0, "/app/src")
 
 from viio_rag.chunks import document_chunks
 from viio_rag.config import Settings

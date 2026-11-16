@@ -84,3 +84,66 @@ async def test_enhanced_retrieval_runs_sparse_bm25_branch_and_diagnostics():
     assert "lexical" in branches
     assert branches["sparse_bm25"]["status"] == "ok"
     assert branches["sparse_bm25"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_enhanced_retrieval_runs_qdrant_hybrid_branch_and_diagnostics():
+    doc_hybrid = Document(page_content="Гибридный документ по запросу", metadata={"document_id": "hyb_1", "title": "Гибрид"})
+
+    vector_store = SimpleNamespace(
+        hybrid_search=lambda query, k, filter, fusion, prefetch_limit: [doc_hybrid],
+        similarity_search=lambda query, k, filter: [doc_hybrid],
+    )
+    data = SimpleNamespace(
+        lexical=AsyncMock(return_value=[doc_hybrid]),
+        public_index=None,
+        authorized_candidates=AsyncMock(return_value=[doc_hybrid]),
+    )
+
+    retrieval = EnhancedRetrieval(vector_store, data, hybrid_enabled=True, hybrid_fusion="rrf")
+    diagnostics: dict = {}
+
+    selected = await retrieval.search("тестовый запрос", {"role": "employee"}, 2, diagnostics=diagnostics)
+    assert len(selected) == 1
+
+    branches = diagnostics.get("branches", {})
+    assert "qdrant_hybrid" in branches
+    assert "lexical" in branches
+    assert "semantic" not in branches
+    assert branches["qdrant_hybrid"]["status"] == "ok"
+    assert branches["qdrant_hybrid"]["count"] == 1
+
+
+def test_qdrant_vector_store_adapter_hybrid_search_in_memory():
+    from langchain_core.embeddings import FakeEmbeddings
+    from qdrant_client import QdrantClient
+    from viio_rag.vector_store import QdrantVectorStoreAdapter
+
+    client = QdrantClient(":memory:")
+    embeddings = FakeEmbeddings(size=8)
+    adapter = QdrantVectorStoreAdapter(
+        client=client,
+        embeddings=embeddings,
+        collection_name="test_hybrid_coll",
+    )
+
+    texts = [
+        "Инструкция по приёмке товара и оформлению документов",
+        "Аварийный регламент при сбое оборудования склада",
+    ]
+    metadatas = [
+        {"title": "Приёмка", "document_id": "doc_1", "chunk_index": 0, "ingestion_ready": True, "is_active": True},
+        {"title": "Авария", "document_id": "doc_2", "chunk_index": 0, "ingestion_ready": True, "is_active": True},
+    ]
+    adapter.add_texts(texts=texts, metadatas=metadatas)
+
+    # Тест гибридного поиска с RRF
+    rrf_docs = adapter.hybrid_search("приёмка товара", k=2, fusion="rrf")
+    assert len(rrf_docs) > 0
+    assert any("приёмк" in d.page_content.lower() for d in rrf_docs)
+
+    # Тест гибридного поиска с DBSF
+    dbsf_docs = adapter.hybrid_search("аварийный регламент", k=2, fusion="dbsf")
+    assert len(dbsf_docs) > 0
+    assert any("аварийный" in d.page_content.lower() for d in dbsf_docs)
+

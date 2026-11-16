@@ -13,7 +13,7 @@ services:
     volumes:
       - consultant_traces:/traces
   diagnostics:
-    build: ./Diagnostics
+    build: ./services/diagnostics
     container_name: viio_diagnostics
     ports:
       - 127.0.0.1:3010:3010

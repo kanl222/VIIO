@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 import hashlib
 import json
 import logging
@@ -19,11 +20,11 @@ except ImportError:
 
 
 class InMemoryCache:
-    """Lightweight in-memory cache with TTL expiration for fallback when Redis is offline."""
+    """Lightweight in-memory LRU cache with TTL expiration for fallback when Redis is offline."""
 
     def __init__(self, max_items: int = 2000) -> None:
         self.max_items = max_items
-        self._store: dict[str, tuple[float, str]] = {}
+        self._store: OrderedDict[str, tuple[float, str]] = OrderedDict()
 
     def get(self, key: str) -> str | None:
         item = self._store.get(key)
@@ -33,14 +34,19 @@ class InMemoryCache:
         if expires_at and time.monotonic() > expires_at:
             self._store.pop(key, None)
             return None
+        self._store.move_to_end(key)
         return val
 
     def set(self, key: str, val: str, ttl: int | None = None) -> None:
-        if len(self._store) >= self.max_items:
-            # Drop oldest 20% of entries
-            to_remove = list(self._store.keys())[: max(1, self.max_items // 5)]
-            for k in to_remove:
+        if key in self._store:
+            self._store.move_to_end(key)
+        elif len(self._store) >= self.max_items:
+            now = time.monotonic()
+            expired = [k for k, (exp, _) in self._store.items() if exp and now > exp]
+            for k in expired:
                 self._store.pop(k, None)
+            while len(self._store) >= self.max_items:
+                self._store.popitem(last=False)
         expires_at = time.monotonic() + ttl if ttl else 0.0
         self._store[key] = (expires_at, val)
 

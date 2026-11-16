@@ -1,21 +1,44 @@
-**
-!Assistent/
-!Assistent/pyproject.toml
-!Assistent/uv.lock
-!Assistent/README.md
-!Assistent/src/
-!Assistent/src/**
-!Documents/
-!Documents/Dockerfile
-!Documents/pyproject.toml
-!Documents/uv.lock
-!Documents/README.md
-!Documents/src/
-!Documents/src/**
-!RAG/
-!RAG/Dockerfile
-!RAG/pyproject.toml
-!RAG/uv.lock
-!RAG/README.md
-!RAG/src/
-!RAG/src/**
+# Version control
+.git
+.gitignore
+
+# Environment & local secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments & bytecode
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+**/.pytest_cache
+.ruff_cache
+**/.ruff_cache
+.coverage
+htmlcov
+
+# Node / Frontend build & caches
+node_modules
+**/node_modules
+.next
+.turbo
+
+# Local temporary data, traces, and state
+tmp
+**/tmp
+.tmp
+**/data
+scratch
+coding-workspace
+
+# Tooling and IDE metadata
+.superpowers
+.impeccable
+.agents
+.idea
+.vscode
+*.log

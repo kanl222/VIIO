@@ -157,6 +157,13 @@ def turn_provenance(messages):
                            else sources_from_reference(str(message.content)))
         if message.name == 'list_documents' and isinstance(message.artifact, dict):
             sources.extend(message.artifact.get('sources', []))
+        if message.name == "search_knowledge_graph" and isinstance(message.artifact, dict):
+            for s in message.artifact.get("sources", []):
+                sources.append({
+                    "title": s.get("title", ""),
+                    "document_id": str(s.get("id", s.get("document_id", ""))),
+                    "type": "graph",
+                })
         if message.name == "coding_agent" and isinstance(message.artifact, dict):
             sources.extend(message.artifact.get("sources", []))
             active = message.artifact.get("active_specialist")

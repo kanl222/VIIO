@@ -1,6 +1,6 @@
 # Выделение RAG в отдельный FastAPI-сервис
 
-29 октября 2026 года. Создан и запущен контейнер `viio_rag`, сервис Compose `rag`. Точка входа — `Documents/src/viio_documents/rag_app.py`. Контракт и эксплуатация описаны в [RAG/README.md](../RAG/README.md).
+29 октября 2026 года. Создан и запущен контейнер `viio_rag`, сервис Compose `rag`. Точка входа — `services/rag/src/viio_rag/app.py`. Контракт и эксплуатация описаны в [RAG/README.md](../services/rag/README.md).
 
 ## Реализовано
 

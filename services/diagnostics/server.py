@@ -13,20 +13,27 @@ from urllib.parse import parse_qs, urlsplit
 
 STATIC = Path(__file__).parent / 'dist'
 
+def _get_repo_root() -> Path:
+    current = Path(__file__).resolve()
+    if current.parent.parent.name == 'services':
+        return current.parent.parent.parent
+    return current.parent.parent
+
 def _resolve_roots():
     if os.getenv('TRACE_ROOTS'):
         return [Path(p) for p in os.getenv('TRACE_ROOTS').split(',')]
     if Path('/traces').is_dir():
         return [Path(p) for p in ('/traces/main', '/traces/consultant', '/traces/documents', '/traces/document-worker', '/traces/rag')]
-    local_base = Path(__file__).resolve().parent.parent / 'tmp' / 'traces'
-    return [local_base / name for name in ('main', 'consultant', 'documents', 'document-worker', 'rag')]
+    local_base = _get_repo_root() / 'tmp' / 'traces'
+    subdirs = [local_base / name for name in ('main', 'consultant', 'documents', 'document-worker', 'rag')]
+    return [local_base] + subdirs
 
 def _resolve_reviews():
     if os.getenv('REVIEW_ROOT'):
         return Path(os.getenv('REVIEW_ROOT'))
     if Path('/data/reviews').parent.is_dir() and os.name != 'nt':
         return Path('/data/reviews')
-    return Path(__file__).resolve().parent.parent / 'tmp' / 'reviews'
+    return _get_repo_root() / 'tmp' / 'reviews'
 
 ROOTS = _resolve_roots()
 REVIEWS = _resolve_reviews()
@@ -251,8 +258,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def allowed(self, write=False):
         host = self.headers.get('Host', '')
-        if host not in {'localhost:3010', '127.0.0.1:3010', '[::1]:3010'}:
-            self.send_json(403, {'detail': 'Откройте сайт через localhost:3010'})
+        port = os.getenv('DIAGNOSTICS_PORT', '3010')
+        valid_hosts = {'localhost:3010', '127.0.0.1:3010', '[::1]:3010', f'localhost:{port}', f'127.0.0.1:{port}', f'[::1]:{port}'}
+        if host not in valid_hosts:
+            self.send_json(403, {'detail': f'Откройте сайт через localhost:{port}'})
             return False
         if write and self.headers.get('Origin') != 'http://'+host:
             self.send_json(403, {'detail': 'Запись разрешена только с локальной страницы'})
@@ -346,7 +355,7 @@ class Handler(BaseHTTPRequestHandler):
             fields = ('stage', 'expected_answer', 'evidence', 'document_id', 'notes')
             if not isinstance(data, dict) or any(not isinstance(data.get(key, ''), str) or len(data.get(key, '')) > 6000 for key in fields): raise ValueError()
             allowed_stages = (
-                '', 'correct', 'route', 'retrieval', 'selection', 'context',
+                '', 'correct', 'route', 'retrieval', 'graph', 'selection', 'context',
                 'generation', 'database', 'coding', 'ocr', 'guard', 'unknown'
             )
             if data.get('stage', '') not in allowed_stages: raise ValueError()

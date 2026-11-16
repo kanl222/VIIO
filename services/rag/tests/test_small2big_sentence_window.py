@@ -113,3 +113,36 @@ async def test_enhanced_retrieval_records_small2big_telemetry():
     assert diagnostics.get("small2big_enabled") is True
     assert diagnostics.get("small2big_ratio", 0) > 1.0
     assert diagnostics.get("selected", [])[0].get("has_window") is True
+
+
+@pytest.mark.asyncio
+async def test_expand_procedural_neighbors_preserves_relevance_order():
+    # doc_z is ranked #1 (most relevant), doc_a is ranked #2
+    doc_z = Document(
+        page_content="Самый релевантный фрагмент",
+        metadata={"document_id": "doc_z", "chunk_index": 1, "section_path": ["Раздел Z"]},
+    )
+    doc_a = Document(
+        page_content="Менее релевантный фрагмент",
+        metadata={"document_id": "doc_a", "chunk_index": 0, "section_path": ["Раздел A"]},
+    )
+    neighbor_z = Document(
+        page_content="Соседний фрагмент раздела Z",
+        metadata={"document_id": "doc_z", "chunk_index": 2, "section_path": ["Раздел Z"]},
+    )
+
+    vector = SimpleNamespace(
+        get_chunks=lambda pairs: [neighbor_z] if ("doc_z", 2) in pairs else [],
+    )
+    data = SimpleNamespace(
+        authorized_candidates=AsyncMock(return_value=[neighbor_z]),
+    )
+
+    retrieval = EnhancedRetrieval(vector, data)
+    expanded = await retrieval._expand_procedural_neighbors([doc_z, doc_a], {"role": "admin"})
+
+    # doc_z and its neighbor must precede doc_a (relevance preserved, not alphabetical by doc_id)
+    doc_ids = [d.metadata["document_id"] for d in expanded]
+    assert doc_ids[0] == "doc_z"
+    assert doc_ids[1] == "doc_z"
+    assert doc_ids[2] == "doc_a"

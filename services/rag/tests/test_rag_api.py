@@ -138,3 +138,10 @@ async def test_rag_backend_failure_returns_safe_service_unavailable():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url='http://rag') as client:
         result = await client.post('/api/v1/consultant-materials/search', json={'message': 'Guide'}, headers={'X-Publication-Key': PUBLIC_KEY})
         assert result.status_code == 503 and 'PRIVATE_BACKEND_DETAILS' not in result.text
+
+
+def test_create_app_preserves_custom_vector_store():
+    custom_vector_store = SimpleNamespace(similarity_search=lambda **kwargs: [])
+    settings = Settings(_env_file=None, service_role='rag', secure_runtime=False)
+    app = create_app(settings, vector_store=custom_vector_store)
+    assert app.state.vector_store is custom_vector_store

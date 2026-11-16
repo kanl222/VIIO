@@ -33,23 +33,24 @@ def create_app(settings=None, *, data=None, vector_store=None):
         raise ValueError('RAG must use SERVICE_ROLE=rag')
     s.validate_runtime()
     cache = get_cache(s)
-    reranker = get_reranker(s)
+    reranker = get_reranker(s, cache=cache)
     client = None
     catalog = None
     if data is None:
         client = QdrantClient(url=s.qdrant_url, api_key=s.qdrant_api_key)
         embeddings = create_embeddings(s)
-        vector_store = QdrantVectorStoreAdapter(client, embeddings, s.qdrant_collection_name)
+        if vector_store is None:
+            vector_store = QdrantVectorStoreAdapter(client, embeddings, s.qdrant_collection_name)
         catalog = ReadCatalog()
         data = KnowledgeData(catalog, PublicationIndex(QdrantVectorStoreAdapter(
             client, embeddings, s.qdrant_public_collection_name)))
 
     @asynccontextmanager
     async def lifespan(app):
-        if catalog is None:
-            yield
-            return
         try:
+            if catalog is None:
+                yield
+                return
             async with AsyncConnectionPool(make_conninfo(host=s.postgres_host, port=s.postgres_port,
                 dbname=s.postgres_db, user=s.postgres_user, password=s.postgres_password),
                 open=False, min_size=1, max_size=8,
@@ -61,7 +62,10 @@ def create_app(settings=None, *, data=None, vector_store=None):
                 finally:
                     catalog.set_pool(None)
         finally:
-            client.close()
+            if client is not None:
+                client.close()
+            if cache is not None:
+                await cache.close()
 
     app = FastAPI(title='VIIO RAG', lifespan=lifespan,
                   docs_url=None if s.secure_runtime else '/docs', redoc_url=None if s.secure_runtime else '/redoc')
@@ -129,7 +133,15 @@ def create_app(settings=None, *, data=None, vector_store=None):
                         diagnostic.update(details)
                     record('retrieval', query=question.query, scope='internal', status='ok', context=text, **details)
         else:
-            docs = await EnhancedRetrieval(vector_store, data, reranker=reranker, cache=cache).search(
+            docs = await EnhancedRetrieval(
+                vector_store,
+                data,
+                reranker=reranker,
+                cache=cache,
+                hybrid_enabled=getattr(s, 'qdrant_hybrid_enabled', True),
+                hybrid_fusion=getattr(s, 'qdrant_hybrid_fusion', 'rrf'),
+                prefetch_limit=getattr(s, 'qdrant_prefetch_limit', 40),
+            ).search(
                 question.query, context, question.k, diagnostics=diagnostic, parent_trace_id=parent_trace_id
             )
             text = format_documents(docs)

@@ -69,9 +69,33 @@ class Settings(BaseSettings):
     pgsql_max_chars: int = Field(default=12000, ge=500, le=50000)
     pgsql_timeout_seconds: int = Field(default=40, ge=5, le=90)
     # Настройки каталога документов и файлового хранилища
+    documents_storage_backend: Literal["local", "s3"] = Field(
+        default="local",
+        description="Бэкенд хранилища оригиналов: 'local' (файловая система/том) или 's3' (S3/MinIO).",
+    )
     documents_storage_path: str = Field(
         default="data/documents",
         description="Путь к директории хранилища оригиналов документов (Docker-том).",
+    )
+    s3_endpoint_url: str | None = Field(
+        default=None,
+        description="URL эндпоинта S3/MinIO (например, 'http://minio:9000').",
+    )
+    s3_bucket: str = Field(
+        default="documents",
+        description="Имя S3 бакета для хранения оригиналов документов.",
+    )
+    s3_access_key: str | None = Field(
+        default=None,
+        description="Access Key для авторизации в S3/MinIO.",
+    )
+    s3_secret_key: str | None = Field(
+        default=None,
+        description="Secret Key для авторизации в S3/MinIO.",
+    )
+    s3_region: str = Field(
+        default="us-east-1",
+        description="Регион S3 хранилища.",
     )
     documents_catalog_enabled: bool = Field(
         default=True,
@@ -164,6 +188,9 @@ class Settings(BaseSettings):
         description="Название коллекции векторов в Qdrant.",
     )
     qdrant_public_collection_name: str = Field(default='knowledge_public', min_length=1)
+    qdrant_hybrid_enabled: bool = True
+    qdrant_hybrid_fusion: Literal['rrf', 'dbsf'] = 'rrf'
+    qdrant_prefetch_limit: int = Field(default=40, ge=10, le=200)
 
     @model_validator(mode='after')
     def validate_public_collection(self):

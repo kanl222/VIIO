@@ -15,7 +15,7 @@ from viio_documents.router import create_api_router
 from viio_documents.services.document_catalog import DocumentCatalogService
 from viio_documents.services.document_ingestion import DocumentIngestion
 from viio_documents.services.document_service import DocumentService
-from viio_documents.services.file_store import LocalFileStore
+from viio_documents.services.file_store import LocalFileStore, create_file_store
 from viio_documents.services.project_memory import COLLECTION as PROJECT_MEMORY_COLLECTION, register_project_memory
 from viio_rag.knowledge_data import KnowledgeData
 from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
@@ -73,7 +73,7 @@ def create_app(settings=None, agent_service=None, document_service=None, checkpo
     catalog=DocumentCatalogService(None)
     data=KnowledgeData(catalog,PublicationIndex(QdrantVectorStoreAdapter(client,embeddings,
         s.qdrant_public_collection_name)) if client else None)
-    store=LocalFileStore(s.documents_storage_path)
+    store=create_file_store(s)
     slots=asyncio.Semaphore(s.bulk_max_workers)
     ingestion=DocumentIngestion(document_service,catalog,store,s,knowledge_data=data)
     queue=PersistentBulkQueue(ingestion,catalog,store,max_workers=s.bulk_max_workers,processing_slots=slots)

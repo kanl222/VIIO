@@ -180,4 +180,6 @@ def get_reranker(settings: Any = None, cache: Any = None) -> CrossEncoderReranke
         enabled = getattr(settings, "reranker_enabled", True)
         top_k = getattr(settings, "reranker_top_k", 25)
         _global_reranker = CrossEncoderReranker(model_name=model, enabled=enabled, top_k=top_k, cache=cache)
+    elif cache is not None:
+        _global_reranker.cache = cache
     return _global_reranker

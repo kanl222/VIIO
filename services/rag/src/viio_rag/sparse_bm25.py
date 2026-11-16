@@ -87,6 +87,7 @@ def get_sparse_encoder(settings: Any = None) -> SparseBM25Encoder:
     """Return the global SparseBM25Encoder instance."""
     global _global_sparse_encoder
     if _global_sparse_encoder is None:
-        enabled = getattr(settings, "hybrid_search_enabled", True)
-        _global_sparse_encoder = SparseBM25Encoder(enabled=enabled)
+        enabled = getattr(settings, "sparse_bm25_enabled", getattr(settings, "hybrid_search_enabled", True))
+        model_name = getattr(settings, "sparse_bm25_model", "Qdrant/bm25")
+        _global_sparse_encoder = SparseBM25Encoder(model_name=model_name, enabled=enabled)
     return _global_sparse_encoder

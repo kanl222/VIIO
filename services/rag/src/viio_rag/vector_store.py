@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any
+from typing import Any, Literal
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_qdrant import QdrantVectorStore
@@ -234,6 +234,104 @@ class QdrantVectorStoreAdapter(IVectorStore):
                 return []
             logger.debug("Sparse search unavailable: %s", exc)
             return []
+
+    def hybrid_search(
+        self,
+        query: str,
+        k: int = 4,
+        filter: Any | None = None,
+        fusion: Literal["rrf", "dbsf"] = "rrf",
+        prefetch_limit: int = 40,
+    ) -> list[Document]:
+        """Серверный гибридный поиск Qdrant через Query API (Dense + Sparse BM25 + RRF/DBSF).
+
+        Args:
+            query: Текстовый поисковый запрос.
+            k: Количество возвращаемых результатов.
+            filter: Опциональный фильтр метаданных (qdrant models.Filter).
+            fusion: Метод слияния на стороне Qdrant ('rrf' или 'dbsf').
+            prefetch_limit: Глубина выборки кандидатов для каждой параллельной ветки prefetch.
+
+        Returns:
+            Список найденных документов Document с метаданными.
+        """
+        if k <= 0 or not query.strip():
+            return []
+
+        ready = models.Filter(
+            must_not=[
+                models.FieldCondition(key=key, match=models.MatchValue(value=False))
+                for key in ('metadata.ingestion_ready', 'metadata.is_active')
+            ]
+        )
+        combined_filter = models.Filter(must=[filter, ready]) if filter is not None else ready
+
+        try:
+            encoder = get_sparse_encoder()
+            sparse_vec = encoder.embed_query(query) if encoder.is_available else None
+
+            # Если разреженный энкодер недоступен или не вернул токенов — откат на similarity_search
+            if sparse_vec is None or not sparse_vec.indices:
+                return self.similarity_search(query=query, k=k, filter=filter)
+
+            dense_vec = self._embeddings.embed_query(query)
+            prefetch_candidates = max(prefetch_limit, k * 2, 10)
+
+            dense_prefetch = models.Prefetch(
+                query=dense_vec,
+                using="",
+                limit=prefetch_candidates,
+                filter=combined_filter,
+            )
+            sparse_prefetch = models.Prefetch(
+                query=sparse_vec,
+                using="bm25",
+                limit=prefetch_candidates,
+                filter=combined_filter,
+            )
+            fusion_type = models.Fusion.DBSF if str(fusion).lower() == "dbsf" else models.Fusion.RRF
+            fusion_query = models.FusionQuery(fusion=fusion_type)
+
+            response = self._client.query_points(
+                collection_name=self._collection_name,
+                prefetch=[dense_prefetch, sparse_prefetch],
+                query=fusion_query,
+                limit=k,
+                with_payload=True,
+            )
+            points = response.points if hasattr(response, 'points') else []
+            results = [
+                Document(
+                    page_content=p.payload.get("page_content", ""),
+                    metadata=p.payload.get("metadata", {}),
+                )
+                for p in points
+                if p.payload and p.payload.get("page_content")
+            ]
+
+            # Точные названия систем часто теряются эмбеддингами в коротких вопросах с аббревиатурами
+            titles = self._find_acronym_titles(query, k, combined_filter)
+            if not titles:
+                return results
+
+            combined = []
+            seen = set()
+            for doc in titles[:max(1, k // 2)] + results + titles:
+                identity = (doc.metadata.get("document_id"), doc.metadata.get("chunk_index"), doc.page_content)
+                if identity not in seen:
+                    seen.add(identity)
+                    combined.append(doc)
+                if len(combined) == k:
+                    break
+            return combined
+
+        except Exception as exc:
+            if isinstance(exc, UnexpectedResponse) and exc.status_code == 404:
+                return []
+            if isinstance(exc, ValueError) and str(exc) == f"Collection {self._collection_name} not found":
+                return []
+            logger.warning("Ошибка Query API в hybrid_search (%s), откат на similarity_search", exc)
+            return self.similarity_search(query=query, k=k, filter=filter)
 
     def _sparse_payload_search(self, query: str, k: int, combined_filter: Any | None) -> list[Document]:
         words = [w for w in re.findall(r'\b\w{3,}\b', query) if not w.isdigit()]
