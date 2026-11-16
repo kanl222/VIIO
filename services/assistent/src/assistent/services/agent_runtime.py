@@ -178,11 +178,7 @@ class VIIOPolicy(AgentMiddleware):
             content_question = bool(re.search(r'\b(как|почему|зачем|где|что такое|расшифровка|аббревиатур|термин)\b', question, re.I))
             catalog_only = calls and all(call.get('name') == 'list_documents' for call in calls)
             if not searched and (not calls or catalog_only and content_question):
-                preferred_tool = None
-                if "search_knowledge_graph" in self.names and re.search(r'\b(что такое|расшифровка|аббревиатур|термин|кто такой|где находится|в какой системе)\b', question, re.I):
-                    preferred_tool = "search_knowledge_graph"
-                elif SEARCH_TOOL in self.names:
-                    preferred_tool = SEARCH_TOOL
+                preferred_tool = SEARCH_TOOL if SEARCH_TOOL in self.names else None
                 if preferred_tool and needs_automatic_search(question):
                     return ModelResponse(result=[forced_tool_call(
                         preferred_tool, {'query': question}, AUTO_CALL_PREFIX)])

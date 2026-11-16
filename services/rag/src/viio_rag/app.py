@@ -1,7 +1,9 @@
 """Independent read-only retrieval process; no originals, queue or migrations."""
+import asyncio
 from contextlib import asynccontextmanager
 import logging
 
+import anyio.to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from psycopg.conninfo import make_conninfo
@@ -25,6 +27,7 @@ from viio_rag.search_tool import format_documents
 from viio_rag.schemas import DocumentListRequest
 from viio_rag.document_directory import list_documents, search_selected_documents
 from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_rag.graph_retrieval import MemgraphRetriever
 
 
 def create_app(settings=None, *, data=None, vector_store=None):
@@ -34,6 +37,12 @@ def create_app(settings=None, *, data=None, vector_store=None):
     s.validate_runtime()
     cache = get_cache(s)
     reranker = get_reranker(s, cache=cache)
+    graph_retriever = MemgraphRetriever(
+        uri=s.memgraph_uri,
+        user=getattr(s, 'memgraph_user', ''),
+        password=getattr(s, 'memgraph_password', ''),
+        enabled=getattr(s, 'memgraph_enabled', True),
+    )
     client = None
     catalog = None
     if data is None:
@@ -62,6 +71,8 @@ def create_app(settings=None, *, data=None, vector_store=None):
                 finally:
                     catalog.set_pool(None)
         finally:
+            if graph_retriever is not None:
+                graph_retriever.close()
             if client is not None:
                 client.close()
             if cache is not None:
@@ -96,6 +107,7 @@ def create_app(settings=None, *, data=None, vector_store=None):
             'service': 'rag',
             'redis': await cache.ping(),
             'reranker': reranker.model_name if reranker.enabled else None,
+            'graph_rag': s.memgraph_uri if getattr(s, 'memgraph_enabled', True) else 'disabled',
         }
 
     @app.post('/api/v1/knowledge/yandex/chat', dependencies=[Depends(internal)])
@@ -133,7 +145,7 @@ def create_app(settings=None, *, data=None, vector_store=None):
                         diagnostic.update(details)
                     record('retrieval', query=question.query, scope='internal', status='ok', context=text, **details)
         else:
-            docs = await EnhancedRetrieval(
+            vector_coro = EnhancedRetrieval(
                 vector_store,
                 data,
                 reranker=reranker,
@@ -144,7 +156,22 @@ def create_app(settings=None, *, data=None, vector_store=None):
             ).search(
                 question.query, context, question.k, diagnostics=diagnostic, parent_trace_id=parent_trace_id
             )
-            text = format_documents(docs)
+            graph_coro = anyio.to_thread.run_sync(graph_retriever.search_graph, question.query, 5)
+
+            graph_data, docs = await asyncio.gather(graph_coro, vector_coro)
+            graph_context = MemgraphRetriever.format_graph_context(graph_data)
+            vector_text = format_documents(docs)
+
+            if graph_context and vector_text:
+                text = f"{graph_context}\n\n### Регламентирующие документы:\n{vector_text}"
+            elif graph_context:
+                text = graph_context
+            else:
+                text = vector_text
+
+            if diagnostic is not None:
+                graph_count = sum(len(v) for v in graph_data.values() if isinstance(v, list)) if graph_data else 0
+                diagnostic['graph_facts_count'] = graph_count
         return {'context': text, **({'diagnostics': diagnostic} if diagnostic is not None else {})}
 
     @app.post('/api/v1/knowledge/documents', dependencies=[Depends(internal)])

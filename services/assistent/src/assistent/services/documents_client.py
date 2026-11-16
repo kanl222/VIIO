@@ -23,9 +23,12 @@ def require_internal(request, settings):
 def create_remote_search_tool(settings, k=5, *, tool_name='search_knowledge_base'):
     @tool(tool_name, response_format='content_and_artifact')
     async def search_knowledge_base(query: str, config: RunnableConfig, document_ids: list[str] | None = None) -> tuple[str, dict]:
-        """Поиск ответа по содержимому документов. Для перечня и поиска названий используйте list_documents.
+        """Единый гибридный поиск по базе знаний (GraphRAG):
+        - Онтология аптечного склада: расшифровка аббревиатур (ИСЛО, МДЛП, ЕГИСЗ), бизнес-процессы, шаги алгоритмов, температурные режимы хранения, информационные системы и нормативные акты.
+        - Содержимое регламентирующих документов, инструкций и руководств.
 
-        document_ids: Массив точных doc_id из поиска или каталога, например ["doc-123"], до 8. Поиск ограничен указанными документами.
+        Используйте этот инструмент по умолчанию для любых вопросов о терминах, регламентах, алгоритмах и инструкциях.
+        document_ids: Необязательный массив точных doc_id для фильтрации, например ["doc-123"].
         """
         context = (config or {}).get('configurable', {}).get('user_context') or {}
         # Личные заметки и данные диалогов никогда не попадают в поиск документов.

@@ -201,6 +201,8 @@ services:
     - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
     - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:?Configure CONSULTANT_SOURCE_KEY in .env}
+    - MEMGRAPH_URI=${MEMGRAPH_URI:-bolt://memgraph:7687}
+    - MEMGRAPH_ENABLED=${MEMGRAPH_ENABLED:-true}
     - REDIS_URL=${RAG_REDIS_URL:-redis://redis:6379/0}
     - RERANKER_ENABLED=${RERANKER_ENABLED:-false}
     - RERANKER_MODEL=${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
@@ -211,6 +213,8 @@ services:
     extra_hosts:
     - host.docker.internal:host-gateway
     depends_on:
+      memgraph:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       qdrant:
