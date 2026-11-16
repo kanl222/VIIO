@@ -109,9 +109,9 @@ def build_supervisor_graph(
     all_tool_names = set(tools_by_name.keys())
 
     # Build specialized sub-runtimes with isolated tools & prompts
-    # 1. Knowledge Specialist (search_knowledge_base, search_knowledge_graph, list_documents, search_document_content, manage_plan, save_knowledge, skills)
+    # 1. Knowledge Specialist (Unified GraphRAG: search_knowledge_base, list_documents, search_document_content, manage_plan, save_knowledge, skills)
     knowledge_tools = [t for t in active_tools if t.name in (
-        "search_knowledge_base", "search_knowledge_graph", "list_documents", "search_document_content", "manage_plan", "save_knowledge",
+        "search_knowledge_base", "list_documents", "search_document_content", "manage_plan", "save_knowledge",
         "list_agent_skills", "activate_agent_skill"
     )]
     if corrective_rag:

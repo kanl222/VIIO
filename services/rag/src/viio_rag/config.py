@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     lmstudio_model: str = 'qwen/qwen3-4b-2507'
     ollama_model: str = 'llama3.1'
     memgraph_uri: str = 'bolt://memgraph:7687'
+    memgraph_user: str = ''
+    memgraph_password: str = Field(default='', repr=False)
+    memgraph_enabled: bool = True
     qdrant_url: str = 'http://localhost:6333'
     qdrant_api_key: str | None = Field(default=None, repr=False)
     qdrant_collection_name: str = 'knowledge_base'
