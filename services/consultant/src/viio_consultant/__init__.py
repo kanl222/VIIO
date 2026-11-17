@@ -1,10 +1,12 @@
 """Standalone public API, intentionally independent of the assistent package."""
+import json
 import logging
 from viio_consultant.diagnostics import capture, record
 from contextlib import asynccontextmanager
 from hmac import compare_digest
 import httpx
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Literal
 from viio_consultant.config import ConsultantSettings
@@ -73,5 +75,41 @@ def create_app(settings=None, *, agent=None):
             except Exception:
                 logger.exception('Consultant request failed')
                 raise HTTPException(503, 'Консультант временно недоступен') from None
+
+    @app.post('/api/v1/consultant/chat/stream')
+    async def chat_stream(request: Question, x_consultant_key: str | None = Header(default=None, alias='X-Consultant-Key')):
+        if not settings.enabled:
+            raise HTTPException(503, 'Внешний консультант не настроен')
+        if not x_consultant_key or not compare_digest(x_consultant_key.encode(), settings.api_key.encode()):
+            raise HTTPException(401, 'Необходим ключ внешнего API')
+        if not request.message.strip():
+            raise HTTPException(400, 'Укажите вопрос')
+        if app.state.agent is None:
+            raise HTTPException(503, 'Внешний консультант не настроен')
+
+        async def sse_events():
+            with capture('consultant', request.message):
+                record('route', mode='published_documents', tools=['search_published_documents'])
+                try:
+                    final_res = None
+                    async for event in app.state.agent.astream(request.message.strip()):
+                        if event.get('type') == 'done':
+                            final_res = event
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if final_res:
+                        record('answer', reply=final_res.get('reply'), sources=final_res.get('sources', []))
+                except TimeoutError:
+                    err_ev = {'type': 'error', 'detail': 'Консультант занят. Повторите запрос позже.'}
+                    yield f"data: {json.dumps(err_ev, ensure_ascii=False)}\n\n"
+                except Exception:
+                    logger.exception('Consultant streaming request failed')
+                    err_ev = {'type': 'error', 'detail': 'Консультант временно недоступен'}
+                    yield f"data: {json.dumps(err_ev, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            sse_events(),
+            media_type='text/event-stream',
+            headers={'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no'},
+        )
 
     return app

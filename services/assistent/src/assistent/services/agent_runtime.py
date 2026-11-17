@@ -115,6 +115,20 @@ class VIIOPolicy(AgentMiddleware):
                        f"FROM information_schema.columns WHERE table_name = '{tbl_target}' "
                        f"ORDER BY table_schema, ordinal_position",
             }, 'database-columns-')])
+        if (not calls and 'github_repository' in self.names
+                and (match_tree := re.search(r'(?:структур\w*|дерев\w*|файлы|файлов)\s+(?:репозитор\w*\s+)?([\w.-]+/[\w.-]+)', question, re.I))
+                and has_role_access(ctx(request.runtime).get('user_context', {}), {'programmer', 'admin'})):
+            repo_target = match_tree.group(1)
+            return ModelResponse(result=[forced_tool_call('github_repository', {
+                'operation': 'structure',
+                'repository': repo_target,
+            }, 'github-tree-')])
+        if (not calls and 'github_repository' in self.names
+                and re.search(r'\b(?:какие|список|покажи|доступные)?\s*(?:репозитор\w*|репоизтор\w*|github|гитхаб)\b', question, re.I)
+                and has_role_access(ctx(request.runtime).get('user_context', {}), {'programmer', 'admin'})):
+            return ModelResponse(result=[forced_tool_call('github_repository', {
+                'operation': 'repositories',
+            }, 'github-repos-')])
         delegated = next((msg for msg in reversed(turn)
                           if isinstance(msg, ToolMessage) and msg.name == CODER_TOOL), None)
         if self.model_first and delegated is not None:
@@ -174,6 +188,12 @@ class VIIOPolicy(AgentMiddleware):
             if self.routing and mode == 'knowledge' and CODER_TOOL in self.names and is_coding_request(question):
                 return ModelResponse(result=[forced_tool_call(
                     CODER_TOOL, {'task': question}, FALLBACK_CODE_PREFIX)])
+            if ('github_repository' in self.names
+                    and not any(c.get('name') == 'github_repository' for c in calls)
+                    and re.search(r'\b(?:репозитор\w*|репоизтор\w*|github|гитхаб)\b', question, re.I)
+                    and has_role_access(ctx(request.runtime).get('user_context', {}), {'programmer', 'admin'})):
+                return ModelResponse(result=[forced_tool_call(
+                    'github_repository', {'operation': 'repositories'}, 'github-repos-')])
             searched = any(call.get('name') in {SEARCH_TOOL, 'search_knowledge_graph', 'search_document_content'} for call in calls)
             content_question = bool(re.search(r'\b(как|почему|зачем|где|что такое|расшифровка|аббревиатур|термин)\b', question, re.I))
             catalog_only = calls and all(call.get('name') == 'list_documents' for call in calls)

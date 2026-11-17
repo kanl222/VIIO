@@ -202,7 +202,7 @@ class Settings(BaseSettings):
     rag_chunk_unit: Literal["characters", "words"] = "characters"
     rag_chunk_size: int = Field(default=500, gt=0)
     rag_chunk_overlap: int = Field(default=50, ge=0)
-    rag_context_max_chars: int = Field(default=12000, ge=1000, le=48000)
+    rag_context_max_chars: int = Field(default=4500, ge=1000, le=48000)
 
     @model_validator(mode="after")
     def validate_chunk_overlap(self) -> "Settings":

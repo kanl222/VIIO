@@ -162,10 +162,16 @@ def create_app(settings=None, *, data=None, vector_store=None):
             graph_context = MemgraphRetriever.format_graph_context(graph_data)
             vector_text = format_documents(docs)
 
-            if graph_context and vector_text:
-                text = f"{graph_context}\n\n### Регламентирующие документы:\n{vector_text}"
-            elif graph_context:
-                text = graph_context
+            if graph_context:
+                graph_context_block = (
+                    '<context source="Онтология аптечного склада (Memgraph)" doc_id="doc-ontology">\n'
+                    f'{graph_context}\n'
+                    '</context>'
+                )
+                if vector_text and vector_text != "Ничего не найдено в базе знаний в рамках ваших прав доступа.":
+                    text = f"{graph_context_block}\n\n### Регламентирующие документы:\n{vector_text}"
+                else:
+                    text = graph_context_block
             else:
                 text = vector_text
 

@@ -180,5 +180,12 @@ def turn_provenance(messages):
             if tree_match and not file_match:
                 repo = tree_match.group(1)
                 sources.append({"title": repo, "document_id": f"github:{repo}"})
+            if "repositories" in content and not file_match and not tree_match:
+                try:
+                    data = json.loads(content)
+                    if isinstance(data, dict) and "repositories" in data:
+                        sources.append({"title": "GitHub", "document_id": "github:repositories"})
+                except Exception:
+                    pass
     unique = {(source["title"], source["document_id"]): source for source in sources}
     return list(unique.values()), active
