@@ -26,9 +26,12 @@ def test_classify_route_logic():
     # If not authorized, falls back to domain/knowledge
     assert classify_route("Какие таблицы в postgres?", tools, empl_ctx) == "knowledge"
 
-    # Coding -> coding
+    # Coding & GitHub -> coding
     assert classify_route("/code Напиши функцию", tools, prog_ctx) == "coding"
     assert classify_route("Напиши скрипт на python", tools, prog_ctx) == "coding"
+    assert classify_route("Какие репозитории доступны?", tools, prog_ctx) == "coding"
+    assert classify_route("GitHub", tools, prog_ctx) == "coding"
+    assert classify_route("какие репоизтории доступны", tools, prog_ctx) == "coding"
 
     # Knowledge
     assert classify_route("Как оформить отпуск в компании?", tools, empl_ctx) == "knowledge"

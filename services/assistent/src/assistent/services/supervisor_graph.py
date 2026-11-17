@@ -58,6 +58,10 @@ from assistent.tools.postgres_tool import DATABASE_ROLES
 logger = logging.getLogger(__name__)
 
 
+def is_github_request(question: str) -> bool:
+    return bool(re.search(r'\b(?:github|гитхаб|gitlab|репозитор\w*|репоизтор\w*|коммит\w*|пулл.?реквест\w*)\b', question, re.I))
+
+
 def classify_route(question: str, tools_available: set[str], user_context: dict[str, Any]) -> str:
     """Classify user request to choose the appropriate specialist node."""
     # 1. Direct calculations
@@ -75,8 +79,8 @@ def classify_route(question: str, tools_available: set[str], user_context: dict[
         if "postgresql_readonly" in tools_available and has_role_access(user_context, DATABASE_ROLES):
             return "database"
 
-    # 3. Coding requests (/code or coding intent)
-    if (parts and parts[0].lower() == "/code") or is_coding_request(clean_q):
+    # 3. Coding requests (/code or coding/github intent)
+    if (parts and parts[0].lower() == "/code") or is_coding_request(clean_q) or is_github_request(clean_q):
         if any(t in tools_available for t in ("github_repository", "coding_agent")):
             return "coding"
 

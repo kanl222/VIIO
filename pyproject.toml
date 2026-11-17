@@ -15,6 +15,7 @@ members = [
     "services/consultant",
     "services/documents",
     "services/rag",
+    "data/gosapteka56/2026-10-27/arhciv_full",
 ]
 
 [dependency-groups]

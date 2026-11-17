@@ -29,6 +29,24 @@ def test_standalone_routes_never_expose_internal_tools_or_document_management():
     agent.chat.assert_awaited_once_with('Help')
 
 
+def test_consultant_chat_stream_endpoint():
+    agent = AsyncMock()
+    async def fake_stream(msg):
+        yield {'type': 'status', 'message': 'Поиск...'}
+        yield {'type': 'delta', 'text': 'Тестовый ответ'}
+        yield {'type': 'done', 'reply': 'Тестовый ответ', 'sources': []}
+    agent.astream = fake_stream
+
+    with TestClient(create_app(settings(), agent=agent)) as client:
+        assert client.post('/api/v1/consultant/chat/stream', json={'message': 'Help'}).status_code == 401
+        res = client.post('/api/v1/consultant/chat/stream', json={'message': 'Help'}, headers={'X-Consultant-Key': 'a' * 40})
+        assert res.status_code == 200
+        assert 'text/event-stream' in res.headers['content-type']
+        assert 'data: {"type": "status"' in res.text
+        assert 'data: {"type": "delta"' in res.text
+        assert 'data: {"type": "done"' in res.text
+
+
 def test_disabled_service_starts_without_secrets_or_model():
     with TestClient(create_app(ConsultantSettings(enabled=False))) as client:
         assert client.get('/health').json()['enabled'] is False

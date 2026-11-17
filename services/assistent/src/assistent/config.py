@@ -133,7 +133,7 @@ class Settings(BaseSettings):
 
 
     # Настройки PostgreSQL для хранения состояния агента (LangGraph Checkpointer)
-    rag_context_max_chars: int = Field(default=12000, ge=1000, le=48000)
+    rag_context_max_chars: int = Field(default=4500, ge=1000, le=48000)
 
 
     postgres_host: str = Field(

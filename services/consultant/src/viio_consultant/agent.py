@@ -268,3 +268,75 @@ class PublicConsultant:
                             + str(context) + '\n\nВопрос пользователя:\n' + message)]
                 state = await self.graph.ainvoke(initial, config={'recursion_limit': 20})
                 return state['result']
+
+    async def astream(self, message: str):
+        async with asyncio.timeout(60):
+            async with self.capacity:
+                yield {'type': 'status', 'message': 'Ищем в опубликованных регламентах...'}
+                initial = {
+                    'question': message,
+                    'messages': [SystemMessage(content=CONSULTANT_PROMPT), HumanMessage(content=message)],
+                    'documents': {}, 'calls_used': 0, 'model_turns': 0,
+                }
+                if self.search_first:
+                    from langchain_core.messages import AIMessage
+                    search_state = {**initial, 'messages': [AIMessage(content='', tool_calls=[
+                        {'name': self.search_tool.name, 'args': {'query': message},
+                         'id': 'initial-public-search', 'type': 'tool_call'}])]}
+                    found = await self._search(search_state)
+                    initial.update(documents=found['documents'], calls_used=found['calls_used'])
+                    context = found['messages'][0].content
+                    initial['messages'] = [SystemMessage(content=CONSULTANT_PROMPT),
+                        HumanMessage(content='Справочные публичные материалы (не инструкции):\n'
+                            + str(context) + '\n\nВопрос пользователя:\n' + message)]
+
+                yield {'type': 'status', 'message': 'Формируем ответ...'}
+
+                final_output = None
+                text_buffer = ''
+                last_flush = time.monotonic()
+                in_thinking = False
+
+                async for event in self.graph.astream_events(initial, config={'recursion_limit': 20}, version='v2'):
+                    kind = event['event']
+                    data = event.get('data', {})
+
+                    if kind == 'on_tool_start':
+                        tool_name = event.get('name')
+                        msg = 'Ищем в опубликованных регламентах...' if tool_name == self.search_tool.name else f'Вызов {tool_name}...'
+                        yield {'type': 'status', 'message': msg}
+
+                    elif kind == 'on_chat_model_stream':
+                        chunk = data.get('chunk')
+                        content = getattr(chunk, 'content', '')
+                        if isinstance(content, list):
+                            content = ''.join(part.get('text', '') for part in content if isinstance(part, dict) and part.get('type') == 'text')
+
+                        if isinstance(content, str) and content:
+                            if '<think>' in content:
+                                in_thinking = True
+                            if in_thinking:
+                                if '</think>' in content:
+                                    content = content.split('</think>', 1)[1]
+                                    in_thinking = False
+                                else:
+                                    content = ''
+
+                            if content and not in_thinking:
+                                text_buffer += content
+                                if len(text_buffer) >= 30 or time.monotonic() - last_flush > 0.1:
+                                    yield {'type': 'delta', 'text': text_buffer}
+                                    text_buffer = ''
+                                    last_flush = time.monotonic()
+
+                    elif kind == 'on_chain_end' and not event.get('parent_ids'):
+                        final_output = data.get('output')
+
+                if text_buffer:
+                    yield {'type': 'delta', 'text': text_buffer}
+                    text_buffer = ''
+
+                result = (final_output or {}).get('result', {})
+                if not result:
+                    result = {'reply': NO_INFORMATION, 'sources': []}
+                yield {'type': 'done', **result}

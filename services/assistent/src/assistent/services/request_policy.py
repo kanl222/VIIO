@@ -25,7 +25,7 @@ FOLLOWUP = re.compile(
 
 # Используется совместно резервным супервизором и явным маршрутизатором кодера.
 CODING_INTENT = re.compile(
-    r"\b(?:sql|soap|rest|graphql|wsdl|git|python|javascript|typescript|csharp|java|"
+    r"\b(?:sql|soap|rest|graphql|wsdl|git|github|гитхаб|gitlab|репозитор\w*|репоизтор\w*|коммит\w*|пулл.?реквест\w*|python|javascript|typescript|csharp|java|"
     r"pytest|npm|docker|langgraph|fastapi|react|api|psycopg\w*)\b|"
     r"```|Traceback \(most recent call last\)|"
     r"\b[\w/-]+\.(?:py|tsx?|jsx?|cs|sql|go|rs|java|wsdl)\b|"

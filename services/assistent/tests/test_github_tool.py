@@ -294,3 +294,38 @@ async def test_search_query_allows_double_colon_and_quotes(setup_tool):
     # Запрос с запрещённым квалификатором repo:
     res = await tool.ainvoke({"operation": "search", "query": "repo:evil/repo test"}, config=AUTH)
     assert "обычные слова" in res
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_auto_invokes_repositories_on_inquiry():
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import MemorySaver
+    from assistent.services.graph_builder import build_agent_graph
+    from assistent.services.agent_service import AgentService
+    from assistent.prompts import UNIFIED_SYSTEM_PROMPT
+    from test_required_retrieval import NoToolCallsModel
+
+    settings = Settings(
+        _env_file=None,
+        github_mcp_enabled=True,
+        github_repository="*",
+        github_mcp_token="test-only",
+    )
+    backend = AsyncMock()
+    backend.list_repositories.return_value = json.dumps({"repositories": [{"repository": "kanl222/VIIO", "private": False, "default_branch": "master"}]})
+    tool = create_github_tool(settings, backend)
+
+    llm = NoToolCallsModel(messages=iter([AIMessage(content="Доступен репозиторий kanl222/VIIO на GitHub.")]))
+    graph = build_agent_graph(
+        llm=llm,
+        tools=[tool],
+        checkpointer=MemorySaver(),
+        system_prompt=UNIFIED_SYSTEM_PROMPT,
+        model_first_tools=True,
+        task_routing=False,
+    )
+    service = AgentService(graph=graph)
+    reply, _ = await service.chat("/code какие репоизтории доступны", "test-thread", {"user_id": "u1", "role": "admin"})
+    assert "kanl222/VIIO" in reply
+    backend.list_repositories.assert_awaited()
+

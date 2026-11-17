@@ -13,10 +13,10 @@ async def test_graph_search_tool_direct():
     settings = SimpleNamespace(memgraph_uri="bolt://127.0.0.1:7687", memgraph_user="", memgraph_password="")
     tool = create_graph_search_tool(settings)
 
-    context = await tool.ainvoke({"query": "инвентаризация на складах"})
+    context = await tool.ainvoke({"query": "приемка лекарственных препаратов"})
 
     assert "Факты из графа знаний" in context
-    assert "Управление запасами" in context or "Инвентаризация" in context
+    assert "Приёмка" in context or "WMS" in context
 
 
 @pytest.mark.asyncio
