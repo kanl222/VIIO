@@ -42,6 +42,8 @@ def create_app(settings=None, *, data=None, vector_store=None):
         user=getattr(s, 'memgraph_user', ''),
         password=getattr(s, 'memgraph_password', ''),
         enabled=getattr(s, 'memgraph_enabled', True),
+        timeout=getattr(s, 'memgraph_timeout_seconds', 5),
+        max_stems=getattr(s, 'memgraph_max_stems', 5),
     )
     client = None
     catalog = None

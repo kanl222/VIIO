@@ -26,7 +26,9 @@ def main():
             if not conn.execute('SELECT 1 FROM pg_database WHERE datname=%s', (db,)).fetchone():
                 conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(db)))
         for role,variable in ROLES.items():
-            password=os.environ[variable]
+            password=os.environ.get(variable)
+            if not password:
+                continue
             if len(password)<32:raise ValueError('Runtime passwords must be at least 32 characters')
             if not conn.execute('SELECT 1 FROM pg_roles WHERE rolname=%s',(role,)).fetchone():
                 conn.execute(sql.SQL('CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION').format(sql.Identifier(role)))
@@ -91,13 +93,21 @@ def main():
                 CREATE TABLE IF NOT EXISTS document_contents (
                     document_id VARCHAR(64) PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
                     content TEXT NOT NULL,
+                    filename TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    search_vector tsvector GENERATED ALWAYS AS
+                      (to_tsvector('russian',title || ' ' || filename || ' ' || content) || to_tsvector('simple',title || ' ' || filename || ' ' || content)) STORED,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS document_publications (
-                    document_id VARCHAR(64) PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    document_id VARCHAR(64) UNIQUE NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
                     title VARCHAR(255) NOT NULL,
                     content TEXT NOT NULL,
-                    published_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    publisher_id TEXT NOT NULL DEFAULT 'system',
+                    published_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    search_vector tsvector GENERATED ALWAYS AS
+                      (to_tsvector('russian',title || ' ' || content) || to_tsvector('simple',title || ' ' || content)) STORED
                 );
                 CREATE TABLE IF NOT EXISTS document_upload_jobs (
                     id VARCHAR(64) PRIMARY KEY,
@@ -149,6 +159,8 @@ def main():
                 );
                 """)
             for role in ROLES:
+                if not conn.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (role,)).fetchone():
+                    continue
                 conn.execute(sql.SQL('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {}').format(sql.Identifier(role)))
                 conn.execute(sql.SQL('REVOKE CREATE ON SCHEMA public FROM {}').format(sql.Identifier(role)))
                 if database not in TABLES[role]:continue
@@ -158,7 +170,7 @@ def main():
                     if conn.execute('SELECT to_regclass(%s)',('public.'+table,)).fetchone()[0] is None:
                         raise RuntimeError('Run schema migrations before provisioning runtime permissions: '+table)
                     conn.execute(sql.SQL('GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE {} TO {}').format(sql.Identifier(table),sql.Identifier(role)))
-            if database=='agent_db':
+            if database=='agent_db' and conn.execute("SELECT 1 FROM pg_roles WHERE rolname='viio_documents'").fetchone():
                 conn.execute('GRANT SELECT ON documents,document_contents,document_publications TO viio_documents')
     print('Runtime roles provisioned; migrations remain under the deployment account')
 

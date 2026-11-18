@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import html
+import json
 import re
-from typing import TypedDict
+from collections.abc import Sequence
+from typing import Any, TypedDict
+
+from viio_core.text.strip_thinking import strip_thinking
 
 
 class AnswerSource(TypedDict):
@@ -13,6 +17,36 @@ class AnswerSource(TypedDict):
 
 
 CONTEXT = re.compile(r'<context source="(.*?)" doc_id="([^"]*)"[^>]*>([\s\S]*?)</context>')
+
+# Границы слов обязательны: иначе «нет» совпадает внутри «интернет», «нетто» и т.п.
+# [^.!?\n] не даёт условию перескакивать через границы предложений.
+_NO_DATA = re.compile(
+    r"(?:сведени[яй]|информаци[яи]|данны[ех]|упоминани[яй])[^.!?\n]{0,100}"
+    r"\b(?:отсутству\w*|не найден\w*|нет)\b"
+    r"|недостаточно данных|невозможно определить"
+    r"|\bнет (?:информации|сведений)\b|не удалось (?:найти|получить)",
+    re.I,
+)
+
+# Фальшивая реплика пользователя/ассистента, дописанная моделью после пустой строки
+_FAKE_TURN = re.compile(r"(?is)\n[ \t]*\n[ \t]*(?:user|human|assistant)[ \t]*:.*\Z")
+_CJK = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+")
+
+MIN_TITLE_MATCH_LEN = 4
+
+
+def _source(item: Any) -> AnswerSource | None:
+    """Приводит источник от любого инструмента к {title, document_id}; без обоих полей отбрасывает."""
+    if not isinstance(item, dict):
+        return None
+    title = str(item.get("title") or "")
+    identifier = str(item.get("document_id") or item.get("id") or "")
+    if not title and not identifier:
+        return None
+    result: dict[str, Any] = {"title": title, "document_id": identifier}
+    if item.get("type"):
+        result["type"] = item["type"]
+    return result  # type: ignore[return-value]
 
 
 def reference_title(title: str, body: str) -> str:
@@ -79,21 +113,23 @@ def readable_reference(reference: str, max_chars: int | None = None, *, include_
     return "\n\n".join(reordered_excerpts)[:max_chars]
 
 
-from viio_core.text.strip_thinking import strip_thinking
+def clean_answer(text: str, sources: list[AnswerSource], *, strip_cjk: bool = True) -> str:
+    """Remove leaked transport labels outside fenced code, preserving actual code.
 
-
-def clean_answer(text: str, sources: list[AnswerSource]) -> str:
-    """Remove leaked transport labels outside fenced code, preserving actual code."""
+    strip_cjk=False нужен, когда пользователь сам пишет по-китайски/по-японски.
+    """
     text = strip_thinking(text)
     identifiers = [s["document_id"] for s in sources if s["document_id"] not in {"", "unknown"}]
     sections = re.split(r"(```[\s\S]*?```)", text)
+    last = len(sections) - 1  # split с одной группой всегда даёт нечётную длину: последний элемент - текст
     for index in range(0, len(sections), 2):
         part = sections[index]
-        # Strip synthetic user/assistant dialogue turn headers leaked by the model
-        part = re.sub(r"(?im)\n\s*(?:user|human|assistant|ai)\s*:\s*.*$", "", part)
-        part = re.sub(r"(?im)\n\s*(?:user|human|assistant|ai)\s*\n.*$", "", part)
-        # Strip CJK hallucinated characters outside code blocks
-        part = re.sub(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+", "", part)
+        # Выдуманное продолжение диалога обрезаем только в конце ответа,
+        # иначе пострадают легитимные строки вроде «User: admin» в середине.
+        if index == last:
+            part = _FAKE_TURN.sub("", part)
+        if strip_cjk:
+            part = _CJK.sub("", part)
         part = re.sub(r"(?im)^\s*(?:источник[и]?|документ[ы]?):[^\n]*(?:knowledge_reference|<context|doc_id)[^\n]*\n?", "", part)
         part = re.sub(r"</?(?:knowledge_reference|context)\b[^>]*>", "", part, flags=re.I)
         part = re.sub(r"\bknowledge_reference\b", "", part)
@@ -108,7 +144,11 @@ def clean_answer(text: str, sources: list[AnswerSource]) -> str:
 
 
 class AgentReply(str):
-    """String-compatible result for existing services; provenance is per-result."""
+    """String-compatible result for existing services; provenance is per-result.
+
+    Внимание: строковые методы (.strip(), +, срезы) возвращают обычный str без sources.
+    Провенанс нужно брать из исходного объекта AgentReply, а не из результата обработки.
+    """
 
     def __new__(cls, text: str, sources: list[AnswerSource] | None = None, active_specialist: str | None = None, *, saved_documents: list | None = None, interrupt: Any = None):
         instance = super().__new__(cls, text)
@@ -125,8 +165,7 @@ def cited_sources(text: str, candidates: list[AnswerSource]) -> list[AnswerSourc
     This is a conservative attribution filter, not a factual entailment verifier.
     """
     prose = re.sub(r"```[\s\S]*?```", "", strip_thinking(text))
-    if re.search(r"(?:сведени[яй]|информаци[яи]|данны[ех]|упоминани[яй]).{0,100}(?:отсутству|не найден|нет)|"
-                 r"(?:недостаточно данных|невозможно определить|нет (?:информации|сведений)|не удалось (?:найти|получить))", prose, re.I | re.S):
+    if _NO_DATA.search(prose):
         return []
     normalized = " ".join(prose.casefold().replace("ё", "е").split())
     cited_ids = set(re.findall(r'\(doc_id:\s*([^\s)]+)\)', prose))
@@ -136,7 +175,9 @@ def cited_sources(text: str, candidates: list[AnswerSource]) -> list[AnswerSourc
         stem = re.sub(r'\.(pdf|docx|odt|txt|md)$', '', title).strip()
         identifier = source["document_id"]
         key = identifier if identifier not in {"", "unknown"} else (identifier, title)
-        if (title and title in normalized) or (stem and len(stem) >= 4 and stem in normalized):
+        # Короткие названия («1С», «ИС») совпадали бы почти с любым ответом
+        if (len(title) >= MIN_TITLE_MATCH_LEN and title in normalized) or \
+           (len(stem) >= MIN_TITLE_MATCH_LEN and stem in normalized):
             matched[key] = source
         elif identifier in cited_ids:
             matched.setdefault(key, source)
@@ -146,46 +187,50 @@ def cited_sources(text: str, candidates: list[AnswerSource]) -> list[AnswerSourc
 def turn_provenance(messages):
     """Only current-turn results of server-controlled tools carry provenance."""
     latest = max((i for i, m in enumerate(messages) if m.type == "human"), default=-1)
-    sources = []
+    sources: list[AnswerSource] = []
     active = None
+
+    def add(items):
+        for item in items or []:
+            normalized = _source(item)
+            if normalized:
+                sources.append(normalized)
+
     for message in messages[latest + 1:]:
         if message.type != "tool":
             continue
+        artifact = message.artifact if isinstance(message.artifact, dict) else {}
         if message.name in {"search_knowledge_base", "search_document_content"}:
-            sources.extend(message.artifact.get('sources', [])
-                           if isinstance(message.artifact, dict) and 'sources' in message.artifact
-                           else sources_from_reference(str(message.content)))
-        if message.name == 'list_documents' and isinstance(message.artifact, dict):
-            sources.extend(message.artifact.get('sources', []))
-        if message.name == "search_knowledge_graph" and isinstance(message.artifact, dict):
-            for s in message.artifact.get("sources", []):
-                sources.append({
-                    "title": s.get("title", ""),
-                    "document_id": str(s.get("id", s.get("document_id", ""))),
-                    "type": "graph",
-                })
-        if message.name == "coding_agent" and isinstance(message.artifact, dict):
-            sources.extend(message.artifact.get("sources", []))
-            active = message.artifact.get("active_specialist")
-        if message.name == "github_repository":
-            # Извлекаем ссылки на репозиторий и файлы
+            if "sources" in artifact:
+                add(artifact["sources"])
+            else:
+                add(sources_from_reference(str(message.content)))
+        elif message.name == "list_documents":
+            add(artifact.get("sources"))
+        elif message.name == "search_knowledge_graph":
+            for s in artifact.get("sources", []):
+                add([{**s, "type": "graph"}])
+        elif message.name == "coding_agent":
+            add(artifact.get("sources"))
+            active = artifact.get("active_specialist")
+        elif message.name == "github_repository":
             content = str(message.content)
             # Файл owner/repo/path
             file_match = re.search(r"Файл\s+([\w.-]+/[\w.-]+)/([^\s\n:]+)", content)
             if file_match:
                 repo, path = file_match.group(1), file_match.group(2)
-                sources.append({"title": f"{repo}/{path}", "document_id": f"github:{repo}/{path}"})
-            # Структура owner/repo (ветка/коммит: sha, путь: path)
+                add([{"title": f"{repo}/{path}", "document_id": f"github:{repo}/{path}"}])
+            # Структура owner/repo
             tree_match = re.search(r"Структура\s+([\w.-]+/[\w.-]+)", content)
             if tree_match and not file_match:
                 repo = tree_match.group(1)
-                sources.append({"title": repo, "document_id": f"github:{repo}"})
+                add([{"title": repo, "document_id": f"github:{repo}"}])
             if "repositories" in content and not file_match and not tree_match:
                 try:
                     data = json.loads(content)
                     if isinstance(data, dict) and "repositories" in data:
-                        sources.append({"title": "GitHub", "document_id": "github:repositories"})
+                        add([{"title": "GitHub", "document_id": "github:repositories"}])
                 except Exception:
                     pass
-    unique = {(source["title"], source["document_id"]): source for source in sources}
+    unique = {(s["title"], s["document_id"]): s for s in sources}
     return list(unique.values()), active

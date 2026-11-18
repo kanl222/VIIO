@@ -76,7 +76,9 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
             active_tools.append(create_postgres_readonly_tool(app_settings))
         if app_settings.memgraph_enabled:
             from assistent.tools.graph_tool import create_graph_search_tool
-            active_tools.append(create_graph_search_tool(app_settings))
+            graph_tool = create_graph_search_tool(app_settings)
+            if graph_tool is not None:
+                active_tools.append(graph_tool)
 
         graph = build_agent_graph(
             llm=llm,
@@ -86,7 +88,7 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
             task_routing=False,
             max_tool_calls=app_settings.agent_max_tool_calls,
             context_max_chars=app_settings.rag_context_max_chars,
-            model_first_tools=True,
+            model_first_tools=app_settings.model_first_tools,
             summary_after=app_settings.conversation_summary_after if app_settings.conversation_summary_enabled else 0,
             history_max_chars=app_settings.conversation_history_max_chars,
             supervisor=app_settings.supervisor_enabled or routing_llm is not None,

@@ -75,3 +75,4 @@ Diagnostics/PRODUCT.md
 .agents/skills/*
 scripts/verify_warehouse_graph.py
 scripts/test_live_agent_and_consultant.py
+.tmp/

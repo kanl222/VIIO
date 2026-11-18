@@ -1,54 +1,83 @@
-"""Инструмент поиска по графу знаний Memgraph для агента Assistent (Semantic GraphRAG).
-
-Реализует поиск по онтологии аптечного склада:
-- Процессы и шаги (Process -> Step, NEXT, RESPONSIBLE_FOR, EXECUTED_IN, COMPLIES_WITH)
-- Товары, серии и режимы хранения (Product, Batch, StorageCondition, Location, Category)
-- Системы и мастер-данные (System, DataEntity, Integration, Department)
-- Нормативные требования (Regulation)
-- Навигация по интерфейсу (MenuPath -> Operation)
-"""
+"""Инструмент поиска по графу знаний Memgraph для агента Assistent (Semantic GraphRAG)."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
-from typing import Any
 from collections import defaultdict
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from neo4j import GraphDatabase
 
 from assistent.services.diagnostics import record
+from assistent.utils.stemmer import (
+    CONTACT_STEMS,
+    ORG_STEMS,
+    extract_keywords,
+)
 
 logger = logging.getLogger(__name__)
 
-STOP_WORDS = {
-    "в", "во", "на", "по", "с", "со", "к", "ко", "из", "изо", "от", "до", "для", "о", "об",
-    "как", "где", "что", "кто", "чем", "кому", "какой", "какие", "какая", "какое",
-    "ли", "же", "бы", "и", "или", "не", "лишь", "только", "найти", "подскажи", "покажи",
-}
+MAX_STEMS = 5
+MIN_STEM_LEN = 3
 
 
-def extract_keywords(query: str) -> list[str]:
-    """Извлекает значимые ключевые слова для поиска по графу."""
-    words = re.findall(r"[а-яёa-z0-9]+", query.lower())
-    meaningful = [w for w in words if w not in STOP_WORDS and len(w) >= 3]
-    return meaningful if meaningful else words
+def _norm(expr: str) -> str:
+    """Cypher-выражение: нижний регистр и ё -> е."""
+    return f"toLower(replace({expr}, 'ё', 'е'))"
+
+
+def _field_match(f: str, var: str = "t") -> str:
+    return f"({f} IS NOT NULL AND ({f} CONTAINS {var} OR replace({f}, 'ё', 'е') CONTAINS {var} OR {_norm(f)} CONTAINS {var}))"
+
+
+def _match_any(*fields: str, var: str = "t") -> str:
+    """Условие: хотя бы одна основа из $stems входит хотя бы в одно из полей."""
+    parts = [_field_match(f, var) for f in fields]
+    return f"any({var} IN $stems WHERE {' OR '.join(parts)})"
+
+
+def _empty_result() -> dict[str, Any]:
+    return {
+        "abbreviations": [], "processes": [], "storage_rules": [], "systems": [],
+        "regulations": [], "organizations": [], "departments": [], "employees": [],
+        "menus": [], "operations": [], "sources": [],
+    }
+
+
+def _dedup(rows: list[dict], key: str = "name") -> list[dict]:
+    return list({r[key]: r for r in rows if r.get(key)}.values())
 
 
 class KnowledgeGraphClient:
-    """Клиент для выполнения быстрых поисковых и структурных запросов к Memgraph."""
+    """Клиент для выполнения поисковых и структурных запросов к Memgraph."""
 
-    def __init__(self, uri: str = "bolt://localhost:7687", user: str = "", password: str = ""):
+    def __init__(
+        self,
+        uri: str = "bolt://localhost:7687",
+        user: str = "",
+        password: str = "",
+        timeout: float = 5.0,
+        max_stems: int = 5,
+    ):
         self.uri = uri
         self.auth = (user, password)
+        self.timeout = timeout
+        self.max_stems = max_stems
         self._driver = None
 
     def get_driver(self):
         if self._driver is None:
-            self._driver = GraphDatabase.driver(self.uri, auth=self.auth)
+            auth = self.auth if (self.auth and self.auth[0]) else None
+            self._driver = GraphDatabase.driver(
+                self.uri,
+                auth=auth,
+                connection_timeout=self.timeout,
+            )
         return self._driver
 
     def close(self):
@@ -57,387 +86,359 @@ class KnowledgeGraphClient:
             self._driver = None
 
     def search_graph(self, query: str, limit: int = 8) -> dict[str, Any]:
-        """Быстрый многоэтапный поиск по графу без декартовых произведений (< 50 мс)."""
-        keywords = extract_keywords(query)
-        if not keywords:
-            return {
-                "abbreviations": [],
-                "processes": [],
-                "storage_rules": [],
-                "systems": [],
-                "regulations": [],
-                "employees": [],
-                "menus": [],
-                "operations": [],
-                "sources": [],
-            }
+        """Многоэтапный поиск по графу. Синхронный: из async-кода вызывать через to_thread."""
+        all_stems = [s for s in extract_keywords(query) if len(s) >= MIN_STEM_LEN]
+        if not all_stems:
+            return _empty_result()
 
+        is_contact_query = any(s in CONTACT_STEMS for s in all_stems)
+        is_org_query = any(s in ORG_STEMS for s in all_stems)
+        # Тематические основы без слов-намерений («склад», «телефон»)
+        topic = [s for s in all_stems if s not in CONTACT_STEMS and s not in ORG_STEMS]
+        raw_stems = (topic or all_stems)[:self.max_stems]
+        stems = list({v for s in raw_stems for v in (s, s.capitalize(), s.upper(), s.replace('ё', 'е')) if len(v) >= MIN_STEM_LEN})
+        generic = (is_contact_query or is_org_query) and not topic
+
+        result = _empty_result()
         driver = self.get_driver()
         with driver.session() as session:
-            # 0. Поиск аббревиатур и терминов онтологии (Abbreviation)
-            abbr_data = []
+            # 0. Аббревиатуры (по исходным токенам, не по основам)
             tokens = [w for w in re.findall(r"[а-яёa-z0-9\-]+", query.lower()) if len(w) >= 2]
             if tokens:
-                search_tokens = list(set(tokens) | {w.upper() for w in tokens} | {w.capitalize() for w in tokens})
+                tokens_lower = list(set(tokens))
+                tokens_upper = [w.upper() for w in tokens_lower]
+                query_clean = query.lower().strip()
                 abbr_rows = session.run(
                     """
                     MATCH (a:Abbreviation)
-                    WHERE a.name IN $tokens
-                       OR (a.short_form IS NOT NULL AND a.short_form IN $tokens)
-                       OR any(t IN $tokens WHERE a.name CONTAINS t OR a.full_name CONTAINS t)
+                    WHERE toLower(a.name) IN $tokens_lower
+                       OR (a.short_form IS NOT NULL AND toLower(a.short_form) IN $tokens_lower)
+                       OR any(t IN $tokens_upper WHERE a.name = t)
+                       OR (size($query_clean) >= 4 AND toLower(a.full_name) CONTAINS $query_clean)
                     OPTIONAL MATCH (a)-[:EXPANDS_TO|REFERS_TO]->(target)
                     RETURN a.name AS name, a.full_name AS full_name, a.short_form AS short_form,
                            a.description AS description, a.category AS category,
-                           labels(target)[0] AS target_type, coalesce(target.name, target.title, target.code) AS target_name
+                           labels(target)[0] AS target_type,
+                           coalesce(target.name, target.title, target.code) AS target_name
                     LIMIT $limit;
                     """,
-                    tokens=search_tokens,
+                    tokens_lower=tokens_lower,
+                    tokens_upper=tokens_upper,
+                    query_clean=query_clean,
                     limit=limit,
                 ).data()
-                grouped_abbr = {}
+                grouped: dict[str, dict] = {}
                 for r in abbr_rows:
-                    k = r["name"]
-                    if k not in grouped_abbr:
-                        grouped_abbr[k] = {
-                            "name": r["name"],
-                            "full_name": r["full_name"],
-                            "short_form": r["short_form"],
-                            "description": r["description"],
-                            "category": r["category"],
-                            "related": [],
-                        }
+                    g = grouped.setdefault(r["name"], {
+                        "name": r["name"], "full_name": r["full_name"],
+                        "short_form": r["short_form"], "description": r["description"],
+                        "category": r["category"], "related": [],
+                    })
                     if r.get("target_name"):
-                        t_str = f"{r['target_type']}: {r['target_name']}" if r.get("target_type") else r["target_name"]
-                        if t_str not in grouped_abbr[k]["related"]:
-                            grouped_abbr[k]["related"].append(t_str)
-                abbr_data = list(grouped_abbr.values())
+                        t_str = (f"{r['target_type']}: {r['target_name']}"
+                                 if r.get("target_type") else r["target_name"])
+                        if t_str not in g["related"]:
+                            g["related"].append(t_str)
+                result["abbreviations"] = list(grouped.values())
 
-            # 1. Поиск процессов и шагов (Process / Step)
-            processes_data = []
-            for kw in keywords[:2]:
-                stem = kw[:5] if len(kw) >= 5 else kw
-                p_rows = session.run(
-                    """
-                    MATCH (p:Process)
-                    WHERE p.name CONTAINS $t_lower
-                       OR p.name CONTAINS $t_title
-                       OR p.name CONTAINS $t_upper
-                    OPTIONAL MATCH (p)-[:HAS_STEP]->(s:Step)
-                    OPTIONAL MATCH (s)-[:NEXT]->(next:Step)
-                    OPTIONAL MATCH (r:Role)-[:RESPONSIBLE_FOR]->(s)
-                    OPTIONAL MATCH (s)-[:EXECUTED_IN]->(sys:System)
-                    OPTIONAL MATCH (p)-[:COMPLIES_WITH]->(reg:Regulation)
-                    RETURN p.name AS process, p.version AS version, p.owner AS owner,
-                           s.order AS step_order, coalesce(s.name, s.description) AS step_name,
-                           s.description AS step_desc, next.name AS next_step,
-                           r.name AS role, sys.name AS system, reg.code AS reg_code
-                    ORDER BY p.name, s.order
-                    LIMIT $limit;
+            # 1. Процессы и шаги
+            p_rows = session.run(
+                f"""
+                MATCH (p:Process)
+                WHERE {_match_any("p.name")}
+                OPTIONAL MATCH (p)-[:HAS_STEP]->(s:Step)
+                OPTIONAL MATCH (s)-[:NEXT]->(next:Step)
+                OPTIONAL MATCH (r:Role)-[:RESPONSIBLE_FOR]->(s)
+                OPTIONAL MATCH (s)-[:EXECUTED_IN]->(sys:System)
+                OPTIONAL MATCH (p)-[:COMPLIES_WITH]->(reg:Regulation)
+                RETURN p.name AS process, p.version AS version, p.owner AS owner,
+                       s.order AS step_order, coalesce(s.name, s.description) AS step_name,
+                       s.description AS step_desc, next.name AS next_step,
+                       r.name AS role, sys.name AS system, reg.code AS reg_code
+                ORDER BY p.name, s.order
+                LIMIT $limit;
+                """,
+                stems=stems,
+                limit=limit * 6,  # строк на процесс много (шаги x роли x нормативы)
+            ).data()
+            by_proc = defaultdict(lambda: {"process": "", "owner": "", "steps": [], "regulations": []})
+            for r in p_rows:
+                pname = r["process"]
+                by_proc[pname]["process"] = pname
+                by_proc[pname]["owner"] = r.get("owner")
+                if r.get("reg_code") and r["reg_code"] not in by_proc[pname]["regulations"]:
+                    by_proc[pname]["regulations"].append(r["reg_code"])
+                if r.get("step_name"):
+                    step = {
+                        "order": r["step_order"], "name": r["step_name"],
+                        "desc": r.get("step_desc"), "role": r.get("role"),
+                        "system": r.get("system"), "next": r.get("next_step"),
+                    }
+                    if not any(s["order"] == step["order"] for s in by_proc[pname]["steps"]):
+                        by_proc[pname]["steps"].append(step)
+            result["processes"] = list(by_proc.values())
+
+            # 2. Товары, серии, режимы хранения
+            result["storage_rules"] = session.run(
+                f"""
+                MATCH (p:Product)
+                WHERE {_match_any("p.name", "p.mnn")}
+                OPTIONAL MATCH (p)-[:REQUIRES]->(sc:StorageCondition)
+                OPTIONAL MATCH (p)-[:BELONGS_TO]->(c:Category)
+                OPTIONAL MATCH (b:Batch)-[:OF_PRODUCT]->(p)
+                OPTIONAL MATCH (b)-[:STORED_IN]->(loc:Location)
+                OPTIONAL MATCH (loc)-[:PROVIDES]->(loc_sc:StorageCondition)
+                RETURN p.name AS product, p.mnn AS mnn, p.form AS form, p.dosage AS dosage,
+                       sc.name AS required_condition, c.name AS category,
+                       b.number AS batch_number, b.status AS batch_status, b.expiry_date AS expiry_date,
+                       loc.code AS location, loc_sc.name AS provided_condition
+                LIMIT $limit;
+                """,
+                stems=stems,
+                limit=limit,
+            ).data()
+
+            # 3. Информационные системы и мастер-данные
+            result["systems"] = session.run(
+                f"""
+                MATCH (sys:System)
+                OPTIONAL MATCH (sys)-[:SOURCE_OF_TRUTH_FOR]->(de:DataEntity)
+                WITH sys, collect(DISTINCT de.name) AS master_data
+                WHERE any(t IN $stems WHERE
+                       {_norm("sys.name")} CONTAINS t
+                    OR (sys.type IS NOT NULL AND {_norm("sys.type")} CONTAINS t)
+                    OR any(m IN master_data WHERE {_norm("m")} CONTAINS t))
+                OPTIONAL MATCH (sys)-[:INTEGRATES_WITH]->(other:System)
+                OPTIONAL MATCH (dep:Department)-[:USES_SYSTEM]->(sys)
+                RETURN sys.name AS system, sys.type AS type, sys.criticality AS criticality,
+                       master_data,
+                       collect(DISTINCT other.name) AS integrations,
+                       collect(DISTINCT dep.name) AS departments
+                LIMIT $limit;
+                """,
+                stems=stems,
+                limit=limit,
+            ).data()
+
+            # 4. Нормативные акты
+            result["regulations"] = session.run(
+                f"""
+                MATCH (r:Regulation)
+                WHERE {_match_any("r.code", "r.title")}
+                OPTIONAL MATCH (entity)-[:COMPLIES_WITH]->(r)
+                RETURN r.code AS code, r.title AS title, r.source AS source, r.edition AS edition,
+                       collect(DISTINCT coalesce(entity.name, labels(entity)[0])) AS complies_entities
+                LIMIT $limit;
+                """,
+                stems=stems,
+                limit=limit,
+            ).data()
+
+            # 4.1. Организации и контакты
+            org_cols = """
+                RETURN org.name AS name, org.full_name AS full_name, org.short_name AS short_name,
+                       org.phone AS phone, org.hotline AS hotline, org.address AS address,
+                       org.email AS email, org.website AS website, org.inn AS inn
+                LIMIT $limit;
+            """
+            org_rows: list[dict] = []
+            if not generic:
+                org_rows = session.run(
+                    f"""
+                    MATCH (org:Organization)
+                    WHERE (org.phone IS NOT NULL OR org.hotline IS NOT NULL)
+                      AND {_match_any("org.name", "org.short_name", "org.full_name")}
+                    {org_cols}
                     """,
-                    t_lower=stem.lower(),
-                    t_title=stem.capitalize(),
-                    t_upper=stem.upper(),
-                    limit=limit * 2,
-                ).data()
-
-                by_proc = defaultdict(lambda: {"process": "", "owner": "", "steps": [], "regulations": []})
-                for r in p_rows:
-                    pname = r["process"]
-                    by_proc[pname]["process"] = pname
-                    by_proc[pname]["owner"] = r.get("owner")
-                    if r.get("reg_code") and r["reg_code"] not in by_proc[pname]["regulations"]:
-                        by_proc[pname]["regulations"].append(r["reg_code"])
-                    if r.get("step_name"):
-                        step_info = {
-                            "order": r["step_order"],
-                            "name": r["step_name"],
-                            "desc": r.get("step_desc"),
-                            "role": r.get("role"),
-                            "system": r.get("system"),
-                            "next": r.get("next_step"),
-                        }
-                        if not any(s["order"] == step_info["order"] for s in by_proc[pname]["steps"]):
-                            by_proc[pname]["steps"].append(step_info)
-
-                for item in by_proc.values():
-                    processes_data.append(item)
-
-            # 2. Поиск товаров, серий и режимов хранения (Product / Batch / StorageCondition)
-            storage_data = []
-            for kw in keywords[:2]:
-                stem = kw[:5] if len(kw) >= 5 else kw
-                st_rows = session.run(
-                    """
-                    MATCH (p:Product)
-                    WHERE p.name CONTAINS $t_lower
-                       OR p.name CONTAINS $t_title
-                       OR p.name CONTAINS $t_upper
-                       OR p.mnn CONTAINS $t_lower
-                    OPTIONAL MATCH (p)-[:REQUIRES]->(sc:StorageCondition)
-                    OPTIONAL MATCH (p)-[:BELONGS_TO]->(c:Category)
-                    OPTIONAL MATCH (b:Batch)-[:OF_PRODUCT]->(p)
-                    OPTIONAL MATCH (b)-[:STORED_IN]->(loc:Location)
-                    OPTIONAL MATCH (loc)-[:PROVIDES]->(loc_sc:StorageCondition)
-                    RETURN p.name AS product, p.mnn AS mnn, p.form AS form, p.dosage AS dosage,
-                           sc.name AS required_condition, c.name AS category,
-                           b.number AS batch_number, b.status AS batch_status, b.expiry_date AS expiry_date,
-                           loc.code AS location, loc_sc.name AS provided_condition
-                    LIMIT $limit;
-                    """,
-                    t_lower=stem.lower(),
-                    t_title=stem.capitalize(),
-                    t_upper=stem.upper(),
+                    stems=stems,
                     limit=limit,
                 ).data()
-                storage_data.extend(st_rows)
-
-            # 3. Поиск информационных систем и мастер-данных (System / DataEntity / Integration)
-            systems_data = []
-            seen_systems = set()
-            for kw in keywords[:3]:
-                stem = kw[:5] if len(kw) >= 5 else kw
-                sys_rows = session.run(
-                    """
-                    MATCH (sys:System)
-                    OPTIONAL MATCH (sys)-[:SOURCE_OF_TRUTH_FOR]->(de:DataEntity)
-                    WITH sys, collect(DISTINCT de.name) AS master_data
-                    WHERE sys.name CONTAINS $t_lower
-                       OR sys.name CONTAINS $t_title
-                       OR sys.name CONTAINS $t_upper
-                       OR sys.type CONTAINS $t_upper
-                       OR any(m IN master_data WHERE m CONTAINS $t_lower OR m CONTAINS $t_title)
-                    OPTIONAL MATCH (sys)-[:INTEGRATES_WITH]->(other:System)
-                    OPTIONAL MATCH (dep:Department)-[:USES_SYSTEM]->(sys)
-                    RETURN sys.name AS system, sys.type AS type, sys.criticality AS criticality,
-                           master_data,
-                           collect(DISTINCT other.name) AS integrations,
-                           collect(DISTINCT dep.name) AS departments
-                    LIMIT $limit;
+            if not org_rows and (generic or is_contact_query):
+                org_rows = session.run(
+                    f"""
+                    MATCH (org:Organization)
+                    WHERE org.phone IS NOT NULL OR org.hotline IS NOT NULL
+                    {org_cols}
                     """,
-                    t_lower=stem.lower(),
-                    t_title=stem.capitalize(),
-                    t_upper=stem.upper(),
                     limit=limit,
                 ).data()
-                for r in sys_rows:
-                    if r["system"] not in seen_systems:
-                        seen_systems.add(r["system"])
-                        systems_data.append(r)
+            result["organizations"] = _dedup(org_rows)
 
-            # 4. Поиск нормативных требований (Regulation)
-            reg_data = []
-            for kw in keywords[:2]:
-                stem = kw[:5] if len(kw) >= 5 else kw
-                r_rows = session.run(
-                    """
-                    MATCH (r:Regulation)
-                    WHERE r.code CONTAINS $t_upper
-                       OR r.title CONTAINS $t_lower
-                       OR r.title CONTAINS $t_title
-                    OPTIONAL MATCH (entity)-[:COMPLIES_WITH]->(r)
-                    RETURN r.code AS code, r.title AS title, r.source AS source, r.edition AS edition,
-                           collect(DISTINCT coalesce(entity.name, labels(entity)[0])) AS complies_entities
-                    LIMIT $limit;
+            # 4.2. Отделы и подразделения
+            dep_cols = """
+                OPTIONAL MATCH (org:Organization)-[:OWNS]->(dep)
+                RETURN dep.name AS name, dep.code AS code, dep.phone AS phone,
+                       dep.hotline AS hotline, dep.email AS email, dep.description AS description,
+                       org.name AS organization
+                ORDER BY dep.code
+                LIMIT $limit;
+            """
+            dept_rows: list[dict] = []
+            if not generic:
+                # WHERE сразу после MATCH, иначе он фильтрует только OPTIONAL MATCH
+                dept_rows = session.run(
+                    f"""
+                    MATCH (dep:Department)
+                    WHERE {_match_any("dep.name", "dep.description")}
+                    {dep_cols}
                     """,
-                    t_lower=stem.lower(),
-                    t_title=stem.capitalize(),
-                    t_upper=stem.upper(),
+                    stems=stems,
                     limit=limit,
                 ).data()
-                reg_data.extend(r_rows)
-
-            # 4.1. Поиск сотрудников, руководства и отделов (Employee / Department / Organization)
-            emp_data = []
-            seen_emps = set()
-            for kw in keywords[:3]:
-                stem = kw[:5] if len(kw) >= 5 else kw
-                e_rows = session.run(
-                    """
-                    MATCH (e:Employee)
-                    OPTIONAL MATCH (e)-[:WORKS_IN]->(dep:Department)
-                    WITH e, dep
-                    WHERE e.name CONTAINS $t_lower
-                       OR e.name CONTAINS $t_title
-                       OR e.name CONTAINS $t_upper
-                       OR (e.position IS NOT NULL AND (e.position CONTAINS $t_lower OR e.position CONTAINS $t_title))
-                       OR (dep.name IS NOT NULL AND (dep.name CONTAINS $t_lower OR dep.name CONTAINS $t_title))
-                    OPTIONAL MATCH (org:Organization)-[:OWNS]->(dep)
-                    RETURN e.name AS name, e.position AS position, e.phone AS phone,
-                           e.support_phones AS support_phones, e.org AS org,
-                           dep.name AS department, dep.code AS dept_code
-                    LIMIT $limit;
+            if not dept_rows and is_contact_query:
+                dept_rows = session.run(
+                    f"""
+                    MATCH (dep:Department)
+                    WHERE dep.phone IS NOT NULL OR dep.hotline IS NOT NULL
+                    {dep_cols}
                     """,
-                    t_lower=stem.lower(),
-                    t_title=stem.capitalize(),
-                    t_upper=stem.upper(),
                     limit=limit,
                 ).data()
-                for r in e_rows:
-                    if r["name"] not in seen_emps:
-                        seen_emps.add(r["name"])
-                        emp_data.append(r)
+            result["departments"] = _dedup(dept_rows)
 
-            # 5. Поиск разделов меню (MenuPath)
-            matched_menus = {}
-            for kw in keywords[:2]:
-                stem = kw[:5] if len(kw) >= 5 else kw
-                rows = session.run(
-                    """
-                    MATCH (m:MenuPath)
-                    WHERE m.full_path CONTAINS $t_lower
-                       OR m.full_path CONTAINS $t_title
-                       OR m.full_path CONTAINS $t_upper
-                    RETURN id(m) AS id, m.full_path AS menu
-                    LIMIT $limit;
-                    """,
-                    t_lower=stem.lower(),
-                    t_title=stem.capitalize(),
-                    t_upper=stem.upper(),
-                    limit=limit,
-                ).data()
-                for r in rows:
-                    matched_menus[r["id"]] = r["menu"]
+            # 4.3. Сотрудники
+            e_rows = session.run(
+                f"""
+                MATCH (e:Employee)
+                OPTIONAL MATCH (e)-[:WORKS_IN]->(dep:Department)
+                WITH e, dep
+                WHERE {_match_any("e.name", "e.position", "dep.name")}
+                RETURN e.name AS name, e.position AS position, e.phone AS phone,
+                       e.support_phones AS support_phones, e.org AS org,
+                       dep.name AS department, dep.code AS dept_code
+                LIMIT $limit;
+                """,
+                stems=stems,
+                limit=limit,
+            ).data()
+            result["employees"] = _dedup(e_rows)
+
+            # 5. Разделы меню
+            menu_rows = session.run(
+                f"""
+                MATCH (m:MenuPath)
+                WHERE {_match_any("m.full_path")}
+                RETURN id(m) AS id, m.full_path AS menu
+                LIMIT $limit;
+                """,
+                stems=stems,
+                limit=limit,
+            ).data()
+            matched_menus = {r["id"]: r["menu"] for r in menu_rows}
 
             menus_data = []
-            menu_ids = list(matched_menus.keys())
+            menu_ids = list(matched_menus)
             if menu_ids:
-                sys_rows = session.run(
+                sys_by_menu = defaultdict(list)
+                for r in session.run(
                     """
                     MATCH (s:System)-[:HAS_MENU]->(m:MenuPath)
                     WHERE id(m) IN $ids
                     RETURN id(m) AS mid, s.name AS sys;
                     """,
                     ids=menu_ids,
-                ).data()
-                sys_by_menu = defaultdict(list)
-                for r in sys_rows:
+                ).data():
                     sys_by_menu[r["mid"]].append(r["sys"])
 
-                doc_rows = session.run(
+                docs_by_menu = defaultdict(list)
+                for r in session.run(
                     """
                     MATCH (m:MenuPath)-[:DOCUMENTED_BY]->(d:Document)
                     WHERE id(m) IN $ids
                     RETURN id(m) AS mid, d.id AS doc_id, d.title AS doc_title;
                     """,
                     ids=menu_ids,
-                ).data()
-                docs_by_menu = defaultdict(list)
-                for r in doc_rows:
+                ).data():
                     docs_by_menu[r["mid"]].append({"id": r["doc_id"], "title": r["doc_title"]})
 
-                act_rows = session.run(
+                acts_by_menu = defaultdict(list)
+                for r in session.run(
                     """
                     MATCH (m:MenuPath)-[:CONTAINS_ACTION]->(op:Operation)
                     WHERE id(m) IN $ids
                     RETURN id(m) AS mid, op.name AS action;
                     """,
                     ids=menu_ids,
-                ).data()
-                acts_by_menu = defaultdict(list)
-                for r in act_rows:
+                ).data():
                     acts_by_menu[r["mid"]].append(r["action"])
 
                 for mid, mpath in matched_menus.items():
                     menus_data.append({
                         "menu": mpath,
-                        "systems": list(set(sys_by_menu[mid])),
+                        "systems": list(dict.fromkeys(sys_by_menu[mid])),
                         "docs": docs_by_menu[mid],
-                        "actions": list(set(acts_by_menu[mid]))[:6],
+                        "actions": list(dict.fromkeys(acts_by_menu[mid]))[:6],
                     })
+            result["menus"] = menus_data
 
-            # 6. Поиск операций (Operation)
-            matched_ops = {}
-            for kw in keywords[:2]:
-                stem = kw[:5] if len(kw) >= 5 else kw
-                rows = session.run(
-                    """
-                    MATCH (op:Operation)
-                    WHERE op.name CONTAINS $t_lower
-                       OR op.name CONTAINS $t_title
-                       OR op.name CONTAINS $t_upper
-                    RETURN id(op) AS id, op.name AS name
-                    LIMIT $limit;
-                    """,
-                    t_lower=stem.lower(),
-                    t_title=stem.capitalize(),
-                    t_upper=stem.upper(),
-                    limit=limit,
-                ).data()
-                for r in rows:
-                    matched_ops[r["id"]] = r["name"]
+            # 6. Операции
+            op_rows = session.run(
+                f"""
+                MATCH (op:Operation)
+                WHERE {_match_any("op.name")}
+                RETURN id(op) AS id, op.name AS name
+                LIMIT $limit;
+                """,
+                stems=stems,
+                limit=limit,
+            ).data()
+            matched_ops = {r["id"]: r["name"] for r in op_rows}
 
             ops_data = []
-            op_ids = list(matched_ops.keys())
+            op_ids = list(matched_ops)
             if op_ids:
-                op_menu_rows = session.run(
+                menus_by_op = defaultdict(list)
+                for r in session.run(
                     """
                     MATCH (m:MenuPath)-[:CONTAINS_ACTION]->(op:Operation)
                     WHERE id(op) IN $ids
                     RETURN id(op) AS op_id, m.full_path AS menu;
                     """,
                     ids=op_ids,
-                ).data()
-                menus_by_op = defaultdict(list)
-                for r in op_menu_rows:
+                ).data():
                     menus_by_op[r["op_id"]].append(r["menu"])
 
-                rel_rows = session.run(
+                conds, roles, nexts, drugs = (defaultdict(list) for _ in range(4))
+                for r in session.run(
                     """
                     MATCH (op:Operation)-[r]->(target)
                     WHERE id(op) IN $ids
-                    RETURN id(op) AS op_id, type(r) AS rel, labels(target)[0] AS t_label, target.name AS t_name;
+                    RETURN id(op) AS op_id, type(r) AS rel, target.name AS t_name;
                     """,
                     ids=op_ids,
-                ).data()
-
-                conds_by_op = defaultdict(list)
-                roles_by_op = defaultdict(list)
-                next_by_op = defaultdict(list)
-                drugs_by_op = defaultdict(list)
-
-                for r in rel_rows:
-                    op_id = r["op_id"]
-                    rel = r["rel"]
+                ).data():
                     name = r["t_name"]
                     if not name:
                         continue
+                    rel, oid = r["rel"], r["op_id"]
                     if rel in ("REQUIRES_CONDITION", "REQUIRES"):
-                        conds_by_op[op_id].append(name)
+                        conds[oid].append(name)
                     elif rel in ("EXECUTED_BY", "RESPONSIBLE_FOR"):
-                        roles_by_op[op_id].append(name)
+                        roles[oid].append(name)
                     elif rel in ("NEXT_STEP", "NEXT"):
-                        next_by_op[op_id].append(name)
+                        nexts[oid].append(name)
                     elif rel in ("APPLIES_TO", "BELONGS_TO"):
-                        drugs_by_op[op_id].append(name)
+                        drugs[oid].append(name)
 
-                for op_id, op_name in matched_ops.items():
+                for oid, op_name in matched_ops.items():
                     ops_data.append({
                         "operation": op_name,
-                        "menus": list(set(menus_by_op[op_id]))[:3],
-                        "conditions": list(set(conds_by_op[op_id]))[:4],
-                        "roles": list(set(roles_by_op[op_id]))[:3],
-                        "next_steps": list(set(next_by_op[op_id]))[:3],
-                        "drug_categories": list(set(drugs_by_op[op_id]))[:3],
+                        "menus": list(dict.fromkeys(menus_by_op[oid]))[:3],
+                        "conditions": list(dict.fromkeys(conds[oid]))[:4],
+                        "roles": list(dict.fromkeys(roles[oid]))[:3],
+                        "next_steps": list(dict.fromkeys(nexts[oid]))[:3],
+                        "drug_categories": list(dict.fromkeys(drugs[oid]))[:3],
                     })
+            result["operations"] = ops_data
 
-            # Сбор документов-источников
-            sources = {}
-            for m in menus_data:
-                for doc in m.get("docs", []):
-                    if doc and doc.get("id"):
-                        sources[doc["id"]] = doc
-
-            return {
-                "abbreviations": abbr_data,
-                "processes": processes_data,
-                "storage_rules": storage_data,
-                "systems": systems_data,
-                "regulations": reg_data,
-                "employees": emp_data,
-                "menus": menus_data,
-                "operations": ops_data,
-                "sources": list(sources.values()),
-            }
+        # Документы-источники
+        sources = {}
+        for m in result["menus"]:
+            for doc in m.get("docs", []):
+                if doc and doc.get("id"):
+                    sources[doc["id"]] = doc
+        result["sources"] = list(sources.values())
+        return result
 
 
 def format_graph_context(data: dict[str, Any]) -> str:
@@ -447,12 +448,17 @@ def format_graph_context(data: dict[str, Any]) -> str:
     storage_rules = data.get("storage_rules", [])
     systems = data.get("systems", [])
     regulations = data.get("regulations", [])
+    organizations = data.get("organizations", [])
+    departments = data.get("departments", [])
     employees = data.get("employees", [])
     menus = data.get("menus", [])
     operations = data.get("operations", [])
     sources = data.get("sources", [])
 
-    has_data = any([abbreviations, processes, storage_rules, systems, regulations, employees, menus, operations])
+    has_data = any([
+        abbreviations, processes, storage_rules, systems, regulations,
+        organizations, departments, employees, menus, operations,
+    ])
     if not has_data:
         return "В графе знаний аптечного склада не найдено прямых соответствий по запросу."
 
@@ -529,9 +535,42 @@ def format_graph_context(data: dict[str, Any]) -> str:
                 blocks.append(f"  - Применяется к: {', '.join(r['complies_entities'][:5])}")
         blocks.append("")
 
-    # 4.1. Должностные лица, контакты и отделы
+    # 4.1. Организации и контакты
+    if organizations:
+        blocks.append("#### Организации и контакты (Organization):")
+        for org in organizations[:5]:
+            blocks.append(f"- **Организация: «{org['name']}»**")
+            if org.get("phone"):
+                blocks.append(f"  - Телефон: {org['phone']}")
+            if org.get("hotline"):
+                blocks.append(f"  - Горячая линия: {org['hotline']}")
+            if org.get("address"):
+                blocks.append(f"  - Адрес: {org['address']}")
+            if org.get("email"):
+                blocks.append(f"  - Email: {org['email']}")
+            if org.get("website"):
+                blocks.append(f"  - Веб-сайт: {org['website']}")
+        blocks.append("")
+
+    # 4.2. Отделы и подразделения
+    if departments:
+        blocks.append("#### Отделы и подразделения (Department):")
+        for d in departments[:5]:
+            org_str = f" ({d['organization']})" if d.get("organization") else ""
+            blocks.append(f"- **Отдел: «{d['name']}»**{org_str}")
+            if d.get("phone"):
+                blocks.append(f"  - Телефон: {d['phone']}")
+            if d.get("hotline"):
+                blocks.append(f"  - Горячая линия: {d['hotline']}")
+            if d.get("email"):
+                blocks.append(f"  - Email: {d['email']}")
+            if d.get("description"):
+                blocks.append(f"  - Описание: {d['description']}")
+        blocks.append("")
+
+    # 4.3. Должностные лица и сотрудники
     if employees:
-        blocks.append("#### Сотрудники, руководство и контакты (Employee / Department):")
+        blocks.append("#### Сотрудники, руководство и контакты (Employee):")
         for e in employees[:6]:
             pos = f" — {e['position']}" if e.get("position") else ""
             dept = f" ({e['department']})" if e.get("department") else ""
@@ -577,10 +616,15 @@ def format_graph_context(data: dict[str, Any]) -> str:
 
 def create_graph_search_tool(settings: Any):
     """Фабрика инструмента search_knowledge_graph для агента."""
+    if hasattr(settings, "memgraph_enabled") and not getattr(settings, "memgraph_enabled"):
+        return None
+
     uri = getattr(settings, "memgraph_uri", "bolt://localhost:7687")
     user = getattr(settings, "memgraph_user", "")
     password = getattr(settings, "memgraph_password", "")
-    client = KnowledgeGraphClient(uri=uri, user=user, password=password)
+    timeout = getattr(settings, "memgraph_timeout_seconds", 5)
+    max_stems = getattr(settings, "memgraph_max_stems", 5)
+    client = KnowledgeGraphClient(uri=uri, user=user, password=password, timeout=float(timeout), max_stems=max_stems)
 
     @tool("search_knowledge_graph", response_format="content_and_artifact")
     async def search_knowledge_graph(
@@ -595,14 +639,18 @@ def create_graph_search_tool(settings: Any):
         - О режимах хранения, сериях и локациях ("какой режим хранения у Гам-КОВИД-Вак...", "где хранится серия...", "соответствует ли режим зоны температуре препарата")
         - О нормативных актах и правилах ("требования GDP...", "правила хранения иммунобиологических...", "МДЛП постановление 1556")
         - Об информационных системах и мастер-данных ("в какой системе ведутся остатки...", "мастер-система для номенклатуры...", "с кем интегрирована WMS")
-        - О должностях, ролях и ответственности ("кто отвечает за входной контроль...", "роль фармацевта-контролёра")
+        - О должностях, ролях, организациях и контактах ("кто отвечает за входной контроль...", "телефон склада...", "контакты министерства...")
         - О навигации по интерфейсу и меню ("где в меню находится...", "в каком разделе...")
 
         query: ключевые слова процесса, препарата, системы, нормативного акта, меню или действия.
         """
         start = time.monotonic()
         try:
-            data = client.search_graph(query)
+            # Драйвер синхронный: уводим в поток с таймаутом
+            data = await asyncio.wait_for(
+                asyncio.to_thread(client.search_graph, query),
+                timeout=float(timeout),
+            )
             context = format_graph_context(data)
             sources = [{"id": d["id"], "title": d["title"], "type": "graph"} for d in data.get("sources", [])]
             record(
@@ -613,6 +661,9 @@ def create_graph_search_tool(settings: Any):
                 storage_rules_count=len(data.get("storage_rules", [])),
                 systems_count=len(data.get("systems", [])),
                 regulations_count=len(data.get("regulations", [])),
+                organizations_count=len(data.get("organizations", [])),
+                departments_count=len(data.get("departments", [])),
+                employees_count=len(data.get("employees", [])),
                 menus_count=len(data.get("menus", [])),
                 operations_count=len(data.get("operations", [])),
                 duration_ms=round((time.monotonic() - start) * 1000),
@@ -620,8 +671,18 @@ def create_graph_search_tool(settings: Any):
                 context_length=len(context),
             )
             return context, {"sources": sources}
+        except asyncio.TimeoutError:
+            logger.warning("Таймаут обращения к Memgraph (%s с)", timeout)
+            record(
+                "graph_search",
+                title="Поиск по графу знаний (Memgraph)",
+                query=query,
+                status="timeout",
+                duration_ms=round((time.monotonic() - start) * 1000),
+            )
+            return "Поиск по графу знаний превысил время ожидания. Воспользуйтесь поиском по документам search_knowledge_base.", {}
         except Exception as e:
-            logger.warning(f"Ошибка обращения к Memgraph: {e}")
+            logger.warning("Ошибка обращения к Memgraph: %s", e)
             record(
                 "graph_search",
                 title="Поиск по графу знаний (Memgraph)",

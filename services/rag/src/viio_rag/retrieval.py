@@ -12,6 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from viio_rag.knowledge_data import query_terms
 from viio_rag.search_tool import build_access_filter, format_documents
 from viio_rag.diagnostics import capture, record
+from viio_rag.stemmer import stem_word
 
 logger = logging.getLogger(__name__)
 RRF_K = 60
@@ -61,13 +62,19 @@ def rank_documents(
 ) -> list[Document]:
     terms = query_terms(query)
 
+    def matches_term(term: str, target: str) -> bool:
+        if term in target:
+            return True
+        stem = stem_word(term)
+        return bool(stem and len(stem) >= 3 and stem in target)
+
     def score(doc: Document) -> float:
         text = doc.page_content.lower()
         title = str(doc.metadata.get('title', '')).lower()
         filename = str(doc.metadata.get('filename', '')).lower()
-        matched_text = [term for term in terms if term in text]
-        matched_title = [term for term in terms if term in title]
-        matched_filename = [term for term in terms if term in filename]
+        matched_text = [term for term in terms if matches_term(term, text)]
+        matched_title = [term for term in terms if matches_term(term, title)]
+        matched_filename = [term for term in terms if matches_term(term, filename)]
         term_score = TEXT_WEIGHT * len(matched_text) + TITLE_WEIGHT * len(set(matched_title + matched_filename))
         bonus = rrf_scores.get(fragment_key(doc), 0.0) if rrf_scores else 0.0
         total = term_score + bonus

@@ -15,9 +15,9 @@ def test_classify_route_logic():
     prog_ctx = {"user_id": "u1", "role": "programmer"}
     empl_ctx = {"user_id": "u2", "role": "employee"}
 
-    # Arithmetic & rewrite -> direct
+    # Arithmetic & greetings -> direct; rewrite -> rewrite
     assert classify_route("2 + 2", tools, prog_ctx) == "direct"
-    assert classify_route("Перепиши вежливо: Привет", tools, prog_ctx) == "direct"
+    assert classify_route("Перепиши вежливо: Привет", tools, prog_ctx) == "rewrite"
     assert classify_route("Привет!", tools, empl_ctx) == "direct"
 
     # Database -> database (if authorized)

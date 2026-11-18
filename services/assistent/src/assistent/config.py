@@ -1,7 +1,7 @@
 """Модуль конфигурации микросервиса assistent.
 
 Содержит настройки приложения, считываемые из переменных окружения и .env файлов
-на основе Pydantic Settings. Поддерживает работу с LM Studio и Ollama.
+на основе Pydantic Settings. Поддерживает работу с LM Studio, Ollama и Yandex.
 """
 
 import json
@@ -14,16 +14,12 @@ class Settings(BaseSettings):
     """Настройки конфигурации сервиса assistent.
 
     Attributes:
-        llm_provider: Провайдер LLM ('lmstudio' или 'ollama').
+        llm_provider: Провайдер LLM ('lmstudio', 'ollama' или 'yandex').
         lmstudio_base_url: Базовый URL для подключения к LM Studio (OpenAI-совместимый API).
         lmstudio_api_key: Ключ авторизации для LM Studio.
         lmstudio_model: Имя модели LLM в LM Studio для генерации ответов.
-        lmstudio_embedding_model: Имя модели в LM Studio для формирования эмбеддингов.
         ollama_base_url: Базовый URL для подключения к сервису Ollama.
         ollama_model: Имя модели LLM для генерации ответов в Ollama.
-        ollama_embedding_model: Имя модели для формирования эмбеддингов в Ollama.
-        qdrant_url: URL векторного хранилища Qdrant.
-        qdrant_collection_name: Имя коллекции в Qdrant для хранения документов.
         postgres_host: Хост для подключения к PostgreSQL.
         postgres_port: Порт для подключения к PostgreSQL.
         postgres_db: Имя базы данных агента.
@@ -47,6 +43,7 @@ class Settings(BaseSettings):
 
     coding_agent_enabled: bool = True
     supervisor_enabled: bool = False
+    model_first_tools: bool = True
     corrective_rag_enabled: bool = False
     hitl_enabled: bool = False
     text_to_sql_enabled: bool = True
@@ -59,10 +56,11 @@ class Settings(BaseSettings):
     github_mcp_max_chars: int = Field(default=16000, ge=1000, le=48000)
     github_mcp_timeout_seconds: int = Field(default=25, ge=5, le=60)
     assistant_rag_backend: Literal['local', 'yandex'] = 'local'
+    rag_timeout_seconds: int = Field(default=120, ge=5, le=600)
+    rag_context_max_chars: int = Field(default=4500, ge=1000, le=48000)
     chat_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     chat_model: str | None = None
     chat_timeout_seconds: int = Field(default=120, ge=5, le=600)
-    rag_timeout_seconds: int = Field(default=120, ge=5, le=600)
     routing_model: str | None = None
     routing_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     routing_max_tokens: int = Field(default=128, ge=16, le=1024)
@@ -80,8 +78,8 @@ class Settings(BaseSettings):
     conversation_summary_after: int = Field(default=24, ge=12, le=100)
     conversation_history_max_chars: int = Field(default=18000, ge=4000, le=60000)
     consultant_enabled: bool = False
-    consultant_api_key: str | None = None
-    consultant_source_key: str | None = None
+    consultant_api_key: str | None = Field(default=None, repr=False)
+    consultant_source_key: str | None = Field(default=None, repr=False)
     consultant_url: str = 'http://consultant:8000'
     # Независимые бюджеты генерации для консультанта и текстового кодера.
     chat_temperature: float = Field(default=0.0, ge=0, le=2)
@@ -101,10 +99,9 @@ class Settings(BaseSettings):
     memgraph_enabled: bool = Field(default=False, description="Включить поиск по графу знаний Memgraph.")
     memgraph_uri: str = Field(default="bolt://localhost:7687", description="Bolt URI подключения к Memgraph.")
     memgraph_user: str = Field(default="", description="Пользователь Memgraph.")
-    memgraph_password: str = Field(default="", description="Пароль Memgraph.")
-    # Настройки каталога документов и файлового хранилища
-    # Массовая загрузка
-
+    memgraph_password: str = Field(default="", repr=False, description="Пароль Memgraph.")
+    memgraph_timeout_seconds: int = Field(default=5, ge=1, le=60, description="Таймаут запросов к Memgraph в секундах.")
+    memgraph_max_stems: int = Field(default=5, ge=1, le=20, description="Максимальное количество основ запроса для графа.")
 
     # Настройки LM Studio (OpenAI-compatible)
     lmstudio_base_url: str = Field(
@@ -113,6 +110,7 @@ class Settings(BaseSettings):
     )
     lmstudio_api_key: str = Field(
         default="lm-studio",
+        repr=False,
         description="Ключ авторизации для запросов к LM Studio.",
     )
     lmstudio_model: str = Field(
@@ -130,13 +128,7 @@ class Settings(BaseSettings):
         description="Идентификатор модели Ollama для рассуждений агента.",
     )
 
-    # Настройки векторного хранилища и API
-
-
     # Настройки PostgreSQL для хранения состояния агента (LangGraph Checkpointer)
-    rag_context_max_chars: int = Field(default=4500, ge=1000, le=48000)
-
-
     postgres_host: str = Field(
         default="localhost",
         description="Хост для подключения к PostgreSQL.",
@@ -157,16 +149,18 @@ class Settings(BaseSettings):
     )
     postgres_password: str = Field(
         default="postgres",
+        repr=False,
         description="Пароль пользователя PostgreSQL.",
     )
     internal_api_key: str | None = Field(
         default=None,
+        repr=False,
         description="Секретный токен для межсервисной аутентификации (X-Internal-Token).",
     )
 
     service_role: Literal['assistent'] = 'assistent'
     documents_url: str = 'http://localhost:8002'
-    rag_url: str = 'http://localhost:8000'
+    rag_url: str = 'http://localhost:8001'
 
     api_host: str = Field(
         default="0.0.0.0",
@@ -181,9 +175,9 @@ class Settings(BaseSettings):
 
     secure_runtime: bool = False
     database_migrations_enabled: bool = True
-    chat_api_key: str | None = None
-    chat_api_key_previous: str | None = None
-    documents_read_key: str | None = None
+    chat_api_key: str | None = Field(default=None, repr=False)
+    chat_api_key_previous: str | None = Field(default=None, repr=False)
+    documents_read_key: str | None = Field(default=None, repr=False)
     documents_admin_key: str | None = Field(default=None, repr=False)
     agent_max_tool_calls: int = Field(default=24, ge=3, le=64)
 
@@ -196,6 +190,28 @@ class Settings(BaseSettings):
             value = value.strip()
             if not value:
                 return ["programmer", "admin"]
+            if value.startswith("[") and value.endswith("]"):
+                inner = value[1:-1].strip()
+                if not inner:
+                    return []
+                try:
+                    return json.loads(value)
+                except Exception:
+                    return [item.strip().strip("'\"") for item in inner.split(",") if item.strip()]
+            return [item.strip().strip("'\"") for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        return value
+
+    @field_validator('github_allowed_repositories', mode='before')
+    @classmethod
+    def parse_github_allowed_repositories(cls, value: Any) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return []
             if value.startswith("[") and value.endswith("]"):
                 inner = value[1:-1].strip()
                 if not inner:
@@ -235,15 +251,15 @@ class Settings(BaseSettings):
         if not self.secure_runtime:
             return
         required = self.runtime_keys()
-        values=[getattr(self,key) for key in required]
-        if any(not value or len(value)<32 or 'viio-internal-secret-token' in value for value in values):
+        values = [getattr(self, key) for key in required]
+        if any(not value or len(value) < 32 or 'viio-internal-secret-token' in value for value in values):
             raise ValueError('Production requires distinct service keys of at least 32 characters')
-        if len(set(values))!=len(values):
+        if len(set(values)) != len(values):
             raise ValueError('Service keys must have distinct values')
         if self.documents_admin_key and (len(self.documents_admin_key) < 32 or self.documents_admin_key in values):
             raise ValueError('Document write key must be long and distinct')
-        if self.chat_api_key_previous and (len(self.chat_api_key_previous)<32 or self.chat_api_key_previous in values):
+        if self.chat_api_key_previous and (len(self.chat_api_key_previous) < 32 or self.chat_api_key_previous in values):
             raise ValueError('Previous chat key must be long and distinct')
 
     def runtime_keys(self):
-        return ('chat_api_key','documents_read_key')
+        return ('chat_api_key', 'documents_read_key')

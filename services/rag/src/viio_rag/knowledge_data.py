@@ -17,15 +17,24 @@ CREATE TABLE IF NOT EXISTS document_contents (
  search_vector tsvector GENERATED ALWAYS AS
    (to_tsvector('russian',title || ' ' || filename || ' ' || content) || to_tsvector('simple',title || ' ' || filename || ' ' || content)) STORED
 );
+ALTER TABLE document_contents ADD COLUMN IF NOT EXISTS filename text NOT NULL DEFAULT '';
+ALTER TABLE document_contents ADD COLUMN IF NOT EXISTS title text NOT NULL DEFAULT '';
+ALTER TABLE document_contents ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS
+   (to_tsvector('russian',title || ' ' || filename || ' ' || content) || to_tsvector('simple',title || ' ' || filename || ' ' || content)) STORED;
 CREATE INDEX IF NOT EXISTS document_contents_search ON document_contents USING gin(search_vector);
+
 CREATE TABLE IF NOT EXISTS document_publications (
- id uuid PRIMARY KEY,
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  document_id varchar(64) UNIQUE NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
- title text NOT NULL, content text NOT NULL, publisher_id text NOT NULL,
+ title text NOT NULL, content text NOT NULL, publisher_id text NOT NULL DEFAULT 'system',
  published_at timestamptz NOT NULL DEFAULT now(),
  search_vector tsvector GENERATED ALWAYS AS
    (to_tsvector('russian',title || ' ' || content) || to_tsvector('simple',title || ' ' || content)) STORED
 );
+ALTER TABLE document_publications ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();
+ALTER TABLE document_publications ADD COLUMN IF NOT EXISTS publisher_id text NOT NULL DEFAULT 'system';
+ALTER TABLE document_publications ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS
+   (to_tsvector('russian',title || ' ' || content) || to_tsvector('simple',title || ' ' || content)) STORED;
 CREATE INDEX IF NOT EXISTS document_publications_search ON document_publications USING gin(search_vector);
 """
 

@@ -110,8 +110,8 @@ services:
     - POSTGRES_HOST=postgres
     - POSTGRES_PORT=5432
     - POSTGRES_DB=agent_db
-    - POSTGRES_USER=viio_worker
-    - POSTGRES_PASSWORD=${WORKER_DB_PASSWORD:?Configure WORKER_DB_PASSWORD in .env}
+    - POSTGRES_USER=${POSTGRES_USER:-postgres}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD in .env}
     - VIIO_TRACE_DIR=/traces
     - PDF_ENGINE=${PDF_ENGINE:-auto}
     - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}
@@ -194,8 +194,8 @@ services:
     - POSTGRES_HOST=postgres
     - POSTGRES_PORT=5432
     - POSTGRES_DB=agent_db
-    - POSTGRES_USER=viio_documents
-    - POSTGRES_PASSWORD=${DOCUMENTS_DB_PASSWORD:?Configure DOCUMENTS_DB_PASSWORD in .env}
+    - POSTGRES_USER=${POSTGRES_USER:-postgres}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD in .env}
     - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
     - DOCUMENTS_READ_KEY_PREVIOUS=${DOCUMENTS_READ_KEY_PREVIOUS:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:?Configure CONSULTANT_SOURCE_KEY in .env}
@@ -236,6 +236,7 @@ services:
     pids_limit: 128
     mem_limit: 768m
     volumes:
+    - ./services/rag/src:/app/services/rag/src:ro
     - ./services/rag/state:/data/rag-state:ro
     - rag_traces:/traces
     user: 65532:65532
@@ -263,8 +264,8 @@ services:
     - POSTGRES_HOST=postgres
     - POSTGRES_PORT=5432
     - POSTGRES_DB=agent_db
-    - POSTGRES_USER=viio_documents
-    - POSTGRES_PASSWORD=${DOCUMENTS_DB_PASSWORD:?Configure DOCUMENTS_DB_PASSWORD in .env}
+    - POSTGRES_USER=${POSTGRES_USER:-postgres}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD in .env}
     - CONSULTANT_API_KEY=${CONSULTANT_API_KEY:-}
     - CONSULTANT_SOURCE_KEY=${CONSULTANT_SOURCE_KEY:-}
     - PDF_ENGINE=${PDF_ENGINE:-auto}
@@ -344,8 +345,8 @@ services:
     - POSTGRES_HOST=postgres
     - POSTGRES_PORT=5432
     - POSTGRES_DB=agent_db
-    - POSTGRES_USER=viio_assistent
-    - POSTGRES_PASSWORD=${ASSISTENT_DB_PASSWORD:?Configure ASSISTENT_DB_PASSWORD in .env}
+    - POSTGRES_USER=${POSTGRES_USER:-postgres}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD in .env}
     - API_HOST=0.0.0.0
     - API_PORT=8000
     - CODING_AGENT_ENABLED=${CODING_AGENT_ENABLED:-true}
@@ -400,6 +401,7 @@ services:
     - AGENT_MAX_TOOL_CALLS=${AGENT_MAX_TOOL_CALLS:-24}
     - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
     - SKILLS_ENABLED=${SKILLS_ENABLED:-true}
+    - MODEL_FIRST_TOOLS=${MODEL_FIRST_TOOLS:-true}
     - VIIO_TRACE_DIR=/traces
     extra_hosts:
     - host.docker.internal:host-gateway
@@ -412,6 +414,7 @@ services:
         condition: service_healthy
     volumes:
     - assistant_traces:/traces
+    - ./services/assistent/src:/app/services/assistent/src:ro
     - ./Skills:/app/Skills:ro
     - ./.agents/skills:/app/.agents/skills:ro
     healthcheck:
@@ -518,9 +521,9 @@ services:
     - POSTGRES_HOST=postgres
     - POSTGRES_PORT=5432
     - POSTGRES_DB=user_db
-    - POSTGRES_USER=viio_webchat
-    - POSTGRES_PASSWORD=${WEBCHAT_DB_PASSWORD:?Configure WEBCHAT_DB_PASSWORD in .env}
-    - DATABASE_URL=postgresql://viio_webchat:${WEBCHAT_DB_PASSWORD:?Configure WEBCHAT_DB_PASSWORD in .env}@postgres:5432/user_db
+    - POSTGRES_USER=${POSTGRES_USER:-postgres}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD in .env}
+    - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD in .env}@postgres:5432/user_db
     - CHAT_API_KEY=${CHAT_API_KEY:?Configure CHAT_API_KEY in .env}
     - DOCUMENTS_READ_KEY=${DOCUMENTS_READ_KEY:?Configure DOCUMENTS_READ_KEY in .env}
     - DOCUMENTS_ADMIN_KEY=${DOCUMENTS_ADMIN_KEY:?Configure DOCUMENTS_ADMIN_KEY in .env}
@@ -573,11 +576,24 @@ services:
     restart: unless-stopped
     networks:
     - viio_net
+  pdf-worker-init:
+    image: alpine:latest
+    container_name: viio_pdf_worker_init
+    profiles:
+    - pdf
+    user: "0:0"
+    volumes:
+    - docling_models:/models
+    command: ["sh", "-c", "mkdir -p /models/huggingface /models/torch /models/artifacts && chown -R 65532:65532 /models && chmod -R 775 /models"]
+    restart: "no"
   pdf-worker:
     image: viio-pdf-worker:latest
     build: ./workers/pdf-worker
     profiles:
     - pdf
+    depends_on:
+      pdf-worker-init:
+        condition: service_completed_successfully
     environment:
     - INTERNAL_API_KEY=${DOCLING_API_KEY:?Configure DOCLING_API_KEY in .env}
     - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}
