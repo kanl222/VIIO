@@ -51,8 +51,8 @@ async def main(output):
         with (output/name).open('a',encoding='utf-8') as handle:
             handle.write(json.dumps(safe,ensure_ascii=False)+'\n')
     run='kb-eval-'+uuid.uuid4().hex
-    saver,pool=await init_async_postgres_saver(make_conninfo(host='postgres',port=5432,dbname='agent_db',
-        user='viio_assistent',password=os.environ['ASSISTENT_DB_PASSWORD']),run_migrations=False)
+    saver,pool=await init_async_postgres_saver(make_conninfo(host=os.getenv('POSTGRES_HOST','postgres'),port=int(os.getenv('POSTGRES_PORT','5432')),dbname='agent_db',
+        user=os.getenv('POSTGRES_USER','postgres'),password=os.getenv('POSTGRES_PASSWORD','postgres')),run_migrations=False)
     threads=[]
     (output/'cases.json').write_text(json.dumps(CASES,ensure_ascii=False,indent=2),encoding='utf-8')
     append('answers.jsonl',{'type':'configuration','run':run,'main_model':os.getenv('LMSTUDIO_MODEL','provider default'),

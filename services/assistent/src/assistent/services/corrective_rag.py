@@ -18,7 +18,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
@@ -31,9 +31,9 @@ from assistent.services.agent_policy import (
     AgentRuntimeContext,
     AgentState,
     ctx,
+    finalize_response,
     history_for_turn,
     last_question,
-    finalize_response,
 )
 from assistent.services.answer_sources import (
     cited_sources,
@@ -45,6 +45,12 @@ from assistent.services.answer_sources import (
 from assistent.services.diagnostics import record
 
 logger = logging.getLogger(__name__)
+
+_CONTEXT_BLOCK_RE = re.compile(r"<context\b[^>]*>[\s\S]*?</context>", re.IGNORECASE)
+_CATALOG_QUERY_RE = re.compile(
+    r"(?:список|перечень|какие)\s+(?:документ|инструкци|регламент)",
+    re.IGNORECASE,
+)
 
 GRADE_DOCUMENTS_PROMPT = """Оцени релевантность фрагментов корпоративных документов вопросу пользователя.
 
@@ -61,19 +67,6 @@ GRADE_DOCUMENTS_PROMPT = """Оцени релевантность фрагмен
 - Ответь строго:
   - 'yes' (или номера релевантных фрагментов через запятую, например '1, 2'), если фрагменты содержат факты или сведения для ответа.
   - 'no', если фрагменты не относятся к теме или не содержат нужной информации."""
-
-
-def filter_context_by_indices(raw_reference: str, indices: Sequence[int]) -> str:
-    """Filter XML <context> fragments by 1-based indices (Filter-Reranker paradigm)."""
-    matches = list(re.finditer(r'<context\b[^>]*>[\s\S]*?</context>', raw_reference))
-    if not matches:
-        return raw_reference
-    selected_chunks = []
-    target_set = set(indices)
-    for idx, match in enumerate(matches, 1):
-        if idx in target_set:
-            selected_chunks.append(match.group(0))
-    return "\n\n".join(selected_chunks) if selected_chunks else raw_reference
 
 REWRITE_QUERY_PROMPT = """Сформулируй оптимизированный поисковый запрос (2-5 ключевых слов) для корпоративной базы знаний.
 
@@ -114,14 +107,36 @@ class CorrectiveRAGState(AgentState, total=False):
     retrieved_docs: str
     raw_reference: str
     rewrite_count: int
-    is_relevant: bool
-    is_grounded: bool
+    is_rewrite_hop: bool
+    is_relevant: bool | None
+    is_grounded: bool | None
     draft_answer: str
 
 
+def filter_context_by_indices(raw_reference: str, indices: Sequence[int]) -> str:
+    """Filter XML <context> fragments by 1-based indices (Filter-Reranker paradigm)."""
+    matches = list(_CONTEXT_BLOCK_RE.finditer(raw_reference))
+    if not matches:
+        return raw_reference
+    target_set = set(indices)
+    selected_chunks = [
+        match.group(0)
+        for idx, match in enumerate(matches, 1)
+        if idx in target_set
+    ]
+    return "\n\n".join(selected_chunks) if selected_chunks else raw_reference
+
+
 def is_affirmative(text: str) -> bool:
+    """Checks whether cleaned LLM verdict is affirmative without false positives on 'нерелевантно'."""
     clean = strip_thinking(text).strip().lower()
-    return clean.startswith("yes") or clean.startswith("да") or "релевант" in clean
+    if not clean or clean.startswith("no") or clean.startswith("нет") or "нерелевант" in clean or "не релевант" in clean:
+        return False
+    return (
+        clean.startswith("yes")
+        or clean.startswith("да")
+        or bool(re.search(r"\bрелевант", clean))
+    )
 
 
 def build_corrective_rag_graph(
@@ -144,35 +159,61 @@ def build_corrective_rag_graph(
     list_tool = tools_by_name.get("list_documents")
 
     # 1. Retrieve Node
-    async def retrieve_node(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    async def retrieve_node(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict[str, Any]:
         history, boundary = history_for_turn(state, runtime)
-        question = state.get("question") or last_question(history)
-        current_query = state.get("current_query") or question
-        user_context = ctx(runtime).get("user_context", {})
+        is_rewrite_hop = bool(state.get("is_rewrite_hop", False))
 
-        # Check for catalog inquiry
-        is_catalog = bool(re.search(r"(?:список|перечень|какие)\s+(?:документ|инструкци|регламент)", question, re.I))
+        if is_rewrite_hop:
+            question = state.get("question") or last_question(history)
+            current_query = state.get("current_query") or question
+            rewrite_count = state.get("rewrite_count", 0)
+        else:
+            # Новый ход диалога: сбрасываем состояние предыдущего хода из checkpointer
+            question = last_question(history) or state.get("question", "")
+            current_query = question
+            rewrite_count = 0
+
+        user_context = ctx(runtime).get("user_context", {})
+        base_turn_state: dict[str, Any] = {
+            **boundary,
+            "question": question,
+            "current_query": current_query,
+            "rewrite_count": rewrite_count,
+            "is_rewrite_hop": False,
+            "is_relevant": None,
+            "is_grounded": None,
+            "draft_answer": "",
+        }
+
+        # Check for catalog inquiry on initial turn
+        is_catalog = not is_rewrite_hop and bool(_CATALOG_QUERY_RE.search(question))
         if is_catalog and list_tool:
             try:
-                res = await list_tool.ainvoke({"query": current_query}, config={"configurable": {"user_context": user_context}})
+                res = await list_tool.ainvoke(
+                    {"query": current_query},
+                    config={"configurable": {"user_context": user_context}},
+                )
                 content = res[0] if isinstance(res, tuple) else str(res)
                 record("crag_retrieve", query=current_query, mode="catalog", length=len(content))
                 return {
-                    **boundary,
-                    "question": question,
-                    "current_query": current_query,
+                    **base_turn_state,
                     "retrieved_docs": content,
                     "raw_reference": "",
                     "is_relevant": bool(content and NOT_FOUND_PHRASE not in content),
                 }
-            except Exception as e:
-                logger.warning("Catalog search tool failed: %s", e)
+            except Exception as exc:
+                logger.warning("Catalog search tool failed: %s", exc)
 
         raw_ref = ""
-        # Search via tool
         if search_tool:
             try:
-                raw_res = await search_tool.ainvoke({"query": current_query}, config={"configurable": {"user_context": user_context}})
+                raw_res = await search_tool.ainvoke(
+                    {"query": current_query},
+                    config={"configurable": {"user_context": user_context}},
+                )
                 raw_ref = str(raw_res) if raw_res else ""
             except Exception as exc:
                 logger.warning("Knowledge search tool failed: %s", exc)
@@ -183,40 +224,58 @@ def build_corrective_rag_graph(
         readable = readable_reference(raw_ref, max_chars=context_max_chars) if raw_ref else ""
         record("crag_retrieve", query=current_query, chars=len(readable), raw_chars=len(raw_ref))
         return {
-            **boundary,
-            "question": question,
-            "current_query": current_query,
+            **base_turn_state,
             "retrieved_docs": readable,
             "raw_reference": raw_ref,
         }
 
     # 2. Grade Documents Node
-    async def grade_documents_node(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    async def grade_documents_node(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict[str, Any]:
         docs = state.get("retrieved_docs", "").strip()
         question = state.get("question", "")
 
-        # Fast heuristic checks before LLM invocation
-        if not docs or NOT_FOUND_PHRASE in docs or "ничего не найдено" in docs.lower() or "ошибка при обращении" in docs.lower():
-            record("crag_grade_documents", relevant=False, fast_path=True)
-            return {"is_relevant": False}
-
-        # If already marked relevant (e.g., catalog listing)
         if state.get("is_relevant") is True:
             return {"is_relevant": True}
 
-        prompt = GRADE_DOCUMENTS_PROMPT.format(question=question, documents=docs[:3000])
+        docs_lower = docs.lower()
+        if (
+            not docs
+            or NOT_FOUND_PHRASE in docs
+            or "ничего не найдено" in docs_lower
+            or "ошибка при обращении" in docs_lower
+            or "база знаний временно недоступна" in docs_lower
+        ):
+            record("crag_grade_documents", relevant=False, fast_path=True)
+            return {"is_relevant": False}
+
+        raw_ref = state.get("raw_reference", "")
+        matches_count = len(_CONTEXT_BLOCK_RE.findall(raw_ref))
+        prompt = GRADE_DOCUMENTS_PROMPT.format(
+            question=question,
+            documents=docs[:context_max_chars],
+        )
+
+        eval_text = ""
         try:
             eval_res = await llm.ainvoke([HumanMessage(content=prompt)])
-            eval_text = str(eval_res.content).strip()
+            eval_text = strip_thinking(str(eval_res.content)).strip()
 
-            # Filter-Reranker paradigm (survey Part 3): extract specific chunk indices if provided
-            raw_ref = state.get("raw_reference", "")
-            matches_count = len(re.findall(r'<context\b[^>]*>', raw_ref))
-            chunk_nums = [int(n) for n in re.findall(r'\b\d+\b', eval_text)]
-            valid_nums = [n for n in chunk_nums if 1 <= n <= matches_count]
+            # Filter-Reranker paradigm: extract specific chunk indices from cleaned response
+            if not eval_text.lower().startswith("no") and not eval_text.lower().startswith("нет"):
+                chunk_nums = [int(n) for n in re.findall(r"\b\d+\b", eval_text)]
+                valid_nums = list(dict.fromkeys(n for n in chunk_nums if 1 <= n <= matches_count))
+            else:
+                valid_nums = []
 
-            if valid_nums and matches_count > 1:
-                filtered_raw = filter_context_by_indices(raw_ref, valid_nums)
+            if valid_nums and matches_count >= 1:
+                filtered_raw = (
+                    filter_context_by_indices(raw_ref, valid_nums)
+                    if len(valid_nums) < matches_count
+                    else raw_ref
+                )
                 filtered_docs = readable_reference(filtered_raw, max_chars=context_max_chars)
                 record(
                     "crag_grade_documents",
@@ -244,14 +303,16 @@ def build_corrective_rag_graph(
             "crag_grade_documents",
             relevant=relevant,
             method="binary",
-            total_chunks=matches_count if "matches_count" in locals() else 0,
-            eval_output=eval_text if "eval_text" in locals() else None,
+            total_chunks=matches_count,
+            eval_output=eval_text,
             query=state.get("current_query"),
         )
         return {"is_relevant": relevant}
 
-    # Routing condition after grading
-    def grade_condition(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> Literal["generate", "rewrite_query", "fallback"]:
+    def grade_condition(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> Literal["generate", "rewrite_query", "fallback"]:
         if state.get("is_relevant"):
             return "generate"
         if state.get("rewrite_count", 0) < max_rewrites:
@@ -259,7 +320,10 @@ def build_corrective_rag_graph(
         return "fallback"
 
     # 3. Rewrite Query Node
-    async def rewrite_query_node(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    async def rewrite_query_node(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict[str, Any]:
         question = state.get("question", "")
         current_query = state.get("current_query", question)
         rewrite_count = state.get("rewrite_count", 0) + 1
@@ -267,11 +331,12 @@ def build_corrective_rag_graph(
         prompt = REWRITE_QUERY_PROMPT.format(question=question, current_query=current_query)
         try:
             rewrite_res = await llm.ainvoke([HumanMessage(content=prompt)])
-            new_query = strip_thinking(str(rewrite_res.content)).strip().strip('"\'')
+            new_query = strip_thinking(str(rewrite_res.content)).strip().strip("\"'")
+            # Берем только первую непустую строку на случай многострочного вывода
+            new_query = next((line.strip() for line in new_query.splitlines() if line.strip()), "")
             if not new_query or new_query.lower() == current_query.lower():
-                # Extract simple keywords if model didn't alter
                 words = [w for w in re.findall(r"\w+", question) if len(w) > 3]
-                new_query = " ".join(words[:4]) or question
+                new_query = " ".join(words[:5]) or question
         except Exception as exc:
             logger.warning("Rewrite query failed: %s", exc)
             new_query = question
@@ -286,15 +351,22 @@ def build_corrective_rag_graph(
         return {
             "current_query": new_query,
             "rewrite_count": rewrite_count,
+            "is_rewrite_hop": True,
         }
 
     # 4. Generate Node
-    async def generate_node(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    async def generate_node(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict[str, Any]:
         question = state.get("question", "")
         docs = state.get("retrieved_docs", "")
-        sys_prompt = system_prompt or DOCUMENT_TURN_PROMPT
+        sys_prompt = system_prompt or DOCUMENT_TURN_PROMPT or DEFAULT_SYSTEM_PROMPT
 
-        user_content = f"Справочные данные из базы знаний:\n\n{docs}\n\nВопрос пользователя:\n{question}"
+        user_content = (
+            f"Справочные данные из базы знаний:\n\n{docs}\n\n"
+            f"Вопрос пользователя:\n{question}"
+        )
         try:
             gen_res = await llm.ainvoke([
                 SystemMessage(content=sys_prompt),
@@ -314,19 +386,24 @@ def build_corrective_rag_graph(
         return {"draft_answer": draft}
 
     # 5. Check Groundedness Node (Self-RAG)
-    async def check_groundedness_node(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    async def check_groundedness_node(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict[str, Any]:
         docs = state.get("retrieved_docs", "")
         draft = state.get("draft_answer", "")
         question = state.get("question", "")
 
-        # If already acknowledged lack of information
-        if NOT_FOUND_PHRASE in draft:
+        if not draft or NOT_FOUND_PHRASE in draft:
             return {"is_grounded": True}
 
-        prompt = CHECK_GROUNDEDNESS_PROMPT.format(documents=docs[:3000], answer=draft)
+        prompt = CHECK_GROUNDEDNESS_PROMPT.format(
+            documents=docs[:context_max_chars],
+            answer=draft,
+        )
         try:
             eval_res = await llm.ainvoke([HumanMessage(content=prompt)])
-            eval_text = str(eval_res.content).strip()
+            eval_text = strip_thinking(str(eval_res.content)).strip()
             grounded = is_affirmative(eval_text)
         except Exception as exc:
             logger.warning("Groundedness evaluation failed: %s", exc)
@@ -342,18 +419,29 @@ def build_corrective_rag_graph(
             faithfulness_score=1.0 if grounded else 0.0,
         )
         if not grounded:
-            # Replace hallucinated draft with a cautious, grounded notification
             draft = (
-                f"В найденных материалах компании недостаточно подтверждённых сведений для полного ответа "
+                f"{NOT_FOUND_PHRASE}\n"
+                f"В найденных материалах компании недостаточно подтверждённых сведений для точного ответа "
                 f"на вопрос «{question}». Рекомендуется уточнить запрос или обратиться к ответственным сотрудникам."
             )
+            return {
+                "is_grounded": False,
+                "draft_answer": draft,
+                "raw_reference": "",
+            }
 
-        return {"is_grounded": grounded, "draft_answer": draft}
+        return {"is_grounded": True, "draft_answer": draft}
 
     # 6. Fallback Node
-    def fallback_node(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    def fallback_node(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict[str, Any]:
         question = state.get("question", "")
-        answer = f"{NOT_FOUND_PHRASE}\nПо вопросу «{question}» в регламентах и документах компании сведений не найдено."
+        answer = (
+            f"{NOT_FOUND_PHRASE}\n"
+            f"По вопросу «{question}» в регламентах и документах компании сведений не найдено."
+        )
         record("crag_fallback", question=question, attempts=state.get("rewrite_count", 0))
         return {
             "draft_answer": answer,
@@ -361,7 +449,10 @@ def build_corrective_rag_graph(
         }
 
     # 7. Finalize Node
-    def finalize_node(state: CorrectiveRAGState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+    def finalize_node(
+        state: CorrectiveRAGState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict[str, Any]:
         raw_ref = state.get("raw_reference", "")
         draft = state.get("draft_answer", "")
 

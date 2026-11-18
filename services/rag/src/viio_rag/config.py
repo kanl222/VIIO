@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     memgraph_user: str = ''
     memgraph_password: str = Field(default='', repr=False)
     memgraph_enabled: bool = True
+    memgraph_timeout_seconds: int = Field(default=5, ge=1, le=60)
+    memgraph_max_stems: int = Field(default=5, ge=1, le=20)
     qdrant_url: str = 'http://localhost:6333'
     qdrant_api_key: str | None = Field(default=None, repr=False)
     qdrant_collection_name: str = 'knowledge_base'
@@ -33,7 +35,7 @@ class Settings(BaseSettings):
     postgres_host: str = 'localhost'
     postgres_port: int = 5432
     postgres_db: str = 'agent_db'
-    postgres_user: str = 'viio_documents'
+    postgres_user: str = 'postgres'
     postgres_password: str = Field(default='postgres', repr=False)
     documents_read_key: str | None = Field(default=None, repr=False)
     documents_read_key_previous: str | None = Field(default=None, repr=False)

@@ -52,7 +52,8 @@ async def inspect(output,answers_file):
     output=Path(output);output.mkdir(parents=True,exist_ok=True)
     evidence=output/'contexts';evidence.mkdir(exist_ok=True)
     s=Settings(qdrant_url='http://qdrant:6333',qdrant_api_key=os.environ['QDRANT_READ_KEY'],
-        postgres_host='postgres',postgres_port=5432,postgres_user='viio_documents',postgres_password=os.environ['DOCUMENTS_DB_PASSWORD'])
+        postgres_host=os.getenv('POSTGRES_HOST','postgres'),postgres_port=int(os.getenv('POSTGRES_PORT','5432')),
+        postgres_user=os.getenv('POSTGRES_USER','postgres'),postgres_password=os.getenv('POSTGRES_PASSWORD','postgres'))
     delegate=create_embeddings(s)
     class Cache(Embeddings):
         def __init__(self):self.cache={};self.lock=threading.Lock()

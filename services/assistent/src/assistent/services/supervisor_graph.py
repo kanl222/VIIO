@@ -1,8 +1,9 @@
 """Supervisor StateGraph for multi-agent routing and orchestration in LangGraph.
 
 Nodes:
-- route: Intent classification and specialist selection
-- direct: Instant responses for calculations, text rewrites, and simple pleasantries
+- route: Intent classification and specialist selection (с проверкой ролей)
+- direct: Instant responses for calculations and simple pleasantries
+- rewrite: Text rewriting with the editor prompt
 - knowledge: RAG & company document Q&A
 - coding: Coding agent & GitHub inspection
 - database: PostgreSQL inspection and read queries
@@ -11,13 +12,14 @@ Nodes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Sequence
 from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import StateGraph, START, END
@@ -25,70 +27,93 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
 from assistent.prompts import (
-    DEFAULT_SYSTEM_PROMPT,
+    DATABASE_SYSTEM_PROMPT,
     GENERAL_SYSTEM_PROMPT,
     REWRITE_SYSTEM_PROMPT,
-    CODING_SYSTEM_PROMPT,
-    DATABASE_SYSTEM_PROMPT,
+    build_coding_prompt,
+    build_system_prompt,
 )
 from assistent.services.agent_policy import (
     AgentRuntimeContext,
     AgentState,
+    attach_reference_sources,
+    cited_sources,
     classify,
+    clean_answer,
     ctx,
+    finalize_response,
     history_for_turn,
     last_human_index,
     last_question,
     turn_provenance,
-    cited_sources,
-    clean_answer,
-    finalize_response,
-    attach_reference_sources,
 )
-from assistent.services.agent_runtime import build_runtime
-from assistent.services.request_policy import is_coding_request
-from assistent.services.database_agent import is_database_request
-from assistent.services.dialogue_summary import compact_dialogue
+from assistent.services.agent_runtime import _content_to_str, build_runtime
 from assistent.services.answer_sources import strip_thinking
-from asyncio import timeout
+from assistent.services.database_agent import is_database_request
 from assistent.services.diagnostics import model_call, record
+from assistent.services.request_policy import is_coding_request
 from assistent.security import has_role_access
 from assistent.tools.postgres_tool import DATABASE_ROLES
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CODING_ROLES = frozenset({"programmer", "admin"})
+
+KNOWLEDGE_TOOL_NAMES = (
+    "search_knowledge_base", "search_knowledge_graph", "list_documents",
+    "search_document_content", "manage_plan", "save_knowledge",
+    "list_agent_skills", "activate_agent_skill",
+)
+CODING_TOOL_NAMES = (
+    "github_repository", "coding_agent", "search_knowledge_base", "manage_plan",
+    "list_agent_skills", "activate_agent_skill",
+)
+
+# Только явное намерение работать с кодом/репозиторием: слово «репозиторий» само по себе не триггер
+_GITHUB_INTENT = re.compile(
+    r'\b(?:github|гитхаб|gitlab|коммит\w*|пулл.?реквест\w*)\b'
+    r'|\b(?:список|какие|покажи|доступные|структур\w*|ветк\w*)\s+(?:\w+\s+)?(?:репозитор\w*|репоизтор\w*)',
+    re.I,
+)
+_CJK_OR_KANA = re.compile(r'[\u4e00-\u9fff\u3040-\u30ff]')
+
 
 def is_github_request(question: str) -> bool:
-    return bool(re.search(r'\b(?:github|гитхаб|gitlab|репозитор\w*|репоизтор\w*|коммит\w*|пулл.?реквест\w*)\b', question, re.I))
+    return bool(_GITHUB_INTENT.search(question))
 
 
-def classify_route(question: str, tools_available: set[str], user_context: dict[str, Any]) -> str:
-    """Classify user request to choose the appropriate specialist node."""
-    # 1. Direct calculations
+def route_access(tools_available: set[str], user_context: dict[str, Any],
+                 coding_roles: Sequence[str] = DEFAULT_CODING_ROLES) -> tuple[bool, bool]:
+    """Единое место решения о доступе: (можно в базу данных, можно в кодинг)."""
+    can_db = ("postgresql_readonly" in tools_available
+              and has_role_access(user_context, DATABASE_ROLES))
+    can_code = (bool({"github_repository", "coding_agent"} & tools_available)
+                and has_role_access(user_context, set(coding_roles)))
+    return can_db, can_code
+
+
+def classify_route(question: str, tools_available: set[str], user_context: dict[str, Any],
+                   coding_roles: Sequence[str] = DEFAULT_CODING_ROLES) -> str:
+    """Classify user request to choose the appropriate specialist node.
+
+    Команды /db и /code проходят ту же проверку ролей, что и обычные запросы.
+    """
     info = classify(question)
     if info.calc is not None:
         return "direct"
 
-    # 2. Database inquiries (/db or question about DB/tables/schema)
     clean_q = question.strip().strip("«»\"'").strip()
-    parts = clean_q.split(maxsplit=1)
-    if parts and parts[0].lower() == "/db":
-        if "postgresql_readonly" in tools_available:
-            return "database"
-    elif is_database_request(clean_q):
-        if "postgresql_readonly" in tools_available and has_role_access(user_context, DATABASE_ROLES):
-            return "database"
+    command = (clean_q.split(maxsplit=1) or [""])[0].lower()
+    can_db, can_code = route_access(tools_available, user_context, coding_roles)
 
-    # 3. Coding requests (/code or coding/github intent)
-    if (parts and parts[0].lower() == "/code") or is_coding_request(clean_q) or is_github_request(clean_q):
-        if any(t in tools_available for t in ("github_repository", "coding_agent")):
-            return "coding"
-
-    # 4. Text rewrite / General pleasantries
-    if info.mode in ("rewrite", "general"):
+    if can_db and (command == "/db" or is_database_request(clean_q)):
+        return "database"
+    if can_code and (command == "/code" or is_coding_request(clean_q) or is_github_request(clean_q)):
+        return "coding"
+    if info.mode == "rewrite":
+        return "rewrite"
+    if info.mode == "general":
         return "direct"
-
-    # 5. Default domain / knowledge base
     return "knowledge"
 
 
@@ -105,65 +130,58 @@ def build_supervisor_graph(
     corrective_rag: bool = False,
     database_analyst: bool = True,
     routing_llm: BaseChatModel | None = None,
+    coding_roles: Sequence[str] = DEFAULT_CODING_ROLES,
+    allow_model_direct: bool = False,
     **extra_kwargs: Any,
 ) -> CompiledStateGraph:
-    """Constructs a Supervisor StateGraph that orchestrates specialized sub-runtimes."""
+    """Constructs a Supervisor StateGraph that orchestrates specialized sub-runtimes.
+
+    allow_model_direct: разрешить модели-маршрутизатору отправлять запрос в direct (без поиска и источников).
+    По умолчанию выключено: выбор direct остаётся за правилами, ошибка модели там обходится дороже лишнего поиска.
+    """
     active_tools = list(tools or [])
     tools_by_name = {t.name: t for t in active_tools}
-    all_tool_names = set(tools_by_name.keys())
+    all_tool_names = set(tools_by_name)
+    coding_roles = tuple(coding_roles)
 
-    # Build specialized sub-runtimes with isolated tools & prompts
-    # 1. Knowledge Specialist (Unified GraphRAG: search_knowledge_base, list_documents, search_document_content, manage_plan, save_knowledge, skills)
-    knowledge_tools = [t for t in active_tools if t.name in (
-        "search_knowledge_base", "list_documents", "search_document_content", "manage_plan", "save_knowledge",
-        "list_agent_skills", "activate_agent_skill"
-    )]
+    def sub_runtime(sub_tools, prompt, *, calls=max_tool_calls):
+        return build_runtime(
+            llm=llm,
+            tools=sub_tools,
+            checkpointer=False,
+            system_prompt=prompt,
+            context_max_chars=context_max_chars,
+            summary_after=summary_after,  # 0 = сжатие выключено; проверьте семантику в compact_dialogue
+            history_max_chars=history_max_chars,
+            model_first_tools=model_first_tools,
+            task_routing=False,
+            max_tool_calls=calls,
+        )
+
+    # 1. Knowledge Specialist
+    knowledge_tools = [t for t in active_tools if t.name in KNOWLEDGE_TOOL_NAMES]
+    knowledge_prompt = system_prompt or build_system_prompt({t.name for t in knowledge_tools})
     if corrective_rag:
         from assistent.services.corrective_rag import build_corrective_rag_graph
         knowledge_runtime = build_corrective_rag_graph(
             llm=llm,
             tools=knowledge_tools,
             checkpointer=False,
-            system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
+            system_prompt=knowledge_prompt,
             context_max_chars=context_max_chars,
             history_max_chars=history_max_chars,
             max_rewrites=2,
         )
     else:
-        knowledge_runtime = build_runtime(
-            llm=llm,
-            tools=knowledge_tools,
-            checkpointer=False,
-            system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
-            context_max_chars=context_max_chars,
-            summary_after=0,  # History compaction handled at supervisor level
-            history_max_chars=history_max_chars,
-            model_first_tools=model_first_tools,
-            task_routing=False,
-            max_tool_calls=max_tool_calls,
-        )
+        knowledge_runtime = sub_runtime(knowledge_tools, knowledge_prompt)
 
-    # 2. Coding Specialist can consult indexed code, GitHub, and procedural skills.
-    coding_tools = [t for t in active_tools if t.name in (
-        "github_repository", "coding_agent", "search_knowledge_base", "manage_plan",
-        "list_agent_skills", "activate_agent_skill"
-    )]
-    coding_runtime = build_runtime(
-        llm=llm,
-        tools=coding_tools,
-        checkpointer=False,
-        system_prompt=CODING_SYSTEM_PROMPT,
-        context_max_chars=context_max_chars,
-        summary_after=0,
-        history_max_chars=history_max_chars,
-        model_first_tools=model_first_tools,
-        task_routing=False,
-        max_tool_calls=max_tool_calls,
-    )
+    # 2. Coding Specialist: промпт под реально доступные инструменты
+    coding_tools = [t for t in active_tools if t.name in CODING_TOOL_NAMES]
+    coding_runtime = sub_runtime(coding_tools, build_coding_prompt({t.name for t in coding_tools}))
 
-    # 3. Database Specialist (Interactive Text-to-SQL Analyst or Runtime)
-    database_tools = [t for t in active_tools if t.name in ("postgresql_readonly",)]
-    if database_analyst and any(t.name == "postgresql_readonly" for t in active_tools):
+    # 3. Database Specialist
+    database_tools = [t for t in active_tools if t.name == "postgresql_readonly"]
+    if database_analyst and database_tools:
         from assistent.services.database_subgraph import build_database_analyst_graph
         database_runtime = build_database_analyst_graph(
             llm=llm,
@@ -172,168 +190,176 @@ def build_supervisor_graph(
             system_prompt=DATABASE_SYSTEM_PROMPT,
         )
     else:
-        database_runtime = build_runtime(
-            llm=llm,
-            tools=database_tools,
-            checkpointer=False,
-            system_prompt=DATABASE_SYSTEM_PROMPT,
-            context_max_chars=context_max_chars,
-            summary_after=0,
-            history_max_chars=history_max_chars,
-            model_first_tools=model_first_tools,
-            task_routing=False,
-            max_tool_calls=max_tool_calls,
-        )
+        database_runtime = sub_runtime(database_tools, DATABASE_SYSTEM_PROMPT)
 
-    # Direct Specialist: handles rewrite & polite conversational phrases without tools
-    direct_runtime = build_runtime(
-        llm=llm,
-        tools=[],
-        checkpointer=False,
-        system_prompt=GENERAL_SYSTEM_PROMPT,
-        context_max_chars=context_max_chars,
-        summary_after=0,
-        history_max_chars=history_max_chars,
-        model_first_tools=model_first_tools,
-        task_routing=False,
-        max_tool_calls=1,
-    )
+    # 4. Direct и Rewrite: без инструментов, у каждого свой промпт
+    direct_runtime = sub_runtime([], GENERAL_SYSTEM_PROMPT, calls=1)
+    rewrite_runtime = sub_runtime([], REWRITE_SYSTEM_PROMPT, calls=1)
 
-    # Supervisor Node: Route determination
     async def route_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
         history, boundary = history_for_turn(state, runtime)
         question = last_question(history)
         user_context = ctx(runtime).get("user_context", {})
-        decision = classify_route(question, all_tool_names, user_context)
-        origin = 'rules'
-        if routing_llm is not None and decision != 'direct' and not question.lstrip().startswith('/'):
-            choices = ['knowledge', 'direct']
-            if {'github_repository', 'coding_agent'} & all_tool_names:
-                choices.append('coding')
-            if 'postgresql_readonly' in all_tool_names and has_role_access(user_context, DATABASE_ROLES):
-                choices.append('database')
+        decision = classify_route(question, all_tool_names, user_context, coding_roles)
+        origin = "rules"
+
+        can_db, can_code = route_access(all_tool_names, user_context, coding_roles)
+        choices = ["knowledge"]
+        if allow_model_direct:
+            choices.append("direct")
+        if can_code:
+            choices.append("coding")
+        if can_db:
+            choices.append("database")
+
+        # Модель уточняет маршрут только для обычных запросов: не для команд, не для прямых ответов и rewrite
+        if (routing_llm is not None and len(choices) > 1
+                and decision not in ("direct", "rewrite")
+                and not question.lstrip().startswith("/")):
             try:
-                async with timeout(5):
-                    examples: list[str] = []
-                    if 'direct' in choices:
-                        examples.append('Запрос: Привет -> direct')
-                        examples.append('Запрос: Расскажи шутку или анекдот -> direct')
-                    if 'knowledge' in choices:
-                        examples.append('Запрос: Как оформить отпуск по регламенту? -> knowledge')
-                    if 'coding' in choices:
-                        examples.append('Запрос: Напиши функцию на python -> coding')
-                    if 'database' in choices:
-                        examples.append('Запрос: Покажи таблицы базы данных -> database')
-
-                    prompt_parts = [
-                        '/no_think',
-                        'Ты — классификатор запросов. Верни ровно одну метку из: ' + ', '.join(choices) + '.',
-                        'knowledge — регламенты, документы компании.',
-                        'direct — разговоры, шутки, общие вопросы.',
-                    ]
-                    if 'coding' in choices:
-                        prompt_parts.append('coding — написание и просмотр кода.')
-                    if 'database' in choices:
-                        prompt_parts.append('database — таблицы и схемы БД.')
-                    if examples:
-                        prompt_parts.append('\nПримеры:\n' + '\n'.join(examples))
-                    prompt_parts.append('\nВерни ТОЛЬКО ОДНО СЛОВО метки из списка.')
-
-                    result = await model_call(routing_llm, [
-                        SystemMessage(content='\n'.join(prompt_parts)),
+                descriptions = {
+                    "knowledge": "knowledge — регламенты, документы компании, термины, инструкции.",
+                    "direct": "direct — разговоры, шутки, общие вопросы.",
+                    "coding": "coding — написание и просмотр кода, репозитории.",
+                    "database": "database — таблицы и схемы БД.",
+                }
+                examples = {
+                    "knowledge": "Запрос: Как оформить отпуск по регламенту? -> knowledge",
+                    "direct": "Запрос: Расскажи шутку или анекдот -> direct",
+                    "coding": "Запрос: Напиши функцию на python -> coding",
+                    "database": "Запрос: Покажи таблицы базы данных -> database",
+                }
+                routing_prompt = "\n".join([
+                    "/no_think",
+                    "Ты — классификатор запросов. Верни ровно одну метку из: " + ", ".join(choices) + ".",
+                    *(descriptions[c] for c in choices),
+                    "",
+                    "Примеры:",
+                    *(examples[c] for c in choices),
+                    "",
+                    "Верни ТОЛЬКО ОДНО СЛОВО метки из списка.",
+                ])
+                result = await asyncio.wait_for(
+                    model_call(routing_llm, [
+                        SystemMessage(content=routing_prompt),
                         HumanMessage(content=question),
-                    ])
-                clean_content = strip_thinking(str(result.content)).strip().lower()
-                if clean_content in choices:
-                    decision, origin = clean_content, 'model'
-                else:
-                    match = re.search(r'\b(' + '|'.join(re.escape(c) for c in choices) + r')\b', clean_content)
-                    if match:
-                        decision, origin = match.group(1), 'model'
+                    ]),
+                    timeout=5,
+                )
+                label = strip_thinking(_content_to_str(result.content)).strip().lower()
+                if label not in choices:
+                    match = re.search(r"\b(" + "|".join(re.escape(c) for c in choices) + r")\b", label)
+                    label = match.group(1) if match else ""
+                if label:
+                    decision, origin = label, "model"
             except Exception as error:
-                logger.warning('Routing model unavailable: %s', type(error).__name__)
-        record("route", mode=decision, supervisor=True, tools=sorted(all_tool_names), branch=decision, origin=origin)
-        return {**boundary, 'supervisor_route': decision}
+                logger.warning("Routing model unavailable: %s", type(error).__name__)
 
-    def route_condition(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> Literal["knowledge", "coding", "database", "direct"]:
-        return state['supervisor_route']
+        record("route", mode=decision, supervisor=True, tools=sorted(all_tool_names),
+               branch=decision, origin=origin)
+        return {**boundary, "supervisor_route": decision}
 
-    # Specialist Nodes
+    def route_condition(state: AgentState, runtime: Runtime[AgentRuntimeContext]
+                        ) -> Literal["knowledge", "coding", "database", "direct", "rewrite"]:
+        return state["supervisor_route"]
+
+    def denied(specialist: str) -> dict[str, Any]:
+        record("specialist_denied", specialist=specialist)
+        return {"messages": [AIMessage(content="Недостаточно прав для этого режима.")]}
+
     async def knowledge_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
         history, _ = history_for_turn(state, runtime)
-        question = last_question(history)
-        record("specialist_dispatch", specialist="knowledge", name="Аналитик базы знаний (RAG)", question=question[:200])
+        record("specialist_dispatch", specialist="knowledge", name="Аналитик базы знаний (RAG)",
+               question=last_question(history)[:200])
         return await knowledge_runtime.ainvoke(state, context=ctx(runtime))
 
     async def coding_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+        # Повторная проверка на случай, если маршрут задан в обход route_node
+        _, can_code = route_access(all_tool_names, ctx(runtime).get("user_context", {}), coding_roles)
+        if not can_code:
+            return denied("coding")
         history, _ = history_for_turn(state, runtime)
-        question = last_question(history)
-        record("specialist_dispatch", specialist="coding", name="Инженер-программист (Coding Specialist)", question=question[:200])
+        record("specialist_dispatch", specialist="coding", name="Инженер-программист (Coding Specialist)",
+               question=last_question(history)[:200])
         return await coding_runtime.ainvoke(state, context=ctx(runtime))
 
     async def database_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+        can_db, _ = route_access(all_tool_names, ctx(runtime).get("user_context", {}), coding_roles)
+        if not can_db:
+            return denied("database")
         history, _ = history_for_turn(state, runtime)
-        question = last_question(history)
-        record("specialist_dispatch", specialist="database", name="Аналитик базы данных (Database Analyst)", question=question[:200])
+        record("specialist_dispatch", specialist="database", name="Аналитик базы данных (Database Analyst)",
+               question=last_question(history)[:200])
         return await database_runtime.ainvoke(state, context=ctx(runtime))
 
-    # Direct Specialist: for arithmetic, answer immediately; for general text, call llm
     async def direct_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
-        history, boundary = history_for_turn(state, runtime)
+        history, _ = history_for_turn(state, runtime)
         question = last_question(history)
         info = classify(question)
         if info.calc is not None:
-            record("specialist_dispatch", specialist="direct_calc", name="Прямой расчет (Арифметика)", result=info.calc)
+            record("specialist_dispatch", specialist="direct_calc", name="Прямой расчет (Арифметика)",
+                   result=info.calc)
             return {"messages": [AIMessage(content=info.calc)]}
-        record("specialist_dispatch", specialist="direct", name="Общий диалог без инструментов", question=question[:200])
+        record("specialist_dispatch", specialist="direct", name="Общий диалог без инструментов",
+               question=question[:200])
         return await direct_runtime.ainvoke(state, context=ctx(runtime))
 
-    # Supervisor Review Node: Final response formatting and provenance
+    async def rewrite_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
+        history, _ = history_for_turn(state, runtime)
+        record("specialist_dispatch", specialist="rewrite", name="Редактор текста",
+               question=last_question(history)[:200])
+        return await rewrite_runtime.ainvoke(state, context=ctx(runtime))
+
     def review_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
         messages = state["messages"]
         if not messages or not isinstance(messages[-1], AIMessage):
             return {}
         last = messages[-1]
-        sources, active = turn_provenance(messages)
+        content = _content_to_str(last.content)
+        candidates, active = turn_provenance(messages)
+
         reference = ctx(runtime).get("reference_context")
         if reference:
             last = attach_reference_sources(last, reference)
-            sources = last.response_metadata.get("sources", sources)
-            sources = cited_sources(str(last.content), sources)
+            candidates = last.response_metadata.get("sources", candidates)
+            sources = cited_sources(content, candidates)
         elif "sources" in last.response_metadata:
             sources = last.response_metadata["sources"]
         else:
-            sources = cited_sources(str(last.content), sources)
-        cleaned = clean_answer(last.content, sources)
-        finalized = finalize_response(last, sources, active, content=cleaned)
-        record("supervisor_review", active=active, sources=[s.get("title") if isinstance(s, dict) else str(s) for s in sources])
+            sources = cited_sources(content, candidates)
+
+        history, _ = history_for_turn(state, runtime)
+        question = last_question(history)
+        turn = messages[last_human_index(messages) + 1:]
+        saved = [m.artifact["saved_document"] for m in turn
+                 if isinstance(m, ToolMessage) and m.name == "save_knowledge"
+                 and isinstance(m.artifact, dict) and "saved_document" in m.artifact]
+
+        # clean_answer получает всех кандидатов, а не только процитированные: иначе
+        # идентификаторы нецитированных документов останутся в тексте
+        cleaned = clean_answer(content, candidates, strip_cjk=not _CJK_OR_KANA.search(question))
+        finalized = finalize_response(last, sources, active, content=cleaned, saved_documents=saved)
+        record("supervisor_review", active=active,
+               sources=[s.get("title") if isinstance(s, dict) else str(s) for s in sources])
         return {"messages": [finalized]}
 
-    # Graph Assembly
     builder = StateGraph(AgentState, context_schema=AgentRuntimeContext)
     builder.add_node("route", route_node)
     builder.add_node("knowledge", knowledge_node)
     builder.add_node("coding", coding_node)
     builder.add_node("database", database_node)
     builder.add_node("direct", direct_node)
+    builder.add_node("rewrite", rewrite_node)
     builder.add_node("review", review_node)
 
     builder.add_edge(START, "route")
     builder.add_conditional_edges(
         "route",
         route_condition,
-        {
-            "knowledge": "knowledge",
-            "coding": "coding",
-            "database": "database",
-            "direct": "direct",
-        },
+        {name: name for name in ("knowledge", "coding", "database", "direct", "rewrite")},
     )
-
-    builder.add_edge("knowledge", "review")
-    builder.add_edge("coding", "review")
-    builder.add_edge("database", "review")
-    builder.add_edge("direct", "review")
+    for name in ("knowledge", "coding", "database", "direct", "rewrite"):
+        builder.add_edge(name, "review")
     builder.add_edge("review", END)
 
     return builder.compile(checkpointer=checkpointer)
