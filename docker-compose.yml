@@ -148,8 +148,6 @@ services:
     - documents_storage:/data/documents
     - document_worker_traces:/traces
     depends_on:
-      pdf-worker:
-        condition: service_healthy
       postgres:
         condition: service_healthy
       qdrant:
@@ -578,6 +576,8 @@ services:
   pdf-worker:
     image: viio-pdf-worker:latest
     build: ./workers/pdf-worker
+    profiles:
+    - pdf
     environment:
     - INTERNAL_API_KEY=${DOCLING_API_KEY:?Configure DOCLING_API_KEY in .env}
     - PDF_MAX_BYTES=${PDF_MAX_BYTES:-33554432}

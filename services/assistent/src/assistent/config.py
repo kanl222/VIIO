@@ -4,7 +4,8 @@
 на основе Pydantic Settings. Поддерживает работу с LM Studio и Ollama.
 """
 
-from typing import Literal
+import json
+from typing import Literal, Any
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -69,7 +70,7 @@ class Settings(BaseSettings):
     database_provider: Literal['lmstudio', 'ollama', 'yandex'] | None = None
     database_model: str | None = None
     coding_model: str | None = None
-    coding_allowed_roles: list[str] = Field(default_factory=lambda: ["programmer", "admin"])
+    coding_allowed_roles: list[str] | str = Field(default_factory=lambda: ["programmer", "admin"])
     coding_context_max_chars: int = Field(default=6000, ge=1000, le=24000)
     yandex_api_key: str = Field(default="", repr=False)
     yandex_folder_id: str = ""
@@ -185,6 +186,28 @@ class Settings(BaseSettings):
     documents_read_key: str | None = None
     documents_admin_key: str | None = Field(default=None, repr=False)
     agent_max_tool_calls: int = Field(default=24, ge=3, le=64)
+
+    @field_validator('coding_allowed_roles', mode='before')
+    @classmethod
+    def parse_coding_allowed_roles(cls, value: Any) -> list[str]:
+        if value is None or value == "":
+            return ["programmer", "admin"]
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return ["programmer", "admin"]
+            if value.startswith("[") and value.endswith("]"):
+                inner = value[1:-1].strip()
+                if not inner:
+                    return []
+                try:
+                    return json.loads(value)
+                except Exception:
+                    return [item.strip().strip("'\"") for item in inner.split(",") if item.strip()]
+            return [item.strip().strip("'\"") for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        return value
 
     @field_validator('routing_provider', mode='before')
     @classmethod
