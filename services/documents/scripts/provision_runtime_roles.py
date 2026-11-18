@@ -22,6 +22,9 @@ def connect(database):
 
 def main():
     with connect('postgres') as conn:
+        for db in ['agent_db', 'user_db']:
+            if not conn.execute('SELECT 1 FROM pg_database WHERE datname=%s', (db,)).fetchone():
+                conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(db)))
         for role,variable in ROLES.items():
             password=os.environ[variable]
             if len(password)<32:raise ValueError('Runtime passwords must be at least 32 characters')
@@ -30,6 +33,121 @@ def main():
             conn.execute(sql.SQL('ALTER ROLE {} PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION').format(sql.Identifier(role),sql.Literal(password)))
     for database in ['agent_db','user_db']:
         with connect(database) as conn:
+            if database == 'user_db':
+                conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    username VARCHAR(64) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    role VARCHAR(32) NOT NULL DEFAULT 'employee',
+                    departments TEXT[] NOT NULL DEFAULT ARRAY['general']::TEXT[],
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id VARCHAR(64) PRIMARY KEY,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    user_agent TEXT,
+                    ip_address VARCHAR(45),
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL DEFAULT 'Новый диалог',
+                    agent_thread_id VARCHAR(64) UNIQUE NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS messages (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    sender VARCHAR(32) NOT NULL,
+                    text TEXT NOT NULL,
+                    attachments JSONB DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+                """)
+            elif database == 'agent_db':
+                conn.execute("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id VARCHAR(64) PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    mime_type VARCHAR(128) NOT NULL DEFAULT 'text/plain',
+                    file_size BIGINT,
+                    sha256 VARCHAR(64),
+                    owner_id VARCHAR(64),
+                    version INTEGER NOT NULL DEFAULT 1,
+                    parent_id VARCHAR(64) REFERENCES documents(id) ON DELETE SET NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'indexed',
+                    is_public BOOLEAN NOT NULL DEFAULT FALSE,
+                    allowed_roles TEXT[] NOT NULL DEFAULT ARRAY['employee']::TEXT[],
+                    allowed_departments TEXT[] NOT NULL DEFAULT ARRAY['general']::TEXT[],
+                    storage_key VARCHAR(512),
+                    chunks_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS document_contents (
+                    document_id VARCHAR(64) PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS document_publications (
+                    document_id VARCHAR(64) PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL,
+                    content TEXT NOT NULL,
+                    published_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS document_upload_jobs (
+                    id VARCHAR(64) PRIMARY KEY,
+                    filename VARCHAR(255) NOT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS user_facts (
+                    id UUID PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    access_scope TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    source_thread TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS checkpoints (
+                    thread_id TEXT NOT NULL,
+                    checkpoint_ns TEXT NOT NULL DEFAULT '',
+                    checkpoint_id TEXT NOT NULL,
+                    parent_checkpoint_id TEXT,
+                    type TEXT,
+                    checkpoint BYTEA NOT NULL,
+                    metadata BYTEA NOT NULL,
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+                );
+                CREATE TABLE IF NOT EXISTS checkpoint_blobs (
+                    thread_id TEXT NOT NULL,
+                    checkpoint_ns TEXT NOT NULL DEFAULT '',
+                    channel TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    type TEXT,
+                    blob BYTEA,
+                    PRIMARY KEY (thread_id, checkpoint_ns, channel, version)
+                );
+                CREATE TABLE IF NOT EXISTS checkpoint_writes (
+                    thread_id TEXT NOT NULL,
+                    checkpoint_ns TEXT NOT NULL DEFAULT '',
+                    checkpoint_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    idx INTEGER NOT NULL,
+                    channel TEXT NOT NULL,
+                    type TEXT,
+                    blob BYTEA,
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+                );
+                CREATE TABLE IF NOT EXISTS checkpoint_migrations (
+                    v INTEGER PRIMARY KEY
+                );
+                """)
             for role in ROLES:
                 conn.execute(sql.SQL('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {}').format(sql.Identifier(role)))
                 conn.execute(sql.SQL('REVOKE CREATE ON SCHEMA public FROM {}').format(sql.Identifier(role)))
