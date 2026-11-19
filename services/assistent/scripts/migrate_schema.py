@@ -3,6 +3,7 @@ import asyncio
 from types import SimpleNamespace
 from psycopg.conninfo import make_conninfo
 from assistent.config import Settings
+from assistent.services.personal_memory import PersonalFacts
 from assistent.utils.postgres_saver import init_async_postgres_saver
 
 MEMORY_STATEMENTS = [
@@ -28,6 +29,7 @@ async def main():
         dbname=s.postgres_db, user=s.postgres_user, password=s.postgres_password))
     try:
         await setup_facts(pool)
+        await PersonalFacts(SimpleNamespace(pool=pool)).setup()
     finally:
         await pool.close()
     print('Agent schema migrated; no model calls started')

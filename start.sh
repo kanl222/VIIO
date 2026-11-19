@@ -33,6 +33,8 @@ if command -v uv >/dev/null 2>&1; then
     uv run python scripts/configure_runtime_secrets.py 2>/dev/null || true
 elif command -v python3 >/dev/null 2>&1; then
     python3 scripts/configure_runtime_secrets.py 2>/dev/null || true
+else
+    docker run --rm -v "$REPO_ROOT:/work" -w /work python:3.12-alpine python scripts/configure_runtime_secrets.py 2>/dev/null || true
 fi
 echo -e "\033[0;32m[OK] Конфигурация проверена.\033[0m"
 
@@ -64,6 +66,8 @@ elif command -v python3 >/dev/null 2>&1; then
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 python3 services/documents/scripts/provision_runtime_roles.py || true
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 python3 services/documents/scripts/migrate_schema.py || true
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 python3 services/assistent/scripts/migrate_schema.py || true
+else
+    docker compose exec -T postgres sh -c "psql -U postgres -d agent_db -c 'ALTER TABLE documents ADD COLUMN IF NOT EXISTS family_id VARCHAR(64); UPDATE documents SET family_id=id WHERE family_id IS NULL;'" >/dev/null 2>&1 || true
 fi
 
 # 5. Запуск основных сервисов

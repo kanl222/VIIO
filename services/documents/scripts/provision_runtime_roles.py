@@ -10,15 +10,22 @@ from psycopg.conninfo import make_conninfo
 ROLES={'viio_assistent':'ASSISTENT_DB_PASSWORD','viio_documents':'DOCUMENTS_DB_PASSWORD',
        'viio_worker':'WORKER_DB_PASSWORD','viio_webchat':'WEBCHAT_DB_PASSWORD'}
 TABLES={
-    'viio_assistent':{'agent_db':['checkpoints','checkpoint_blobs','checkpoint_writes','checkpoint_migrations','user_facts']},
+    'viio_assistent':{'agent_db':['checkpoints','checkpoint_blobs','checkpoint_writes','checkpoint_migrations','user_facts','store','store_migrations']},
     'viio_documents':{'agent_db':['document_upload_jobs']},
     'viio_worker':{'agent_db':['documents','document_contents','document_publications','document_upload_jobs']},
     'viio_webchat':{'user_db':['users','sessions','conversations','messages']},
 }
 
 def connect(database):
-    return psycopg.connect(make_conninfo(host=os.getenv('POSTGRES_HOST','postgres'),port=os.getenv('POSTGRES_PORT','5432'),
-        dbname=database,user=os.getenv('POSTGRES_USER','postgres'),password=os.getenv('POSTGRES_PASSWORD','postgres')),autocommit=True)
+    host=os.getenv('POSTGRES_HOST','localhost')
+    port=os.getenv('POSTGRES_PORT','5432')
+    user=os.getenv('POSTGRES_USER','postgres')
+    password=os.getenv('POSTGRES_PASSWORD','postgres')
+    try:
+        return psycopg.connect(make_conninfo(host=host,port=port,dbname=database,user=user,password=password),autocommit=True)
+    except psycopg.OperationalError:
+        alt_host='postgres' if host in ('localhost','127.0.0.1') else 'localhost'
+        return psycopg.connect(make_conninfo(host=alt_host,port=port,dbname=database,user=user,password=password),autocommit=True)
 
 def main():
     with connect('postgres') as conn:
@@ -202,6 +209,21 @@ def main():
                     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
                 );
                 CREATE TABLE IF NOT EXISTS checkpoint_migrations (
+                    v INTEGER PRIMARY KEY
+                );
+                CREATE TABLE IF NOT EXISTS store (
+                    prefix TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value JSONB NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMPTZ,
+                    ttl_minutes INTEGER,
+                    PRIMARY KEY (prefix, key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_store_expires_at ON store(expires_at) WHERE expires_at IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS store_prefix_idx ON store(prefix text_pattern_ops);
+                CREATE TABLE IF NOT EXISTS store_migrations (
                     v INTEGER PRIMARY KEY
                 );
                 """)
