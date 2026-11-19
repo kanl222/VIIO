@@ -2,15 +2,20 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKUP_DIR="${REPO_ROOT}/data/backups/backup-2026-11-17"
+BACKUP_DIR="${1:-${REPO_ROOT}/data/backups/backup-2026-11-19}"
 
 if [ ! -d "$BACKUP_DIR" ]; then
+    BACKUP_DIR="$(find "${REPO_ROOT}/data/backups" -maxdepth 1 -type d -name "backup-*" | sort | tail -n 1)"
+fi
+
+if [ -z "$BACKUP_DIR" ] || [ ! -d "$BACKUP_DIR" ]; then
     echo -e "\033[0;31m[ERROR] Папка с резервной копией не найдена: $BACKUP_DIR\033[0m"
-    echo -e "Поместите папку backup-2026-11-17 в data/backups/"
+    echo -e "Поместите папку резервной копии (например, backup-2026-11-19) в data/backups/"
     exit 1
 fi
 
-echo -e "\033[0;36m=== Восстановление резервной копии VIIO (2026-11-17) ===\033[0m"
+BACKUP_NAME="$(basename "$BACKUP_DIR")"
+echo -e "\033[0;36m=== Восстановление резервной копии VIIO (${BACKUP_NAME}) ===\033[0m"
 
 echo -e "\033[0;33m[1/6] Создание томов Docker...\033[0m"
 docker volume create viio_postgres_data
