@@ -78,7 +78,33 @@ if ($UvCmd) {
     & python scripts/configure_runtime_secrets.py 2>$null | Out-Null
     Write-Host "  [OK] Конфигурация и секреты .env проверены (python)." -ForegroundColor Green
 } else {
-    Write-Host "  [WARN] Python/uv не найден на хосте, используются существующие ключи .env." -ForegroundColor Gray
+    Write-Host "  [INFO] Python/uv не найден на хосте, генерация недостающих ключей средствами PowerShell..." -ForegroundColor Cyan
+    $envContent = Get-Content -LiteralPath $EnvPath -Raw
+    $keys = @('CHAT_API_KEY','DOCUMENTS_READ_KEY','DOCUMENTS_ADMIN_KEY','DOCUMENT_WORKER_KEY',
+              'DOCLING_API_KEY','QDRANT_API_KEY','QDRANT_READ_KEY','CONSULTANT_API_KEY','CONSULTANT_SOURCE_KEY')
+    foreach ($k in $keys) {
+        $pattern = "(?m)^$k=\s*$"
+        if ($envContent -match $pattern) {
+            $bytes = [byte[]]::new(32)
+            [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+            $hex = -join ($bytes | ForEach-Object { '{0:x2}' -f $_ })
+            $envContent = $envContent -replace $pattern, "$k=$hex"
+        }
+    }
+    if ($envContent -match "(?m)^POSTGRES_PASSWORD=\s*$") {
+        $envContent = $envContent -replace "(?m)^POSTGRES_PASSWORD=\s*$", "POSTGRES_PASSWORD=postgres"
+    }
+    if ($envContent -match "(?m)^BOOTSTRAP_ADMIN_USERNAME=\s*$") {
+        $envContent = $envContent -replace "(?m)^BOOTSTRAP_ADMIN_USERNAME=\s*$", "BOOTSTRAP_ADMIN_USERNAME=admin"
+    }
+    if ($envContent -match "(?m)^BOOTSTRAP_ADMIN_PASSWORD=\s*$") {
+        $bytes = [byte[]]::new(16)
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $pass = [Convert]::ToBase64String($bytes).Replace('+','-').Replace('/','_').TrimEnd('=')
+        $envContent = $envContent -replace "(?m)^BOOTSTRAP_ADMIN_PASSWORD=\s*$", "BOOTSTRAP_ADMIN_PASSWORD=$pass"
+    }
+    Set-Content -LiteralPath $EnvPath -Value $envContent -NoNewline
+    Write-Host "  [OK] Конфигурация и секреты .env успешно дополнены через PowerShell." -ForegroundColor Green
 }
 
 # Сборка аргументов профилей
@@ -141,7 +167,7 @@ try {
         & python services/documents/scripts/migrate_schema.py 2>$null | Out-Null
         & python services/assistent/scripts/migrate_schema.py 2>$null | Out-Null
     } else {
-        docker run --rm --network viio_viio_net --env-file .env -e POSTGRES_HOST=postgres -e POSTGRES_PORT=5432 -v "${RepoRoot}/services/documents/scripts:/migration:ro" viio-documents:latest python /migration/provision_runtime_roles.py 2>$null | Out-Null
+        docker compose exec -T postgres sh -c "psql -U postgres -d agent_db -c 'ALTER TABLE documents ADD COLUMN IF NOT EXISTS family_id VARCHAR(64); UPDATE documents SET family_id=id WHERE family_id IS NULL;'" 2>$null | Out-Null
     }
     Write-Host "  [OK] Базы данных (user_db, agent_db) и схемы успешно проверены." -ForegroundColor Green
 } catch {

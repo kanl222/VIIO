@@ -158,4 +158,21 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" -d agent_db <<-EOSQL
     CREATE TABLE IF NOT EXISTS checkpoint_migrations (
         v INTEGER PRIMARY KEY
     );
+
+    CREATE TABLE IF NOT EXISTS store (
+        prefix TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value JSONB NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMPTZ,
+        ttl_minutes INTEGER,
+        PRIMARY KEY (prefix, key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_store_expires_at ON store(expires_at) WHERE expires_at IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS store_prefix_idx ON store(prefix text_pattern_ops);
+
+    CREATE TABLE IF NOT EXISTS store_migrations (
+        v INTEGER PRIMARY KEY
+    );
 EOSQL
