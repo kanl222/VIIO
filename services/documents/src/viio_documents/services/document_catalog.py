@@ -53,13 +53,20 @@ CREATE TABLE IF NOT EXISTS documents (
     storage_key         VARCHAR(512),
     chunks_count        INTEGER      NOT NULL DEFAULT 0,
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    family_id           VARCHAR(64),
+    is_active           BOOLEAN      NOT NULL DEFAULT TRUE,
+    document_kind       TEXT         NOT NULL DEFAULT 'document',
+    original_filename   VARCHAR(255),
+    catalog_metadata    JSONB        NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_owner      ON documents(owner_id);
 CREATE INDEX IF NOT EXISTS idx_documents_status     ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_sha256     ON documents(sha256) WHERE sha256 IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS documents_family_version ON documents(family_id, version);
+CREATE UNIQUE INDEX IF NOT EXISTS documents_one_active     ON documents(family_id) WHERE is_active;
 """
 
 

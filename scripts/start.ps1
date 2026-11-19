@@ -132,10 +132,14 @@ try {
         $env:POSTGRES_HOST = "localhost"
         $env:POSTGRES_PORT = "5432"
         & uv run --env-file .env python services/documents/scripts/provision_runtime_roles.py | Out-Null
+        & uv run --env-file .env python services/documents/scripts/migrate_schema.py 2>$null | Out-Null
+        & uv run --env-file .env python services/assistent/scripts/migrate_schema.py 2>$null | Out-Null
     } elseif ($PythonCmd) {
         $env:POSTGRES_HOST = "localhost"
         $env:POSTGRES_PORT = "5432"
         & python services/documents/scripts/provision_runtime_roles.py | Out-Null
+        & python services/documents/scripts/migrate_schema.py 2>$null | Out-Null
+        & python services/assistent/scripts/migrate_schema.py 2>$null | Out-Null
     } else {
         docker run --rm --network viio_viio_net --env-file .env -e POSTGRES_HOST=postgres -e POSTGRES_PORT=5432 -v "${RepoRoot}/services/documents/scripts:/migration:ro" viio-documents:latest python /migration/provision_runtime_roles.py 2>$null | Out-Null
     }

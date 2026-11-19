@@ -88,8 +88,27 @@ def main():
                     storage_key VARCHAR(512),
                     chunks_count INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    family_id VARCHAR(64),
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    document_kind TEXT NOT NULL DEFAULT 'document',
+                    original_filename VARCHAR(255),
+                    catalog_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
                 );
+                ALTER TABLE documents ADD COLUMN IF NOT EXISTS family_id VARCHAR(64);
+                ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+                ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_kind TEXT NOT NULL DEFAULT 'document';
+                ALTER TABLE documents ADD COLUMN IF NOT EXISTS original_filename VARCHAR(255);
+                ALTER TABLE documents ADD COLUMN IF NOT EXISTS catalog_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+                UPDATE documents SET family_id = id WHERE family_id IS NULL;
+                ALTER TABLE documents ALTER COLUMN family_id SET NOT NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS documents_family_version ON documents(family_id, version);
+                CREATE UNIQUE INDEX IF NOT EXISTS documents_one_active ON documents(family_id) WHERE is_active;
+                CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_id);
+                CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
+                CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_documents_sha256 ON documents(sha256) WHERE sha256 IS NOT NULL;
+
                 CREATE TABLE IF NOT EXISTS document_contents (
                     document_id VARCHAR(64) PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
                     content TEXT NOT NULL,
@@ -99,6 +118,10 @@ def main():
                       (to_tsvector('russian',title || ' ' || filename || ' ' || content) || to_tsvector('simple',title || ' ' || filename || ' ' || content)) STORED,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                ALTER TABLE document_contents ADD COLUMN IF NOT EXISTS filename TEXT NOT NULL DEFAULT '';
+                ALTER TABLE document_contents ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
+                CREATE INDEX IF NOT EXISTS document_contents_search ON document_contents USING gin(search_vector);
+
                 CREATE TABLE IF NOT EXISTS document_publications (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     document_id VARCHAR(64) UNIQUE NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -109,13 +132,36 @@ def main():
                     search_vector tsvector GENERATED ALWAYS AS
                       (to_tsvector('russian',title || ' ' || content) || to_tsvector('simple',title || ' ' || content)) STORED
                 );
+                ALTER TABLE document_publications ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
+                ALTER TABLE document_publications ADD COLUMN IF NOT EXISTS publisher_id TEXT NOT NULL DEFAULT 'system';
+                CREATE INDEX IF NOT EXISTS document_publications_search ON document_publications USING gin(search_vector);
+
                 CREATE TABLE IF NOT EXISTS document_upload_jobs (
-                    id VARCHAR(64) PRIMARY KEY,
-                    filename VARCHAR(255) NOT NULL,
-                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    id TEXT PRIMARY KEY,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','processing','needs_review','ready','error','cancelled')),
+                    document_id TEXT,
+                    chunks_count INTEGER,
+                    error TEXT,
+                    claim_token TEXT,
+                    lease_until TIMESTAMPTZ,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    review JSONB,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS document_id TEXT;
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS chunks_count INTEGER;
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS error TEXT;
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS claim_token TEXT;
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ;
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE document_upload_jobs ADD COLUMN IF NOT EXISTS review JSONB;
+                ALTER TABLE document_upload_jobs DROP CONSTRAINT IF EXISTS document_upload_jobs_status_check;
+                ALTER TABLE document_upload_jobs ADD CONSTRAINT document_upload_jobs_status_check CHECK (status IN ('queued','processing','needs_review','ready','error','cancelled'));
+                CREATE INDEX IF NOT EXISTS document_jobs_pending ON document_upload_jobs(created_at) WHERE status IN ('queued','processing');
+
                 CREATE TABLE IF NOT EXISTS user_facts (
                     id UUID PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -124,6 +170,7 @@ def main():
                     source_thread TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE INDEX IF NOT EXISTS user_facts_owner_scope ON user_facts(owner_id, access_scope, created_at DESC);
                 CREATE TABLE IF NOT EXISTS checkpoints (
                     thread_id TEXT NOT NULL,
                     checkpoint_ns TEXT NOT NULL DEFAULT '',
