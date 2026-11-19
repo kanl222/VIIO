@@ -58,8 +58,12 @@ done
 echo -e "\n\033[0;33m[4/5] Проверка баз данных и ролей...\033[0m"
 if command -v uv >/dev/null 2>&1; then
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 uv run --env-file .env python services/documents/scripts/provision_runtime_roles.py || true
+    POSTGRES_HOST=localhost POSTGRES_PORT=5432 uv run --env-file .env python services/documents/scripts/migrate_schema.py || true
+    POSTGRES_HOST=localhost POSTGRES_PORT=5432 uv run --env-file .env python services/assistent/scripts/migrate_schema.py || true
 elif command -v python3 >/dev/null 2>&1; then
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 python3 services/documents/scripts/provision_runtime_roles.py || true
+    POSTGRES_HOST=localhost POSTGRES_PORT=5432 python3 services/documents/scripts/migrate_schema.py || true
+    POSTGRES_HOST=localhost POSTGRES_PORT=5432 python3 services/assistent/scripts/migrate_schema.py || true
 fi
 
 # 5. Запуск основных сервисов
