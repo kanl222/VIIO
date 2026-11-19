@@ -43,8 +43,13 @@ def create_api_router(agent_service, settings, consultant_service=None):
     @router.get('/health')
     async def health():
         provider = settings.chat_provider or settings.llm_provider
-        model = settings.chat_model or (settings.yandex_model if provider == 'yandex' else
-                settings.ollama_model if provider == 'ollama' else settings.lmstudio_model)
+        from assistent.models.chat import resolve_yandex_model
+        if provider == 'yandex':
+            model = resolve_yandex_model(settings.chat_model, settings.yandex_model)
+        elif provider == 'ollama':
+            model = settings.chat_model or settings.ollama_model
+        else:
+            model = settings.chat_model or settings.lmstudio_model
         return {'status':'healthy','service':'assistent','provider':provider,'model':model}
     @router.get('/api/v1/usage', dependencies=[Depends(authorize)])
     async def usage():

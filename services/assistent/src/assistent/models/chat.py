@@ -8,6 +8,26 @@ from assistent.config import Settings
 from assistent.services.token_usage import token_usage
 
 
+def is_incompatible_local_model(name: str | None) -> bool:
+    """Проверяет, является ли имя модели локальным (LM Studio / Ollama), несовместимым с Yandex Cloud."""
+    if not name or not name.strip():
+        return False
+    n = name.strip().lower()
+    if n.startswith(('gpt://', 'yandexgpt/')):
+        return False
+    if '/' in n:
+        return True
+    local_keywords = ('qwen', 'llama', 'mistral', 'deepseek', 'phi', 'gemma', 'nomic', 'codellama', 'starcoder')
+    return any(k in n for k in local_keywords)
+
+
+def resolve_yandex_model(model_name: str | None, default_yandex_model: str) -> str:
+    """Возвращает имя модели Yandex, игнорируя несовместимые локальные имена моделей."""
+    if model_name and model_name.strip() and not is_incompatible_local_model(model_name):
+        return model_name.strip()
+    return (default_yandex_model or "aliceai-llm").strip()
+
+
 def create_chat_model(settings: Settings, *, model_name: str | None = None, coding: bool = False,
                       agent: str = 'chat') -> BaseChatModel:
     """Create an unbound client using this specialist's generation configuration."""
@@ -23,7 +43,7 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
         temperature = 0
     model_name = model_name or getattr(settings, f'{role}_model')
     if provider == "yandex":
-        name = (model_name or settings.yandex_model).strip()
+        name = resolve_yandex_model(model_name, settings.yandex_model)
         folder = settings.yandex_folder_id.strip()
         return ChatOpenAI(
             metadata={'viio_provider': provider},

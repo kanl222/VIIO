@@ -45,14 +45,53 @@ def test_qdrant_vector_store_race_condition_already_exists(monkeypatch) -> None:
         collection_name="race_collection",
     )
 
-    # Симулируем, что collection_exists вернул False, но create_collection выбросил ошибку 'already exists'
+    # Симулируем, что collection_exists сначала вернул False, но create_collection выбросил ошибку 'already exists',
+    # после чего параллельный процесс уже создал коллекцию (collection_exists -> True)
+    exists_calls = [False, True]
+
+    def fake_collection_exists(*args, **kwargs):
+        return exists_calls.pop(0) if exists_calls else True
+
     def fake_create_collection(*args, **kwargs):
         raise ValueError("Collection race_collection already exists")
 
+    monkeypatch.setattr(client, "collection_exists", fake_collection_exists)
     monkeypatch.setattr(client, "create_collection", fake_create_collection)
 
     # Метод не должен выбрасывать исключение
     adapter._ensure_collection()
+
+
+def test_qdrant_vector_store_add_texts_retries_on_404(monkeypatch) -> None:
+    """Проверка повторной инициализации коллекции при 404 во время upsert."""
+    client = QdrantClient(":memory:")
+    embeddings = FakeEmbeddings(size=8)
+    adapter = QdrantVectorStoreAdapter(
+        client=client,
+        embeddings=embeddings,
+        collection_name="retry_404_collection",
+    )
+
+    from qdrant_client.http.exceptions import UnexpectedResponse
+    import httpx
+
+    original_add = adapter._store.add_texts
+    first_call = True
+
+    def flakily_add(*args, **kwargs):
+        nonlocal first_call
+        if first_call:
+            first_call = False
+            response = httpx.Response(404, request=httpx.Request("POST", "http://qdrant:6333/collections/retry_404_collection/points"))
+            raise UnexpectedResponse.for_response(response)
+        return original_add(*args, **kwargs)
+
+    monkeypatch.setattr(adapter._store, "add_texts", flakily_add)
+
+    # При первом вызове будет 404, адаптер должен вызвать _ensure_collection(force=True) и успешно повторить
+    ids = adapter.add_texts(["тестовый текст"])
+    assert len(ids) == 1
+    assert not first_call
 
 
 def test_acronym_title_search_boosts_exact_source_without_bypassing_acl(monkeypatch) -> None:

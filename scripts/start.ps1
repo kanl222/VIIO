@@ -174,6 +174,54 @@ try {
     Write-Host "  [WARN] Инициализация баз данных завершилась с предупреждением: $_" -ForegroundColor Yellow
 }
 
+# Ожидание готовности Qdrant и инициализация коллекций
+Write-Host "  Ожидание готовности Qdrant..." -ForegroundColor Yellow
+$qdrantReady = $false
+for ($i = 1; $i -le 30; $i++) {
+    try {
+        $res = Invoke-RestMethod -Uri "http://localhost:6333/readyz" -TimeoutSec 2 -ErrorAction Stop
+        $qdrantReady = $true
+        break
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+if ($qdrantReady) {
+    Write-Host "  [OK] Qdrant готов к подключениям." -ForegroundColor Green
+} else {
+    Write-Host "  [WARN] Qdrant не ответил на /readyz за 30 секунд, продолжаем..." -ForegroundColor Yellow
+}
+
+Write-Host "  Проверка коллекций Qdrant (knowledge_base, knowledge_public, project_memory)..." -ForegroundColor Yellow
+try {
+    if ($UvCmd) {
+        $env:QDRANT_URL = "http://localhost:6333"
+        & uv run --env-file .env python services/rag/scripts/init_qdrant_collections.py 2>$null | Out-Null
+    } elseif ($PythonCmd) {
+        $env:QDRANT_URL = "http://localhost:6333"
+        & python services/rag/scripts/init_qdrant_collections.py 2>$null | Out-Null
+    } else {
+        $qApiKey = ($envContent -split "`n" | Where-Object { $_ -match "^QDRANT_API_KEY=(.*)" } | ForEach-Object { $matches[1].Trim() })
+        $qHeaders = @{}
+        if ($qApiKey) { $qHeaders["api-key"] = $qApiKey }
+        $qCols = @('knowledge_base', 'knowledge_public', 'project_memory')
+        foreach ($c in $qCols) {
+            try {
+                Invoke-RestMethod -Uri "http://localhost:6333/collections/$c" -Headers $qHeaders -TimeoutSec 2 -ErrorAction Stop | Out-Null
+            } catch {
+                $qBody = @{
+                    vectors = @{ size = 768; distance = "Cosine" }
+                    sparse_vectors = @{ bm25 = @{ modifier = "idf" } }
+                } | ConvertTo-Json -Depth 5
+                Invoke-RestMethod -Uri "http://localhost:6333/collections/$c" -Method Put -Headers $qHeaders -ContentType "application/json" -Body $qBody -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+            }
+        }
+    }
+    Write-Host "  [OK] Коллекции Qdrant успешно проверены." -ForegroundColor Green
+} catch {
+    Write-Host "  [WARN] Инициализация коллекций Qdrant завершилась с предупреждением: $_" -ForegroundColor Yellow
+}
+
 # 5. Запуск основных сервисов приложения
 Write-Host "`n[5/6] Запуск сервисов приложения VIIO..." -ForegroundColor Yellow
 $upArgs = @()
