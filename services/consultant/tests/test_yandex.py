@@ -78,6 +78,18 @@ def test_yandex_model_factory():
         assert model.call_args.kwargs['model'] == 'gpt://folder/aliceai-llm'
         assert model.call_args.kwargs['base_url'] == 'https://ai.api.cloud.yandex.net/v1'
 
+        # Local model name is ignored and safely falls back to default yandex model
+        settings_with_local = ConsultantSettings(provider='yandex', api_key='a' * 40,
+            yandex_api_key='test', yandex_folder_id='folder', model='qwen/qwen3-vl-8b')
+        create_model(settings_with_local)
+        assert model.call_args.kwargs['model'] == 'gpt://folder/aliceai-llm'
+
+        # Valid yandex model name is respected
+        settings_with_yandex = ConsultantSettings(provider='yandex', api_key='a' * 40,
+            yandex_api_key='test', yandex_folder_id='folder', model='yandexgpt/latest')
+        create_model(settings_with_yandex)
+        assert model.call_args.kwargs['model'] == 'gpt://folder/yandexgpt/latest'
+
 
 @pytest.mark.asyncio
 async def test_cloud_accepts_only_explicit_public_access_class():

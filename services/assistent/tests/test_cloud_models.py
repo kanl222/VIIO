@@ -35,6 +35,8 @@ def test_global_cloud_credentials_validated_for_inherited_roles():
     (None, "gpt://folder/aliceai-llm"),
     ("yandexgpt/latest", "gpt://folder/yandexgpt/latest"),
     ("gpt://other/custom/latest", "gpt://other/custom/latest"),
+    ("qwen/qwen3-vl-8b", "gpt://folder/aliceai-llm"),
+    ("llama3.1", "gpt://folder/aliceai-llm"),
 ])
 def test_cloud_selected_independently(role, name, expected):
     settings = Settings(_env_file=None, yandex_api_key="test-key", yandex_folder_id="folder",

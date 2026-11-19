@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import uuid
 from typing import Any, Literal
 from langchain_core.documents import Document
@@ -54,15 +55,24 @@ class QdrantVectorStoreAdapter(IVectorStore):
             validate_collection_config=False,
         )
 
-    def _ensure_collection(self) -> None:
+    def _ensure_collection(self, force: bool = False) -> None:
         """Проверка существования коллекции и автоматическое создание при её отсутствии."""
         try:
-            if not self._client.collection_exists(self._collection_name):
+            if force or not self._client.collection_exists(self._collection_name):
                 logger.info(
                     "Коллекция %s отсутствует, создание новой...", self._collection_name
                 )
-                sample_embedding = self._embeddings.embed_query("ping")
-                vector_size = len(sample_embedding)
+                try:
+                    sample_embedding = self._embeddings.embed_query("ping")
+                    vector_size = len(sample_embedding)
+                except Exception as embed_exc:
+                    logger.warning(
+                        "Не удалось получить размерность эмбеддингов для %s (%s), используется значение по умолчанию 768",
+                        self._collection_name,
+                        embed_exc,
+                    )
+                    vector_size = 768
+
                 try:
                     self._client.create_collection(
                         collection_name=self._collection_name,
@@ -86,6 +96,12 @@ class QdrantVectorStoreAdapter(IVectorStore):
                         )
                     else:
                         raise
+
+                # Убеждаемся, что коллекция действительно доступна (в т.ч. при параллельном создании)
+                for _ in range(10):
+                    if self._client.collection_exists(self._collection_name):
+                        break
+                    time.sleep(0.5)
         except Exception as exc:
             logger.error("Ошибка при проверке/создании коллекции %s: %s", self._collection_name, exc)
             raise
@@ -108,9 +124,26 @@ class QdrantVectorStoreAdapter(IVectorStore):
         self._ensure_collection()
         if metadatas and all('document_id' in meta and 'chunk_index' in meta for meta in metadatas):
             ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"{meta['document_id']}:{meta['chunk_index']}")) for meta in metadatas]
-            res_ids = self._store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
         else:
-            res_ids = self._store.add_texts(texts=texts, metadatas=metadatas)
+            ids = None
+
+        def _do_add() -> list[str]:
+            if ids:
+                return self._store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
+            return self._store.add_texts(texts=texts, metadatas=metadatas)
+
+        try:
+            res_ids = _do_add()
+        except UnexpectedResponse as exc:
+            if exc.status_code == 404:
+                logger.warning(
+                    "Коллекция %s не найдена в Qdrant (404) при upsert. Повторная инициализация...",
+                    self._collection_name,
+                )
+                self._ensure_collection(force=True)
+                res_ids = _do_add()
+            else:
+                raise
 
         try:
             encoder = get_sparse_encoder()
@@ -395,26 +428,48 @@ class QdrantVectorStoreAdapter(IVectorStore):
 
     def delete_document(self, identifier: str) -> None:
         if self._client.collection_exists(self._collection_name):
-            self._client.delete(self._collection_name, models.FilterSelector(filter=models.Filter(must=[
-                models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier)),
-            ])), wait=True)
+            try:
+                self._client.delete(self._collection_name, models.FilterSelector(filter=models.Filter(must=[
+                    models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier)),
+                ])), wait=True)
+            except UnexpectedResponse as exc:
+                if exc.status_code != 404:
+                    raise
 
     def publish_document(self, identifier: str) -> None:
-        self._client.set_payload(self._collection_name, payload={'ingestion_ready': True},
-            points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
-            key='metadata', wait=True)
+        if not self._client.collection_exists(self._collection_name):
+            return
+        try:
+            self._client.set_payload(self._collection_name, payload={'ingestion_ready': True},
+                points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
+                key='metadata', wait=True)
+        except UnexpectedResponse as exc:
+            if exc.status_code != 404:
+                raise
 
     def delete_document_tail(self, identifier: str, chunks_count: int) -> None:
         """Remove obsolete chunk indices only after the replacement was written."""
-        self._client.delete(self._collection_name, models.FilterSelector(filter=models.Filter(must=[
-            models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier)),
-            models.FieldCondition(key='metadata.chunk_index', range=models.Range(gte=chunks_count)),
-        ])), wait=True)
+        if not self._client.collection_exists(self._collection_name):
+            return
+        try:
+            self._client.delete(self._collection_name, models.FilterSelector(filter=models.Filter(must=[
+                models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier)),
+                models.FieldCondition(key='metadata.chunk_index', range=models.Range(gte=chunks_count)),
+            ])), wait=True)
+        except UnexpectedResponse as exc:
+            if exc.status_code != 404:
+                raise
 
     def set_document_active(self, identifier, active):
-        self._client.set_payload(self._collection_name, payload={'is_active': active},
-            points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
-            key='metadata', wait=True)
+        if not self._client.collection_exists(self._collection_name):
+            return
+        try:
+            self._client.set_payload(self._collection_name, payload={'is_active': active},
+                points=models.Filter(must=[models.FieldCondition(key='metadata.document_id', match=models.MatchValue(value=identifier))]),
+                key='metadata', wait=True)
+        except UnexpectedResponse as exc:
+            if exc.status_code != 404:
+                raise
 
     def get_chunks(self, doc_chunks: list[tuple[str, int]]) -> list[Document]:
         """Прямое извлечение чанков по парам (document_id, chunk_index) через детерминированные ID."""

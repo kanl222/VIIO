@@ -56,8 +56,8 @@ for i in {1..30}; do
     sleep 1
 done
 
-# 4. Инициализация схем
-echo -e "\n\033[0;33m[4/5] Проверка баз данных и ролей...\033[0m"
+# 4. Инициализация схем и хранилищ
+echo -e "\n\033[0;33m[4/5] Проверка баз данных, ролей и векторных хранилищ...\033[0m"
 if command -v uv >/dev/null 2>&1; then
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 uv run --env-file .env python services/documents/scripts/provision_runtime_roles.py || true
     POSTGRES_HOST=localhost POSTGRES_PORT=5432 uv run --env-file .env python services/documents/scripts/migrate_schema.py || true
@@ -69,6 +69,31 @@ elif command -v python3 >/dev/null 2>&1; then
 else
     docker compose exec -T postgres sh -c "psql -U postgres -d agent_db -c 'ALTER TABLE documents ADD COLUMN IF NOT EXISTS family_id VARCHAR(64); UPDATE documents SET family_id=id WHERE family_id IS NULL;'" >/dev/null 2>&1 || true
 fi
+
+echo -e "\n\033[0;33mОжидание готовности Qdrant...\033[0m"
+for i in {1..30}; do
+    if curl -s http://localhost:6333/readyz >/dev/null 2>&1; then
+        echo -e "\033[0;32m[OK] Qdrant готов.\033[0m"
+        break
+    fi
+    sleep 1
+done
+
+echo -e "\n\033[0;33mПроверка коллекций Qdrant...\033[0m"
+if command -v uv >/dev/null 2>&1; then
+    QDRANT_URL=http://localhost:6333 uv run --env-file .env python services/rag/scripts/init_qdrant_collections.py || true
+elif command -v python3 >/dev/null 2>&1; then
+    QDRANT_URL=http://localhost:6333 python3 services/rag/scripts/init_qdrant_collections.py || true
+else
+    QDRANT_KEY=$(grep -E '^QDRANT_API_KEY=' .env 2>/dev/null | cut -d '=' -f2- | tr -d ' \r\n')
+    for col in knowledge_base knowledge_public project_memory; do
+        curl -s -X PUT "http://localhost:6333/collections/$col" \
+            -H "api-key: $QDRANT_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"vectors":{"size":768,"distance":"Cosine"},"sparse_vectors":{"bm25":{"modifier":"idf"}}}' >/dev/null 2>&1 || true
+    done
+fi
+echo -e "\033[0;32m[OK] Коллекции Qdrant проверены.\033[0m"
 
 # 5. Запуск основных сервисов
 echo -e "\n\033[0;33m[5/5] Запуск приложений VIIO...\033[0m"
