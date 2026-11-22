@@ -40,14 +40,25 @@ def fragment_snapshot(doc: Document, *, include_text: bool = True) -> dict:
 
 def reciprocal_rank_fusion(
     ranked_lists: Sequence[Sequence[Document]],
+    weights: Sequence[float] | None = None,
     k: int = RRF_K,
 ) -> dict[tuple[Any, str], float]:
-    """Calculate Reciprocal Rank Fusion (RRF) scores across multiple ranked candidate lists."""
+    """Calculate Reciprocal Rank Fusion (RRF) scores across multiple ranked candidate lists.
+
+    Supports optional per-branch weights: score += weight * (1.0 / (k + rank)).
+    """
     rrf_scores: dict[tuple[Any, str], float] = {}
-    for candidate_list in ranked_lists:
+    if weights is None:
+        effective_weights = [1.0] * len(ranked_lists)
+    else:
+        effective_weights = list(weights)
+        if len(effective_weights) < len(ranked_lists):
+            effective_weights.extend([1.0] * (len(ranked_lists) - len(effective_weights)))
+
+    for candidate_list, weight in zip(ranked_lists, effective_weights):
         for rank, doc in enumerate(candidate_list, start=1):
             key = fragment_key(doc)
-            rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (k + rank))
+            rrf_scores[key] = rrf_scores.get(key, 0.0) + (weight / (k + rank))
     return rrf_scores
 
 
@@ -126,6 +137,15 @@ def reorder_lost_in_the_middle(documents: Sequence[Any]) -> list[Any]:
     return left + right
 
 
+DEFAULT_BRANCH_WEIGHTS: dict[str, float] = {
+    'qdrant_hybrid': 1.0,
+    'semantic': 0.8,
+    'sparse_bm25': 0.7,
+    'lexical': 0.5,
+    'public': 0.4,
+}
+
+
 class EnhancedRetrieval:
     def __init__(
         self,
@@ -136,6 +156,7 @@ class EnhancedRetrieval:
         hybrid_enabled: bool = True,
         hybrid_fusion: str = "rrf",
         prefetch_limit: int = 40,
+        branch_weights: dict[str, float] | None = None,
     ) -> None:
         self.vector_store: Any = vector_store
         self.data: Any = data
@@ -144,6 +165,7 @@ class EnhancedRetrieval:
         self.hybrid_enabled: bool = hybrid_enabled
         self.hybrid_fusion: str = hybrid_fusion
         self.prefetch_limit: int = prefetch_limit
+        self.branch_weights: dict[str, float] = {**DEFAULT_BRANCH_WEIGHTS, **(branch_weights or {})}
 
     async def search(self, query: str, context: Any, k: int, diagnostics: dict[str, Any] | None = None, parent_trace_id: str | None = None) -> list[Document]:
         with capture('search', query, parent_trace_id=parent_trace_id) as trace:
@@ -284,8 +306,22 @@ class EnhancedRetrieval:
         for name, result in zip(names, results):
             if isinstance(result, Exception):
                 logger.warning('%s search unavailable: %s', name, type(result).__name__)
-        valid_lists = [r for r in [results[1], results[0], *results[2:]] if not isinstance(r, Exception)]
-        rrf_map = reciprocal_rank_fusion(valid_lists)
+
+        valid_branches = [
+            (name, res) for name, res in zip(names, results) if not isinstance(res, Exception)
+        ]
+        valid_lists = [res for _, res in valid_branches]
+        weights = [self.branch_weights.get(name, 1.0) for name, _ in valid_branches]
+        rrf_map = reciprocal_rank_fusion(valid_lists, weights=weights, k=RRF_K)
+
+        if diagnostics is not None:
+            diagnostics['fusion'] = {
+                'branches': [name for name, _ in valid_branches],
+                'weights': {name: self.branch_weights.get(name, 1.0) for name, _ in valid_branches},
+                'rrf_k': RRF_K,
+                'fused_candidates': len(rrf_map),
+            }
+
         candidates, seen = [], set()
         for candidate_list in valid_lists:
             for doc in candidate_list:

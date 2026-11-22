@@ -9,6 +9,7 @@ from viio_rag.chunks import (
     split_into_sentences,
     sentence_window_chunks,
     document_chunks,
+    sections,
 )
 from viio_rag.search_tool import format_documents
 from viio_rag.retrieval import EnhancedRetrieval
@@ -146,3 +147,41 @@ async def test_expand_procedural_neighbors_preserves_relevance_order():
     assert doc_ids[0] == "doc_z"
     assert doc_ids[1] == "doc_z"
     assert doc_ids[2] == "doc_a"
+
+
+def test_markdown_header_splitter_hierarchy_and_code_blocks():
+    markdown_content = (
+        "# Главный раздел\n\n"
+        "Вводный текст раздела.\n\n"
+        "```python\n"
+        "# Это комментарий в коде, не должен стать заголовком!\n"
+        "def example():\n"
+        "    return 42\n"
+        "```\n\n"
+        "## Подраздел А\n\n"
+        "Текст подраздела А.\n\n"
+        "### Детализация А.1\n\n"
+        "Глубокие детали процесса.\n\n"
+        "1. Нумерованный пункт\n"
+        "Текст пункта с нумерацией."
+    )
+
+    sec_list = list(sections(markdown_content))
+    assert len(sec_list) >= 3
+
+    # Section 0: # Главный раздел with code block
+    h0, b0 = sec_list[0]
+    assert h0 == [(1, "Главный раздел")]
+    assert "def example():" in b0
+    assert "# Это комментарий в коде" in b0
+
+    # Section 1: ## Подраздел А (inherits Главный раздел)
+    h1, b1 = sec_list[1]
+    assert h1 == [(1, "Главный раздел"), (2, "Подраздел А")]
+    assert "Текст подраздела А." in b1
+
+    # Section 2: ### Детализация А.1
+    h2, b2 = sec_list[2]
+    assert h2 == [(1, "Главный раздел"), (2, "Подраздел А"), (3, "Детализация А.1")]
+    assert "Глубокие детали процесса." in b2
+

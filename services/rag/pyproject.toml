@@ -20,6 +20,8 @@ dependencies = [
   "fastembed>=0.9.0",
   "redis>=5.0.0",
   "neo4j>=6.4.1",
+  "cachetools>=5.5.0",
+  "py-rust-stemmers>=0.1.0",
   "viio-core",
 ]
 

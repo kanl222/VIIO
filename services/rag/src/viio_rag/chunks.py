@@ -2,7 +2,7 @@
 import re
 
 from typing import Literal
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 
 def split_document_text(
@@ -28,11 +28,20 @@ def split_document_text(
     return chunks
 
 
-CHUNKER_VERSION = 'sections-v3'
+CHUNKER_VERSION = 'markdown-header-v4'
 
 TOC_LINE_PAT = re.compile(r'(\.{2,}|\.\s\.\s\.)\s*\d+\s*$')
 NUM_HEADING_PAT = re.compile(r'^(\d+(?:\.\d+)*\.?|[Рр]аздел\s+[IVX\d]+|[Гг]лава\s+\d+)\s+([А-ЯA-ZЁ«"][^\n\r]{2,100})$')
 HEADING_PAT = re.compile(r'^(#{1,6})\s+(.+?)\s*#*\s*$')
+
+MARKDOWN_HEADERS: list[tuple[str, str]] = [
+    ('#', 'h1'),
+    ('##', 'h2'),
+    ('###', 'h3'),
+    ('####', 'h4'),
+    ('#####', 'h5'),
+    ('######', 'h6'),
+]
 
 
 def find_toc_range(lines):
@@ -68,50 +77,89 @@ def find_toc_range(lines):
     return toc_start, last_toc_idx + 1
 
 
-def sections(content, strip_toc=True):
-    raw_lines = content.splitlines()
-    toc_range = find_toc_range(raw_lines) if strip_toc else None
+def sections(content: str, strip_toc: bool = True):
+    """Split reviewed Markdown by section using standard MarkdownHeaderTextSplitter.
 
-    headings, lines, fence = [], [], None
-    for idx, line in enumerate(raw_lines):
-        if toc_range and toc_range[0] <= idx < toc_range[1]:
-            continue
+    Preserves heading hierarchy in metadata, normalizes numbered headings,
+    protects code fences against false matches, and strips Table of Contents (TOC).
+    Yields (headings, body) tuples where headings is a list of (level, title).
+    """
+    raw_lines = content.splitlines()
+    if strip_toc:
+        toc_range = find_toc_range(raw_lines)
+        if toc_range:
+            raw_lines = raw_lines[:toc_range[0]] + raw_lines[toc_range[1]:]
+
+    prepared_lines: list[str] = []
+    code_blocks: list[str] = []
+    in_code = False
+    fence_char = None
+    fence_len = 0
+    code_buffer: list[str] = []
+
+    for line in raw_lines:
         marker = re.match(r'^\s*(`{3,}|~{3,})', line)
         if marker:
-            if fence is None:
-                fence = (marker[1][0], len(marker[1]))
-            elif marker[1][0] == fence[0] and len(marker[1]) >= fence[1]:
-                fence = None
-            lines.append(line)
-            continue
-        heading = None
-        if not fence:
-            m = HEADING_PAT.match(line)
-            if m:
-                heading = (len(m[1]), m[2].strip())
-            else:
-                clean = line.strip()
-                if clean and len(clean) <= 120 and not TOC_LINE_PAT.search(clean):
-                    mnum = NUM_HEADING_PAT.match(clean)
-                    if mnum:
-                        prefix, title = mnum[1], mnum[2].strip()
-                        if not title.endswith(('.', ':', ';', ',')):
-                            parts = prefix.rstrip('.').split('.')
-                            level = min(6, len(parts) + 1)
-                            heading = (level, f"{prefix} {title}")
-        if heading:
-            level, title = heading
-            if strip_toc and title.lower() in ('оглавление', 'содержание', 'table of contents'):
+            c = marker[1][0]
+            l = len(marker[1])
+            if not in_code:
+                in_code = True
+                fence_char = c
+                fence_len = l
+                code_buffer = [line]
                 continue
-            if lines or (headings and level <= headings[-1][0]):
-                yield list(headings), '\n'.join(lines).strip()
-            headings = [(n, t) for n, t in headings if n < level]
-            headings.append((level, title))
-            lines = []
-        else:
-            lines.append(line)
-    if lines or headings:
-        yield headings, '\n'.join(lines).strip()
+            elif c == fence_char and l >= fence_len:
+                in_code = False
+                code_buffer.append(line)
+                idx = len(code_blocks)
+                code_blocks.append('\n'.join(code_buffer))
+                prepared_lines.append(f'<!--CODE_BLOCK_{idx}-->')
+                code_buffer = []
+                continue
+
+        if in_code:
+            code_buffer.append(line)
+            continue
+
+        clean = line.strip()
+        if clean and not clean.startswith('#'):
+            mnum = NUM_HEADING_PAT.match(clean)
+            if mnum:
+                prefix, title = mnum[1], mnum[2].strip()
+                if not title.endswith(('.', ':', ';', ',')):
+                    parts = prefix.rstrip('.').split('.')
+                    level = min(6, len(parts) + 1)
+                    prepared_lines.append('#' * level + ' ' + clean)
+                    continue
+
+        prepared_lines.append(line)
+
+    if code_buffer:
+        idx = len(code_blocks)
+        code_blocks.append('\n'.join(code_buffer))
+        prepared_lines.append(f'<!--CODE_BLOCK_{idx}-->')
+
+    splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=MARKDOWN_HEADERS,
+        strip_headers=True,
+    )
+    docs = splitter.split_text('\n'.join(prepared_lines))
+
+    def restore_code(text: str) -> str:
+        for idx, cb in enumerate(code_blocks):
+            placeholder = f'<!--CODE_BLOCK_{idx}-->'
+            if placeholder in text:
+                text = text.replace(placeholder, cb)
+        return text
+
+    for doc in docs:
+        headings = [
+            (int(tag[1:]), doc.metadata[tag])
+            for tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6')
+            if tag in doc.metadata
+        ]
+        body = restore_code(doc.page_content).strip()
+        yield headings, body
 
 
 def split_table(block, size, overlap, unit):

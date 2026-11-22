@@ -19,14 +19,29 @@ except ImportError:
     REDIS_AVAILABLE = False
 
 
-class InMemoryCache:
-    """Lightweight in-memory LRU cache with TTL expiration for fallback when Redis is offline."""
+try:
+    from cachetools import TTLCache
+    CACHETOOLS_AVAILABLE = True
+except ImportError:
+    TTLCache = None
+    CACHETOOLS_AVAILABLE = False
 
-    def __init__(self, max_items: int = 2000) -> None:
+
+class InMemoryCache:
+    """Lightweight in-memory LRU cache with TTL expiration backed by cachetools (with fallback)."""
+
+    def __init__(self, max_items: int = 2000, default_ttl: int = 86400) -> None:
         self.max_items = max_items
-        self._store: OrderedDict[str, tuple[float, str]] = OrderedDict()
+        self.default_ttl = default_ttl
+        if CACHETOOLS_AVAILABLE:
+            self._ttl_cache: Any = TTLCache(maxsize=max_items, ttl=default_ttl)
+        else:
+            self._ttl_cache = None
+            self._store: OrderedDict[str, tuple[float, str]] = OrderedDict()
 
     def get(self, key: str) -> str | None:
+        if self._ttl_cache is not None:
+            return self._ttl_cache.get(key)
         item = self._store.get(key)
         if not item:
             return None
@@ -38,6 +53,9 @@ class InMemoryCache:
         return val
 
     def set(self, key: str, val: str, ttl: int | None = None) -> None:
+        if self._ttl_cache is not None:
+            self._ttl_cache[key] = val
+            return
         if key in self._store:
             self._store.move_to_end(key)
         elif len(self._store) >= self.max_items:
@@ -51,9 +69,15 @@ class InMemoryCache:
         self._store[key] = (expires_at, val)
 
     def delete(self, key: str) -> None:
+        if self._ttl_cache is not None:
+            self._ttl_cache.pop(key, None)
+            return
         self._store.pop(key, None)
 
     def clear(self) -> None:
+        if self._ttl_cache is not None:
+            self._ttl_cache.clear()
+            return
         self._store.clear()
 
 

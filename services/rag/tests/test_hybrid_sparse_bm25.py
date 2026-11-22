@@ -56,6 +56,24 @@ def test_reciprocal_rank_fusion_combines_dense_and_sparse():
     assert score_a > score_b
 
 
+def test_reciprocal_rank_fusion_with_custom_weights():
+    doc_dense = Document(page_content="Семантика", metadata={"document_id": "dense"})
+    doc_sparse = Document(page_content="Точный термин", metadata={"document_id": "sparse"})
+
+    # Equal ranks (rank 1 each), but dense has 2x weight of sparse
+    rrf = reciprocal_rank_fusion(
+        [[doc_dense], [doc_sparse]],
+        weights=[0.8, 0.4],
+        k=60,
+    )
+
+    key_dense = ("dense", "Семантика")
+    key_sparse = ("sparse", "Точный термин")
+
+    assert rrf[key_dense] > rrf[key_sparse]
+    assert round(rrf[key_dense] / rrf[key_sparse], 2) == 2.0
+
+
 @pytest.mark.asyncio
 async def test_enhanced_retrieval_runs_sparse_bm25_branch_and_diagnostics():
     doc_dense = Document(page_content="Общий порядок ухода в отпуск и приказ руководителя", metadata={"document_id": "dense_1", "title": "Отпуска"})
