@@ -58,10 +58,15 @@ def create_api_router(agent_service, settings, consultant_service=None):
     @router.post('/api/v1/chat',dependencies=[Depends(authorize)],response_model=ChatResponse)
     async def chat(request:ChatRequest):
         if not request.message.strip():raise HTTPException(400,'Пустое сообщение')
+        user_id = request.user_context.user_id if request.user_context else None
+        from assistent.telemetry import record_telemetry_turn_start, record_telemetry_turn_end
+        record_telemetry_turn_start(request.message, request.thread_id, user_id)
         if (request.rag_backend or settings.assistant_rag_backend) == 'yandex':
             from assistent.services.managed_rag import answer
             result = await answer(settings, request.message, request.confirmed_public_for_external_cloud)
-            return ChatResponse(reply=result['reply'], thread_id=request.thread_id or str(uuid.uuid4()),
+            th = request.thread_id or str(uuid.uuid4())
+            record_telemetry_turn_end(result['reply'], th)
+            return ChatResponse(reply=result['reply'], thread_id=th,
                                 sources=result['sources'])
         with capture('main', request.message, request.thread_id):
             context=request.user_context.model_dump() if request.user_context else {}
@@ -80,11 +85,14 @@ def create_api_router(agent_service, settings, consultant_service=None):
                     acknowledgement = 'Сохранено в общую базу знаний:\n' + '\n'.join(
                         f'«{item["title"]}» — {item["chunks_count"]} фрагментов.' for item in saved)
                     record('answer', reply=acknowledgement, sources=[])
+                    record_telemetry_turn_end(acknowledgement, thread)
                     return ChatResponse(reply=acknowledgement, thread_id=thread)
                 record('answer', reply='Доступ к материалам изменился. Повторите вопрос для проверки актуальных источников.', sources=[])
+                record_telemetry_turn_end('Доступ к материалам изменился. Повторите вопрос для проверки актуальных источников.', thread)
                 return ChatResponse(reply='Доступ к материалам изменился. Повторите вопрос для проверки актуальных источников.',thread_id=thread)
             if revision:record('guard', name='access_revision', status='ok')
             record('answer', reply=str(reply), sources=getattr(reply,'sources',[]), thread_id=thread)
+            record_telemetry_turn_end(str(reply), thread)
             return ChatResponse(reply=str(reply),thread_id=thread,sources=getattr(reply,'sources',[]))
     @router.post('/api/v1/chat/stream', dependencies=[Depends(authorize)])
     async def stream_chat(request: ChatRequest):

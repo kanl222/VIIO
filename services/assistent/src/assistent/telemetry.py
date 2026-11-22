@@ -1,5 +1,6 @@
 """Arize Phoenix OpenTelemetry tracing integration for LangChain and LangGraph."""
 
+import contextvars
 import logging
 import os
 from typing import Any
@@ -8,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 _PHOENIX_INITIALIZED = False
 _EXCLUDED_PATTERNS = ("health", "readyz", "metrics", "healthz", "ping")
+_current_root_span: contextvars.ContextVar[Any] = contextvars.ContextVar("current_root_span", default=None)
 
 
 class HealthFilterSampler:
@@ -64,6 +66,8 @@ class ExcludeHealthSpanProcessor:
             self._wrapped._on_ending(span)
 
     def on_start(self, span: Any, parent_context: Any = None) -> None:
+        if getattr(span, "parent", None) is None:
+            _current_root_span.set(span)
         self._wrapped.on_start(span, parent_context)
 
     def on_end(self, span: Any) -> None:
@@ -82,6 +86,19 @@ class ExcludeHealthSpanProcessor:
         func = str(attrs.get("code.function.name") or "").lower()
         if any(pat in func for pat in _EXCLUDED_PATTERNS):
             return
+
+        # Auto-propagate input/output/session to root span if root span is missing them
+        if name in ("langgraph", "agent", "chatopenai"):
+            root = _current_root_span.get()
+            if root and getattr(root, "is_recording", lambda: False)():
+                root_attrs = getattr(root, "attributes", None) or {}
+                if "input.value" not in root_attrs and "input.value" in attrs:
+                    root.set_attribute("input.value", attrs["input.value"])
+                if "output.value" not in root_attrs and "output.value" in attrs:
+                    root.set_attribute("output.value", attrs["output.value"])
+                if "session.id" not in root_attrs and "session.id" in attrs:
+                    root.set_attribute("session.id", attrs["session.id"])
+
         self._wrapped.on_end(span)
 
     def shutdown(self) -> None:
@@ -89,6 +106,54 @@ class ExcludeHealthSpanProcessor:
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return self._wrapped.force_flush(timeout_millis)
+
+
+def record_telemetry_turn_start(
+    message: str,
+    thread_id: str | None = None,
+    user_id: str | None = None,
+) -> None:
+    """Record turn user input and session context on root span and active span for Phoenix."""
+    from opentelemetry import trace
+
+    targets = []
+    root = _current_root_span.get()
+    if root and getattr(root, "is_recording", lambda: False)():
+        targets.append(root)
+    curr = trace.get_current_span()
+    if curr and getattr(curr, "is_recording", lambda: False)() and curr is not root:
+        targets.append(curr)
+
+    for sp in targets:
+        sp.set_attribute("openinference.span.kind", "CHAIN")
+        sp.set_attribute("input.value", message)
+        sp.set_attribute("input.mime_type", "text/plain")
+        if thread_id:
+            sp.set_attribute("session.id", str(thread_id))
+        if user_id:
+            sp.set_attribute("user.id", str(user_id))
+
+
+def record_telemetry_turn_end(
+    reply: str,
+    thread_id: str | None = None,
+) -> None:
+    """Record turn assistant output on root span and active span for Phoenix."""
+    from opentelemetry import trace
+
+    targets = []
+    root = _current_root_span.get()
+    if root and getattr(root, "is_recording", lambda: False)():
+        targets.append(root)
+    curr = trace.get_current_span()
+    if curr and getattr(curr, "is_recording", lambda: False)() and curr is not root:
+        targets.append(curr)
+
+    for sp in targets:
+        sp.set_attribute("output.value", reply)
+        sp.set_attribute("output.mime_type", "text/plain")
+        if thread_id:
+            sp.set_attribute("session.id", str(thread_id))
 
 
 def init_phoenix_tracing(
