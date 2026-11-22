@@ -647,6 +647,7 @@ def create_graph_search_tool(settings: Any):
                 timeout=float(timeout),
             )
             context = format_graph_context(data)
+            duration_ms = round((time.monotonic() - start) * 1000)
             # Граф знаний возвращает факты, не привязываясь к списку документов-источников
             sources: list[dict[str, Any]] = []
             record(
@@ -662,22 +663,42 @@ def create_graph_search_tool(settings: Any):
                 employees_count=len(data.get("employees", [])),
                 menus_count=len(data.get("menus", [])),
                 operations_count=len(data.get("operations", [])),
-                duration_ms=round((time.monotonic() - start) * 1000),
+                duration_ms=duration_ms,
                 status="ok",
                 context_length=len(context),
             )
+            from assistent.telemetry import record_memgraph_telemetry
+            record_memgraph_telemetry(
+                query=query,
+                context=context,
+                data=data,
+                duration_ms=duration_ms,
+                status="ok",
+                uri=client.uri,
+            )
             return context, {"sources": sources}
         except asyncio.TimeoutError:
+            duration_ms = round((time.monotonic() - start) * 1000)
             logger.warning("Таймаут обращения к Memgraph (%s с)", timeout)
             record(
                 "graph_search",
                 title="Поиск по графу знаний (Memgraph)",
                 query=query,
                 status="timeout",
-                duration_ms=round((time.monotonic() - start) * 1000),
+                duration_ms=duration_ms,
+            )
+            from assistent.telemetry import record_memgraph_telemetry
+            record_memgraph_telemetry(
+                query=query,
+                context="",
+                duration_ms=duration_ms,
+                status="timeout",
+                error="Timeout",
+                uri=client.uri,
             )
             return "Поиск по графу знаний превысил время ожидания. Воспользуйтесь поиском по документам search_knowledge_base.", {}
         except Exception as e:
+            duration_ms = round((time.monotonic() - start) * 1000)
             logger.warning("Ошибка обращения к Memgraph: %s", e)
             record(
                 "graph_search",
@@ -685,7 +706,16 @@ def create_graph_search_tool(settings: Any):
                 query=query,
                 status="error",
                 error=str(e),
-                duration_ms=round((time.monotonic() - start) * 1000),
+                duration_ms=duration_ms,
+            )
+            from assistent.telemetry import record_memgraph_telemetry
+            record_memgraph_telemetry(
+                query=query,
+                context="",
+                duration_ms=duration_ms,
+                status="error",
+                error=str(e),
+                uri=client.uri,
             )
             return "Граф знаний временно недоступен. Воспользуйтесь поиском по документам search_knowledge_base.", {}
 

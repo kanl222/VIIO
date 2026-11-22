@@ -176,6 +176,170 @@ def record_telemetry_turn_end(
             sp.set_attribute("session.id", str(thread_id))
 
 
+def record_rag_retrieval_telemetry(
+    query: str,
+    context: str,
+    diagnostics: dict[str, Any] | None = None,
+    document_ids: Any = None,
+    duration_ms: float | None = None,
+    status: str = "ok",
+) -> None:
+    """Record RAG hybrid retrieval, Qdrant vector search, and Memgraph facts in Phoenix."""
+    import json
+    from opentelemetry import trace
+
+    tracer = trace.get_tracer("viio.rag")
+    diag = diagnostics or {}
+    selected = diag.get("selected", [])
+    graph_facts_count = int(diag.get("graph_facts_count", 0))
+    graph_data = diag.get("graph_data", {})
+    fusion = diag.get("fusion", {})
+    reranker_info = diag.get("reranker_info", {})
+    candidates = diag.get("candidates", [])
+
+    # Enrich active tool span (e.g. search_knowledge_base)
+    active_span = trace.get_current_span()
+    if active_span and getattr(active_span, "is_recording", lambda: False)():
+        active_span.set_attribute("rag.query", query)
+        active_span.set_attribute("qdrant.selected_chunks_count", len(selected))
+        active_span.set_attribute("memgraph.facts_count", graph_facts_count)
+        if fusion:
+            active_span.set_attribute("qdrant.hybrid_enabled", True)
+
+    # 1. Main RAG RETRIEVER span
+    with tracer.start_as_current_span("rag.hybrid_retrieval") as rag_span:
+        rag_span.set_attribute("openinference.span.kind", "RETRIEVER")
+        rag_span.set_attribute("input.value", query)
+        rag_span.set_attribute("output.value", context[:12000] if context else "")
+        rag_span.set_attribute("rag.status", status)
+        if duration_ms is not None:
+            rag_span.set_attribute("rag.duration_ms", duration_ms)
+        if document_ids:
+            rag_span.set_attribute("rag.filter.document_ids", json.dumps(list(document_ids), ensure_ascii=False))
+
+        rag_span.set_attribute("qdrant.selected_chunks_count", len(selected))
+        rag_span.set_attribute("qdrant.candidates_count", len(candidates))
+        rag_span.set_attribute("memgraph.facts_count", graph_facts_count)
+
+        # Attach retrieval documents with scores and metadata
+        for i, doc in enumerate(selected[:15]):
+            doc_id = str(doc.get("document_id") or doc.get("chunk_id") or f"doc_{i}")
+            content = str(doc.get("text") or doc.get("content") or "")
+            score = float(doc.get("score") or doc.get("rrf_score") or doc.get("term_score") or 1.0)
+            meta = {k: v for k, v in doc.items() if k not in ("text", "content")}
+            rag_span.set_attribute(f"retrieval.documents.{i}.document.id", doc_id)
+            rag_span.set_attribute(f"retrieval.documents.{i}.document.content", content[:4000])
+            rag_span.set_attribute(f"retrieval.documents.{i}.document.score", score)
+            rag_span.set_attribute(f"retrieval.documents.{i}.document.metadata", json.dumps(meta, ensure_ascii=False))
+
+        # 2. Qdrant Vector Search Child Span
+        with tracer.start_as_current_span("qdrant.vector_search") as qdrant_span:
+            qdrant_span.set_attribute("openinference.span.kind", "RETRIEVER")
+            qdrant_span.set_attribute("db.system", "qdrant")
+            qdrant_span.set_attribute("db.operation", "query_points")
+            qdrant_span.set_attribute("db.name", "knowledge_base")
+            qdrant_span.set_attribute("input.value", query)
+            qdrant_span.set_attribute("qdrant.collection", "knowledge_base")
+            qdrant_span.set_attribute("qdrant.selected_chunks_count", len(selected))
+            qdrant_span.set_attribute("qdrant.candidates_count", len(candidates))
+            if fusion:
+                qdrant_span.set_attribute("qdrant.hybrid_enabled", True)
+                qdrant_span.set_attribute("qdrant.fusion_branches", json.dumps(fusion.get("branches", [])))
+                qdrant_span.set_attribute("qdrant.fused_candidates_count", fusion.get("fused_candidates", 0))
+            if reranker_info:
+                qdrant_span.set_attribute("qdrant.reranker_status", reranker_info.get("reranker_status", "none"))
+                if "reranker_model" in reranker_info:
+                    qdrant_span.set_attribute("qdrant.reranker_model", str(reranker_info["reranker_model"]))
+            # Qdrant chunks
+            for j, doc in enumerate(selected[:15]):
+                doc_id = str(doc.get("document_id") or doc.get("chunk_id") or f"qdrant_{j}")
+                content = str(doc.get("text") or doc.get("content") or "")
+                score = float(doc.get("score") or doc.get("rrf_score") or doc.get("term_score") or 1.0)
+                meta = {k: v for k, v in doc.items() if k not in ("text", "content")}
+                qdrant_span.set_attribute(f"retrieval.documents.{j}.document.id", doc_id)
+                qdrant_span.set_attribute(f"retrieval.documents.{j}.document.content", content[:4000])
+                qdrant_span.set_attribute(f"retrieval.documents.{j}.document.score", score)
+                qdrant_span.set_attribute(f"retrieval.documents.{j}.document.metadata", json.dumps(meta, ensure_ascii=False))
+
+        # 3. Memgraph Knowledge Graph Child Span
+        with tracer.start_as_current_span("memgraph.graph_rag") as memgraph_span:
+            memgraph_span.set_attribute("openinference.span.kind", "RETRIEVER")
+            memgraph_span.set_attribute("db.system", "memgraph")
+            memgraph_span.set_attribute("db.operation", "search_graph")
+            memgraph_span.set_attribute("input.value", query)
+            memgraph_span.set_attribute("memgraph.facts_count", graph_facts_count)
+            if graph_data:
+                for entity_type, items in graph_data.items():
+                    if isinstance(items, list):
+                        memgraph_span.set_attribute(f"memgraph.{entity_type}_count", len(items))
+                g_idx = 0
+                for entity_type, items in graph_data.items():
+                    if isinstance(items, list):
+                        for item in items[:5]:
+                            name = item.get("name") or item.get("title") or item.get("prepara_name") or f"{entity_type}_{g_idx}"
+                            item_json = json.dumps(item, ensure_ascii=False)
+                            memgraph_span.set_attribute(f"retrieval.documents.{g_idx}.document.id", f"memgraph:{entity_type}:{name}")
+                            memgraph_span.set_attribute(f"retrieval.documents.{g_idx}.document.content", item_json[:4000])
+                            memgraph_span.set_attribute(f"retrieval.documents.{g_idx}.document.score", 1.0)
+                            memgraph_span.set_attribute(f"retrieval.documents.{g_idx}.document.metadata", json.dumps({"entity_type": entity_type, "name": name}, ensure_ascii=False))
+                            g_idx += 1
+
+
+def record_memgraph_telemetry(
+    query: str,
+    context: str,
+    data: dict[str, Any] | None = None,
+    duration_ms: float | None = None,
+    status: str = "ok",
+    error: str | None = None,
+    uri: str | None = None,
+) -> None:
+    """Record standalone Memgraph knowledge graph query in Phoenix."""
+    import json
+    from opentelemetry import trace
+
+    tracer = trace.get_tracer("viio.memgraph")
+    data_dict = data or {}
+    total_facts = sum(len(v) for v in data_dict.values() if isinstance(v, list))
+
+    # Enrich active tool span if one exists
+    active_span = trace.get_current_span()
+    if active_span and getattr(active_span, "is_recording", lambda: False)():
+        active_span.set_attribute("db.system", "memgraph")
+        active_span.set_attribute("memgraph.facts_count", total_facts)
+
+    with tracer.start_as_current_span("memgraph.search_knowledge_graph") as span:
+        span.set_attribute("openinference.span.kind", "RETRIEVER")
+        span.set_attribute("db.system", "memgraph")
+        span.set_attribute("db.operation", "search_graph")
+        span.set_attribute("input.value", query)
+        span.set_attribute("output.value", context[:12000] if context else "")
+        span.set_attribute("memgraph.status", status)
+        if uri:
+            span.set_attribute("memgraph.uri", uri)
+        if duration_ms is not None:
+            span.set_attribute("memgraph.duration_ms", duration_ms)
+        if error:
+            span.set_attribute("error", error)
+        span.set_attribute("memgraph.facts_count", total_facts)
+
+        for cat, items in data_dict.items():
+            if isinstance(items, list):
+                span.set_attribute(f"memgraph.{cat}_count", len(items))
+
+        g_idx = 0
+        for cat, items in data_dict.items():
+            if isinstance(items, list):
+                for item in items[:8]:
+                    name = item.get("name") or item.get("title") or item.get("prepara_name") or f"{cat}_{g_idx}"
+                    item_json = json.dumps(item, ensure_ascii=False)
+                    span.set_attribute(f"retrieval.documents.{g_idx}.document.id", f"memgraph:{cat}:{name}")
+                    span.set_attribute(f"retrieval.documents.{g_idx}.document.content", item_json[:4000])
+                    span.set_attribute(f"retrieval.documents.{g_idx}.document.score", 1.0)
+                    span.set_attribute(f"retrieval.documents.{g_idx}.document.metadata", json.dumps({"category": cat, "name": name}, ensure_ascii=False))
+                    g_idx += 1
+
+
 def init_phoenix_tracing(
     endpoint: str | None = None,
     project_name: str | None = None,

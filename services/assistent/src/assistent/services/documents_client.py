@@ -69,7 +69,9 @@ def create_remote_search_tool(settings: Any, k: int = 5, *, tool_name: str = "se
         }
         if document_ids is not None:
             payload_data["document_ids"] = list(document_ids)
-        if enabled():
+
+        from assistent.telemetry import is_phoenix_active, record_rag_retrieval_telemetry
+        if enabled() or is_phoenix_active():
             payload_data["diagnostics"] = True
 
         rag_timeout = float(getattr(settings, "rag_timeout_seconds", 60))
@@ -96,23 +98,46 @@ def create_remote_search_tool(settings: Any, k: int = 5, *, tool_name: str = "se
                     text = readable_reference(text, max_chars=max_chars, include_ids=True)
 
                 duration_ms = round((time.monotonic() - start) * 1000)
+                diag = payload.get("diagnostics", {})
                 record(
                     "retrieval",
                     query=query,
                     duration_ms=duration_ms,
                     context=text,
-                    **payload.get("diagnostics", {}),
+                    **diag,
+                )
+                record_rag_retrieval_telemetry(
+                    query=query,
+                    context=text,
+                    diagnostics=diag,
+                    document_ids=document_ids,
+                    duration_ms=duration_ms,
+                    status="ok",
                 )
                 return text, {"sources": sources}
         except httpx.HTTPStatusError as exc:
             duration_ms = round((time.monotonic() - start) * 1000)
             logger.warning("Ошибка HTTP при обращении к базе знаний: %s (код %s)", exc, exc.response.status_code)
             record("retrieval", query=query, status="error", duration_ms=duration_ms)
+            record_rag_retrieval_telemetry(
+                query=query,
+                context="",
+                document_ids=document_ids,
+                duration_ms=duration_ms,
+                status="error",
+            )
             return "Ошибка при обращении к базе знаний. Повторите попытку позже.", {}
         except (httpx.HTTPError, ValueError, KeyError):
             duration_ms = round((time.monotonic() - start) * 1000)
             logger.exception("Критическая ошибка при выполнении поиска в базе знаний")
             record("retrieval", query=query, status="error", duration_ms=duration_ms)
+            record_rag_retrieval_telemetry(
+                query=query,
+                context="",
+                document_ids=document_ids,
+                duration_ms=duration_ms,
+                status="error",
+            )
             return "Ошибка при обращении к базе знаний. Повторите попытку позже.", {}
 
     return search_knowledge_base
