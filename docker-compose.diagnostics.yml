@@ -31,6 +31,11 @@ services:
       - PHOENIX_HOST=0.0.0.0
       - PHOENIX_ENABLE_AUTH=false
       - PHOENIX_WORKING_DIR=/data
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-lm-studio}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://host.docker.internal:1234/v1}
+      - OPENAI_API_BASE=${OPENAI_API_BASE:-http://host.docker.internal:1234/v1}
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - phoenix_data:/data
     restart: unless-stopped
