@@ -11,6 +11,9 @@ services:
       - OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=/healthz?,/metrics,/readyz
     volumes:
       - assistant_traces:/traces
+    networks:
+      - viio_net
+      - phoenix_net
   consultant:
     image: viio-consultant:diagnostics
     environment:
@@ -20,27 +23,9 @@ services:
       - PHOENIX_PROJECT_NAME=${PHOENIX_PROJECT_NAME:-viio-consultant}
     volumes:
       - consultant_traces:/traces
-  phoenix:
-    image: arizephoenix/phoenix:latest
-    container_name: viio_phoenix
-    ports:
-      - "127.0.0.1:6006:6006"
-      - "127.0.0.1:4317:4317"
-    environment:
-      - PHOENIX_PORT=6006
-      - PHOENIX_HOST=0.0.0.0
-      - PHOENIX_ENABLE_AUTH=false
-      - PHOENIX_WORKING_DIR=/data
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-lm-studio}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://host.docker.internal:1234/v1}
-      - OPENAI_API_BASE=${OPENAI_API_BASE:-http://host.docker.internal:1234/v1}
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    volumes:
-      - phoenix_data:/data
-    restart: unless-stopped
     networks:
       - viio_net
+      - phoenix_net
   diagnostics:
     build: ./services/diagnostics
     container_name: viio_diagnostics
@@ -90,9 +75,11 @@ volumes:
   documents_traces:
   document_worker_traces:
   rag_traces:
-  phoenix_data:
 
 networks:
   viio_net:
     name: viio_viio_net
+    external: true
+  phoenix_net:
+    name: phoenix_net
     external: true

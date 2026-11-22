@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 _PHOENIX_INITIALIZED = False
 _EXCLUDED_PATTERNS = ("health", "readyz", "metrics", "healthz", "ping")
 _current_root_span: contextvars.ContextVar[Any] = contextvars.ContextVar("current_root_span", default=None)
+_active_root_spans: dict[int, Any] = {}
 
 
 class HealthFilterSampler:
@@ -68,6 +69,9 @@ class ExcludeHealthSpanProcessor:
     def on_start(self, span: Any, parent_context: Any = None) -> None:
         if getattr(span, "parent", None) is None:
             _current_root_span.set(span)
+            ctx = getattr(span, "context", None)
+            if ctx and getattr(ctx, "trace_id", None):
+                _active_root_spans[ctx.trace_id] = span
         self._wrapped.on_start(span, parent_context)
 
     def on_end(self, span: Any) -> None:
@@ -87,17 +91,21 @@ class ExcludeHealthSpanProcessor:
         if any(pat in func for pat in _EXCLUDED_PATTERNS):
             return
 
+        ctx = getattr(span, "context", None)
+        trace_id = getattr(ctx, "trace_id", None) if ctx else None
+        root = (_active_root_spans.get(trace_id) if trace_id else None) or _current_root_span.get()
+
         # Auto-propagate input/output/session to root span if root span is missing them
-        if name in ("langgraph", "agent", "chatopenai"):
-            root = _current_root_span.get()
-            if root and getattr(root, "is_recording", lambda: False)():
-                root_attrs = getattr(root, "attributes", None) or {}
-                if "input.value" not in root_attrs and "input.value" in attrs:
-                    root.set_attribute("input.value", attrs["input.value"])
-                if "output.value" not in root_attrs and "output.value" in attrs:
-                    root.set_attribute("output.value", attrs["output.value"])
-                if "session.id" not in root_attrs and "session.id" in attrs:
-                    root.set_attribute("session.id", attrs["session.id"])
+        if root and root is not span and getattr(root, "is_recording", lambda: False)():
+            root_attrs = getattr(root, "attributes", None) or {}
+            for k in ("input.value", "output.value", "session.id", "user.id"):
+                if k not in root_attrs and k in attrs:
+                    root.set_attribute(k, attrs[k])
+            if "openinference.span.kind" not in root_attrs:
+                root.set_attribute("openinference.span.kind", "CHAIN")
+
+        if getattr(span, "parent", None) is None and trace_id:
+            _active_root_spans.pop(trace_id, None)
 
         self._wrapped.on_end(span)
 
@@ -116,12 +124,18 @@ def record_telemetry_turn_start(
     """Record turn user input and session context on root span and active span for Phoenix."""
     from opentelemetry import trace
 
+    curr = trace.get_current_span()
+    trace_id = None
+    if curr:
+        sctx = curr.get_span_context()
+        if sctx and getattr(sctx, "trace_id", None):
+            trace_id = sctx.trace_id
+    root = (_active_root_spans.get(trace_id) if trace_id else None) or _current_root_span.get()
+
     targets = []
-    root = _current_root_span.get()
     if root and getattr(root, "is_recording", lambda: False)():
         targets.append(root)
-    curr = trace.get_current_span()
-    if curr and getattr(curr, "is_recording", lambda: False)() and curr is not root:
+    if curr and getattr(curr, "is_recording", lambda: False)() and curr not in targets:
         targets.append(curr)
 
     for sp in targets:
@@ -141,12 +155,18 @@ def record_telemetry_turn_end(
     """Record turn assistant output on root span and active span for Phoenix."""
     from opentelemetry import trace
 
+    curr = trace.get_current_span()
+    trace_id = None
+    if curr:
+        sctx = curr.get_span_context()
+        if sctx and getattr(sctx, "trace_id", None):
+            trace_id = sctx.trace_id
+    root = (_active_root_spans.get(trace_id) if trace_id else None) or _current_root_span.get()
+
     targets = []
-    root = _current_root_span.get()
     if root and getattr(root, "is_recording", lambda: False)():
         targets.append(root)
-    curr = trace.get_current_span()
-    if curr and getattr(curr, "is_recording", lambda: False)() and curr is not root:
+    if curr and getattr(curr, "is_recording", lambda: False)() and curr not in targets:
         targets.append(curr)
 
     for sp in targets:
