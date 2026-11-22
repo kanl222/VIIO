@@ -7,8 +7,11 @@ Computes both retrieval metrics (Recall@k, MRR, NDCG@k) and Ragas generation met
 import argparse
 import json
 import logging
+from pathlib import Path
 import sys
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from viio_rag.evaluation import (
     calculate_recall_at_k,
@@ -110,10 +113,15 @@ def main():
     parser.add_argument("--input-json", type=str, default=None, help="Path to custom test cases JSON file.")
     args = parser.parse_args()
 
-    cases = SAMPLE_EVAL_CASES
+    default_json = Path(__file__).resolve().parents[1] / "data" / "golden_eval_dataset.json"
     if args.input_json:
         with open(args.input_json, "r", encoding="utf-8") as f:
             cases = json.load(f)
+    elif default_json.exists():
+        with open(default_json, "r", encoding="utf-8") as f:
+            cases = json.load(f)
+    else:
+        cases = SAMPLE_EVAL_CASES
 
     run_benchmark(cases, run_ragas_llm=args.with_llm)
 

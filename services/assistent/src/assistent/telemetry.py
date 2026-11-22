@@ -56,6 +56,13 @@ class ExcludeHealthSpanProcessor:
     def __init__(self, wrapped: Any) -> None:
         self._wrapped = wrapped
 
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
+
+    def _on_ending(self, span: Any) -> None:
+        if hasattr(self._wrapped, "_on_ending"):
+            self._wrapped._on_ending(span)
+
     def on_start(self, span: Any, parent_context: Any = None) -> None:
         self._wrapped.on_start(span, parent_context)
 
