@@ -51,6 +51,7 @@ from assistent.services.agent_runtime import _content_to_str, build_runtime
 from assistent.services.answer_sources import strip_thinking
 from assistent.services.database_agent import is_database_request
 from assistent.services.diagnostics import model_call, record
+from assistent.services.multi_hop import decompose_query, execute_multi_hop_retrieval
 from assistent.services.request_policy import is_coding_request
 from assistent.security import has_role_access
 from assistent.tools.postgres_tool import DATABASE_ROLES
@@ -269,8 +270,26 @@ def build_supervisor_graph(
 
     async def knowledge_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:
         history, _ = history_for_turn(state, runtime)
+        question = last_question(history)
         record("specialist_dispatch", specialist="knowledge", name="Аналитик базы знаний (RAG)",
-               question=last_question(history)[:200])
+               question=question[:200])
+
+        # Multi-Hop Query Decomposition: декомпозиция составных вопросов к графу и базе документов
+        plan = await decompose_query(question, llm=routing_llm)
+        if plan.is_multi_hop and len(plan.sub_queries) > 1:
+            record("multi_hop_plan", sub_queries=[sq.to_dict() for sq in plan.sub_queries])
+            multi_hop_ref, _ = await execute_multi_hop_retrieval(
+                plan,
+                tools_by_name,
+                user_context=ctx(runtime).get("user_context", {}),
+                context_max_chars=context_max_chars,
+            )
+            if multi_hop_ref:
+                merged_ctx = dict(ctx(runtime))
+                existing = merged_ctx.get("reference_context", "")
+                merged_ctx["reference_context"] = f"{existing}\n\n{multi_hop_ref}".strip() if existing else multi_hop_ref
+                return await knowledge_runtime.ainvoke(state, context=merged_ctx)
+
         return await knowledge_runtime.ainvoke(state, context=ctx(runtime))
 
     async def coding_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict[str, Any]:

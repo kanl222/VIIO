@@ -186,13 +186,24 @@ def format_documents(docs: Sequence[Any]) -> str:
             line_end = meta.get("line_end", 1)
             content = f"Файл: {filename}, строки {line_start}–{line_end}\n{content}"
 
+        section_path = meta.get("section_path")
+        breadcrumb = ""
+        if isinstance(section_path, (list, tuple)) and section_path:
+            breadcrumb = " > ".join(str(p).strip() for p in section_path if str(p).strip())
+        elif isinstance(section_path, str) and section_path.strip():
+            breadcrumb = section_path.strip()
+
+        if breadcrumb and not content.lstrip().startswith(("#", "[Раздел:")):
+            content = f"[Раздел: {breadcrumb}]\n{content}"
+
         # Защита от prompt injection: экранирование любых вариаций тега <context>
         safe_content = _CONTEXT_TAG_RE.sub(
             lambda m: escape(m.group(0)), content
         )
+        section_attr = f' section="{escape(breadcrumb, quote=True)}"' if breadcrumb else ""
         formatted_parts.append(
             f'<context source="{escape(str(title), quote=True)}" '
-            f'doc_id="{escape(str(doc_id), quote=True)}" chunk="{idx}">\n'
+            f'doc_id="{escape(str(doc_id), quote=True)}" chunk="{idx}"{section_attr}>\n'
             f"{safe_content}\n"
             f"</context>"
         )

@@ -16,7 +16,19 @@ class AnswerSource(TypedDict):
     document_id: str
 
 
-CONTEXT = re.compile(r'<context source="(.*?)" doc_id="([^"]*)"[^>]*>([\s\S]*?)</context>')
+CONTEXT = re.compile(
+    r'<context\b(?=(?:[^>"\']|"[^"]*"|\'[^\']*\')*?\bsource="([^"]*)")'
+    r'(?=(?:[^>"\']|"[^"]*"|\'[^\']*\')*?\bdoc_id="([^"]*)")'
+    r'(?:[^>"\']|"[^"]*"|\'[^\']*\')*>([\s\S]*?)</context>',
+    re.IGNORECASE,
+)
+
+CONTEXT_FULL = re.compile(
+    r'<context\b(?=(?:[^>"\']|"[^"]*"|\'[^\']*\')*?\bsource="([^"]*)")'
+    r'(?=(?:[^>"\']|"[^"]*"|\'[^\']*\')*?\bdoc_id="([^"]*)")'
+    r'((?:[^>"\']|"[^"]*"|\'[^\']*\')*)>([\s\S]*?)</context>',
+    re.IGNORECASE,
+)
 
 # Границы слов обязательны: иначе «нет» совпадает внутри «интернет», «нетто» и т.п.
 # [^.!?\n] не даёт условию перескакивать через границы предложений.
@@ -107,14 +119,37 @@ def reorder_lost_in_the_middle(items: Sequence[Any]) -> list[Any]:
     return left + right
 
 
+def extract_section_path(attrs_or_body: str) -> str:
+    """Extract section hierarchy (breadcrumb) from context attributes or Markdown headings."""
+    # 1. Из атрибута section="..." в открывающем теге
+    section_match = re.search(r'section="([^"]+)"', attrs_or_body)
+    if section_match:
+        return html.unescape(section_match.group(1).strip())
+    # 2. Из префикса [Раздел: ...]
+    bracket_match = re.search(r'^\s*\[Раздел:\s*([^\]]+)\]', attrs_or_body, re.MULTILINE)
+    if bracket_match:
+        return bracket_match.group(1).strip()
+    # 3. Из заголовков Markdown в теле фрагмента (## или ###)
+    sub_headings = re.findall(r'^(#{2,6})\s+([^\n<>]{2,120})', attrs_or_body, re.MULTILINE)
+    if sub_headings:
+        return " > ".join(h[1].strip() for h in sub_headings[:3])
+    return ""
+
+
 def readable_reference(reference: str, max_chars: int | None = None, *, include_ids: bool = False) -> str:
-    """Format excerpts, optionally exposing document IDs for targeted follow-up."""
-    matches = CONTEXT.findall(reference)
+    """Format excerpts with hierarchical breadcrumbs (Small-to-Big context)."""
+    matches = CONTEXT_FULL.findall(reference)
     if not matches:
         return reference[:max_chars]
     fragments = []
-    for title, identifier, body in matches:
-        label = f'Материал «{reference_title(title, body)}»'
+    for title, identifier, attrs, body in matches:
+        doc_title = reference_title(title, body)
+        section = extract_section_path(attrs) or extract_section_path(body)
+        if section and section.startswith(f"{doc_title} > "):
+            section = section[len(f"{doc_title} > "):].strip()
+
+        section_suffix = f" [Раздел: {section}]" if section and section != doc_title and section not in doc_title else ""
+        label = f'Материал «{doc_title}»{section_suffix}'
         if include_ids and identifier and identifier != 'unknown':
             label += f' (doc_id: {html.unescape(identifier)})'
         fragments.append(f'{label}:\n{body.strip()}')
