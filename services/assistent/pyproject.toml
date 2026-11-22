@@ -23,6 +23,8 @@ dependencies = [
     "fastmcp>=4.1.6,<5",
     "redis>=5.0.0",
     "neo4j>=6.4.1",
+    "arize-phoenix-otel>=0.17.0",
+    "openinference-instrumentation-langchain>=0.1.80",
     "viio-core",
 ]
 

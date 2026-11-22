@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     text_to_sql_enabled: bool = True
     skills_enabled: bool = False
     skills_dir: str = "Skills"
+    phoenix_enabled: bool = False
+    phoenix_endpoint: str = "http://localhost:6006/v1/traces"
+    phoenix_project_name: str = "viio"
     github_mcp_enabled: bool = False
     github_mcp_token: str = Field(default="", repr=False)
     github_repository: str = ""

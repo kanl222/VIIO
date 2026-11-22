@@ -49,6 +49,16 @@ def create_app(settings=None,agent_service=None,checkpointer=None):
     app_settings=settings or Settings()
     app_settings.validate_runtime()
     if not app_settings.documents_url:raise ValueError('Для Assistent нужен DOCUMENTS_URL')
+
+    import os
+    if app_settings.phoenix_enabled or os.getenv("PHOENIX_ENABLED", "").lower() in ("true", "1"):
+        from assistent.telemetry import init_phoenix_tracing
+        init_phoenix_tracing(
+            endpoint=app_settings.phoenix_endpoint,
+            project_name=app_settings.phoenix_project_name,
+            enabled=True,
+        )
+
     catalog_service=SimpleNamespace(pool=None)
     consultant=None
     if agent_service is None:
