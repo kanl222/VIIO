@@ -1,4 +1,5 @@
 """Loopback-only trace viewer; stdlib runtime, no access to VIIO databases/keys."""
+import io
 import json
 import os
 import re
@@ -6,6 +7,7 @@ import threading
 import mimetypes
 import queue
 import sqlite3
+import zipfile
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -179,7 +181,135 @@ def export_golden_set():
     return sorted(cases, key=lambda c: c.get('started_at') or '', reverse=True)
 
 
-def summaries(search_query=None):
+def create_traces_zip() -> bytes:
+    """Упаковывает все файлы трасс и рецензий в ZIP-архив."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        seen = set()
+        with LOCK:
+            for root in ROOTS:
+                if not root.is_dir():
+                    continue
+                for path in root.glob('*.json'):
+                    if not ID.fullmatch(path.stem) or path.stem in seen:
+                        continue
+                    seen.add(path.stem)
+                    try:
+                        agent_sub = path.parent.name if path.parent != root else 'main'
+                        archive_path = f"traces/{agent_sub}/{path.name}"
+                        zf.write(path, arcname=archive_path)
+                    except Exception:
+                        pass
+            if REVIEWS.is_dir():
+                for rev_path in REVIEWS.glob('*.json'):
+                    if not ID.fullmatch(rev_path.stem):
+                        continue
+                    try:
+                        zf.write(rev_path, arcname=f"reviews/{rev_path.name}")
+                    except Exception:
+                        pass
+        if not seen:
+            zf.writestr('README.txt', 'В архиве пока нет сохраненных трасс диагностики.\n')
+    return buf.getvalue()
+
+
+def import_traces_from_bytes(data: bytes) -> dict:
+    """Импортирует трассы и рецензии из архива (ZIP) или JSON в каталог трасс и базу SQLite."""
+    imported_traces = 0
+    imported_reviews = 0
+    errors = []
+
+    local_base = _get_repo_root() / 'tmp' / 'traces'
+    local_base.mkdir(parents=True, exist_ok=True)
+    REVIEWS.mkdir(parents=True, exist_ok=True)
+
+    def process_single_item(item: dict, source_name: str):
+        nonlocal imported_traces, imported_reviews
+        identifier = str(item.get('id') or '')
+        if not ID.fullmatch(identifier):
+            return
+
+        if 'stage' in item and ('expected_answer' in item or 'evidence' in item) and 'events' not in item:
+            target = REVIEWS / f"{identifier}.json"
+            target.write_text(json.dumps(item, ensure_ascii=False), encoding='utf-8')
+            imported_reviews += 1
+            return
+
+        agent = str(item.get('agent') or 'main')
+        target_dir = local_base / agent
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{identifier}.json"
+        target.write_text(json.dumps(item, ensure_ascii=False), encoding='utf-8')
+
+        if isinstance(item.get('review'), dict) and any(item['review'].values()):
+            rev_target = REVIEWS / f"{identifier}.json"
+            rev_target.write_text(json.dumps(item['review'], ensure_ascii=False), encoding='utf-8')
+            imported_reviews += 1
+
+        imported_traces += 1
+
+    def process_trace_json(raw_text: str, source_name: str):
+        try:
+            parsed = json.loads(raw_text)
+        except Exception as e:
+            errors.append(f"Ошибка парсинга {source_name}: {e}")
+            return
+
+        if isinstance(parsed, list):
+            for idx, el in enumerate(parsed):
+                if isinstance(el, dict):
+                    process_single_item(el, f"{source_name}[{idx}]")
+        elif isinstance(parsed, dict) and 'items' in parsed and isinstance(parsed['items'], list):
+            for idx, el in enumerate(parsed['items']):
+                if isinstance(el, dict):
+                    process_single_item(el, f"{source_name}.items[{idx}]")
+        elif isinstance(parsed, dict):
+            process_single_item(parsed, source_name)
+
+    if data.startswith(b'PK\x03\x04') or data.startswith(b'PK\x05\x06'):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data), 'r') as zf:
+                for member in zf.infolist():
+                    if member.is_dir():
+                        continue
+                    name = member.filename
+                    if '..' in name or name.startswith('/') or name.startswith('\\'):
+                        continue
+                    if not name.endswith('.json'):
+                        continue
+                    try:
+                        content_str = zf.read(member).decode('utf-8')
+                        process_trace_json(content_str, name)
+                    except Exception as e:
+                        errors.append(f"Ошибка извлечения {name}: {e}")
+        except Exception as e:
+            return {'status': 'error', 'detail': f'Некорректный ZIP-архив: {e}'}
+    else:
+        try:
+            text = data.decode('utf-8')
+            process_trace_json(text, 'upload.json')
+        except Exception as e:
+            return {'status': 'error', 'detail': f'Некорректный формат архива (ожидался ZIP или JSON): {e}'}
+
+    if imported_traces > 0 or imported_reviews > 0:
+        with LOCK:
+            CACHE.clear()
+            summaries()
+        notify_subscribers('traces_imported', {
+            'imported_traces': imported_traces,
+            'imported_reviews': imported_reviews,
+        })
+
+    return {
+        'status': 'ok',
+        'imported_traces': imported_traces,
+        'imported_reviews': imported_reviews,
+        'errors_count': len(errors),
+        'errors': errors[:10] if errors else [],
+    }
+
+
+def summaries(search_query=None, full=False):
     with LOCK:
         existing = set()
         changed = []
@@ -193,6 +323,9 @@ def summaries(search_query=None):
                         item = read_json(path)
                         events = item.get('events', [])
                         summary = {k: item.get(k) for k in ('id', 'agent', 'question', 'thread_id', 'started_at', 'duration_ms', 'status', 'error')}
+                        summary['configuration'] = item.get('configuration', {})
+                        summary['answer'] = next((e.get('reply') for e in reversed(events) if e.get('stage') == 'answer'), None)
+                        summary['sources'] = next((e.get('sources') for e in reversed(events) if e.get('stage') == 'answer'), [])
                         summary['searches'] = sum(1 for e in events if is_search_event(e))
                         summary['model_calls'] = sum(e.get('stage') == 'context' for e in events)
                         summary['event_count'] = len(events)
@@ -240,7 +373,17 @@ def summaries(search_query=None):
                 if conn:
                     conn.close()
 
-        rows = [{**value[1], 'review': review(value[1]['id'])} for value in CACHE.values()]
+        if full:
+            rows = []
+            for path_str, (stamp, summ) in CACHE.items():
+                try:
+                    full_item = read_json(Path(path_str))
+                    full_item['review'] = review(full_item['id'])
+                    rows.append(full_item)
+                except Exception:
+                    rows.append({**summ, 'review': review(summ['id'])})
+        else:
+            rows = [{**value[1], 'review': review(value[1]['id'])} for value in CACHE.values()]
 
         if search_query:
             matched_ids = search_fts(search_query)
@@ -263,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
         if host not in valid_hosts:
             self.send_json(403, {'detail': f'Откройте сайт через localhost:{port}'})
             return False
-        if write and self.headers.get('Origin') != 'http://'+host:
+        if write and self.headers.get('Origin') and self.headers.get('Origin') != 'http://'+host:
             self.send_json(403, {'detail': 'Запись разрешена только с локальной страницы'})
             return False
         return True
@@ -320,8 +463,29 @@ class Handler(BaseHTTPRequestHandler):
 
         if url.path == '/api/traces':
             q = params.get('q', [None])[0]
-            rows = summaries(search_query=q)
+            full_flag = params.get('full', ['0'])[0].lower() in ('1', 'true', 'yes')
+            rows = summaries(search_query=q, full=full_flag)
             self.send_json(200, {'items': rows, 'retention': '7 дней, до 1000 запросов на сервис'})
+        elif url.path == '/api/traces/export':
+            rows = summaries(search_query=params.get('q', [None])[0], full=True)
+            self.send_json(200, {
+                'count': len(rows),
+                'items': rows,
+                'exported_at': datetime.now(timezone.utc).isoformat()
+            })
+        elif url.path in ('/api/traces/archive', '/api/traces/download-zip'):
+            zip_bytes = create_traces_zip()
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            filename = f"viio_traces_{timestamp}.zip"
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+            self.send_header('Content-Length', str(len(zip_bytes)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(zip_bytes)
+            return
         elif url.path == '/api/reviews/export-golden-set':
             dataset = export_golden_set()
             self.send_json(200, {
@@ -345,7 +509,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.allowed(write=True): return
-        identifier = urlsplit(self.path).path.removeprefix('/api/reviews/')
+        url = urlsplit(self.path)
+
+        if url.path == '/api/traces/import-archive':
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+                if size <= 0 or size > 250_000_000:
+                    return self.send_json(400, {'detail': 'Размер архива должен быть до 250 МБ'})
+                body = self.rfile.read(size)
+                result = import_traces_from_bytes(body)
+                status_code = 200 if result.get('status') == 'ok' else 400
+                return self.send_json(status_code, result)
+            except Exception as e:
+                return self.send_json(500, {'detail': f'Сбой импорта архива: {e}'})
+
+        identifier = url.path.removeprefix('/api/reviews/')
         if self.path != '/api/reviews/'+identifier or not trace_path(identifier):
             return self.send_json(404, {'detail': 'Трасса не найдена'})
         try:

@@ -266,28 +266,28 @@ QUESTIONS_40: list[dict[str, Any]] = [
         "id": 33,
         "category": "Онтология склада и холодовая цепь",
         "query": "Какой температурный режим хранения предусмотрен для препарата Гам-КОВИД-Вак и в какой складской зоне он содержится?",
-        "expected_docs": ["doc-ontology", "doc-62"],
+        "expected_docs": ["doc-62"],
         "keywords": ["2-8", "2–8", "-18", "камер", "холод"],
     },
     {
         "id": 34,
         "category": "Онтология склада и холодовая цепь",
         "query": "Какие этапы и роли включает сквозной бизнес-процесс приёмки товара на аптечном складе?",
-        "expected_docs": ["doc-ontology", "doc-25"],
+        "expected_docs": ["doc-25"],
         "keywords": ["приемк", "входной контроль", "фармацевт", "шаг"],
     },
     {
         "id": 35,
         "category": "Онтология склада и холодовая цепь",
         "query": "Какая система является мастер-системой (Source of Truth) для номенклатуры и складских остатков аптечного склада?",
-        "expected_docs": ["doc-ontology"],
+        "expected_docs": ["doc-25", "doc-30"],
         "keywords": ["1с", "erp", "wms", "мастер"],
     },
     {
         "id": 36,
         "category": "Онтология склада и холодовая цепь",
         "query": "Что означает термин ЖНВЛП и каково его практическое значение при ценообразовании?",
-        "expected_docs": ["doc-abbreviations", "doc-ontology"],
+        "expected_docs": ["doc-abbreviations"],
         "keywords": ["жизненно необходим", "жнвлп", "цен"],
     },
 
@@ -385,6 +385,10 @@ def test_retrieval_suite() -> list[dict[str, Any]]:
                     "matched_docs": matched_docs,
                     "kw_matches": kw_matches,
                     "context_len": len(context),
+                    "expected_docs": item.get("expected_docs", []),
+                    "keywords": item.get("keywords", []),
+                    "context": context,
+                    "diagnostics": diag,
                 }
                 results.append(res)
                 mark = "✓ PASS" if found_match else "✗ FAIL"
@@ -463,6 +467,10 @@ def test_agent_generation(selected_ids: list[int] | None = None) -> list[dict[st
                     "status": "PASS" if passed else "FAIL",
                     "latency_s": elapsed_s,
                     "reply": reply,
+                    "sources": data.get("sources", []),
+                    "active_specialist": data.get("active_specialist"),
+                    "thread_id": data.get("thread_id"),
+                    "raw_response": data,
                 }
                 results.append(res)
 

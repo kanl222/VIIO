@@ -6,7 +6,8 @@
 # Storage and runtime keys
 coding-workspace/
 qdrant_storage/
-data/
+data/*
+!data/knowledge_graph/
 *.key
 
 # Python
@@ -48,7 +49,8 @@ Assistent/tests/repro_bug.py
 Assistent/tests/scratch_debug.py
 
 # Local document originals
-/data/
+/data/*
+!/data/knowledge_graph/
 Diagnostics/DESIGN-BRIEF.md
 Diagnostics/PRODUCT.md
 

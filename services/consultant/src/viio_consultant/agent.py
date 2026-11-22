@@ -176,6 +176,10 @@ class PublicConsultant:
             doc_id = str(doc.get('id', ''))
             norm_doc_title = norm(title)
 
+            # Граф знаний и онтология исключаются из источников
+            if doc_id == 'doc-ontology' or any(k in norm_doc_title for k in ('онтолог', 'граф знаний', 'memgraph')):
+                continue
+
             # 1. Точное совпадение очищенной строки из блока источников
             if norm_doc_title in candidate_titles:
                 sources.append({'publication_id': doc['id'], 'title': title})
@@ -200,6 +204,16 @@ class PublicConsultant:
                     sources.append({'publication_id': doc['id'], 'title': title})
 
         if not sources:
+            # Если блок источников не был запрошен и не выведен моделью, но найдены релевантные документы и ответ дан
+            if not footer:
+                valid_docs = [
+                    {'publication_id': d['id'], 'title': d['title']}
+                    for d in docs
+                    if d.get('id') != 'doc-ontology'
+                    and not any(k in norm(d.get('title', '')) for k in ('онтолог', 'граф знаний', 'memgraph'))
+                ]
+                if valid_docs:
+                    return {'result': {'reply': answer, 'sources': valid_docs}}
             return self._no_information(state)
         return {'result': {'reply': answer, 'sources': sources}}
 

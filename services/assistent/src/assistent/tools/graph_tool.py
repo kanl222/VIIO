@@ -606,11 +606,6 @@ def format_graph_context(data: dict[str, Any]) -> str:
                 blocks.append(f"  - Следующий шаг: {', '.join(op['next_steps'])}")
         blocks.append("")
 
-    if sources:
-        blocks.append("#### Документы-первоисточники:")
-        for doc in sources[:5]:
-            blocks.append(f"- *{doc['title']}* (ID: `{doc['id'][:8]}`)")
-
     return "\n".join(blocks)
 
 
@@ -652,7 +647,8 @@ def create_graph_search_tool(settings: Any):
                 timeout=float(timeout),
             )
             context = format_graph_context(data)
-            sources = [{"id": d["id"], "title": d["title"], "type": "graph"} for d in data.get("sources", [])]
+            # Граф знаний возвращает факты, не привязываясь к списку документов-источников
+            sources: list[dict[str, Any]] = []
             record(
                 "graph_search",
                 title="Поиск по графу знаний (Memgraph)",

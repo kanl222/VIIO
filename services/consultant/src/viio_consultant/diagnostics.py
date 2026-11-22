@@ -68,7 +68,7 @@ def record(stage, title=None, **data):
         elapsed_ms=round((time.monotonic()-trace['_start'])*1000),
         **data
     )
-    if len(trace['events']) < 100:
+    if len(trace['events']) < 1000:
         trace['events'].append(event_dict)
     else:
         trace['dropped_events'] = trace.get('dropped_events', 0) + 1
@@ -213,8 +213,8 @@ def persist(trace):
         payload['duration_ms'] = round((time.monotonic()-trace['_start'])*1000)
         payload['updated_at'] = datetime.now(timezone.utc).isoformat()
         def bounded(value):
-            if isinstance(value, str) and len(value) > 100000:
-                return value[:100000] + '\n[Обрезано журналом]'
+            if isinstance(value, str) and len(value) > 250000:
+                return value[:250000] + '\n[Обрезано журналом]'
             if isinstance(value, dict):
                 return {k: bounded(v) for k, v in value.items()}
             if isinstance(value, list):

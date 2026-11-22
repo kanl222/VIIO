@@ -1,5 +1,5 @@
-import { memo, useState } from 'react';
-import { RefreshCw, Download, Check } from 'lucide-react';
+import { memo, useState, useRef } from 'react';
+import { RefreshCw, Download, Check, Upload, FileArchive } from 'lucide-react';
 import { diagnosticTabs, matchesTab, type DiagnosticTab, type TraceSummary } from '../types';
 
 interface ToolbarProps {
@@ -22,6 +22,9 @@ export const Toolbar = memo(function Toolbar({
   onRefresh,
 }: ToolbarProps) {
   const [exporting, setExporting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const exportGoldenSet = async () => {
     setExporting(true);
@@ -41,6 +44,50 @@ export const Toolbar = memo(function Toolbar({
       setTimeout(() => setExporting(false), 1200);
     }
   };
+
+  const exportArchive = async () => {
+    setArchiving(true);
+    try {
+      const res = await fetch('/api/traces/archive');
+      if (!res.ok) throw new Error('Сбой экспорта архива');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `viio_traces_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Не удалось выгрузить архив трасс: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setTimeout(() => setArchiving(false), 1200);
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const res = await fetch('/api/traces/import-archive', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        body: file,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Ошибка импорта');
+      alert(`Успешно импортировано трасс: ${data.imported_traces}${data.imported_reviews ? `, рецензий: ${data.imported_reviews}` : ''}`);
+      onRefresh();
+    } catch (err) {
+      alert('Ошибка при импорте архива: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="diagnostic-toolbar">
       <nav className="diagnostic-tabs" aria-label="Раздел диагностики">
@@ -70,6 +117,31 @@ export const Toolbar = memo(function Toolbar({
           />
           <span>Обновление в реальном времени</span>
         </label>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleImportFile}
+          accept=".zip,.json"
+          style={{ display: 'none' }}
+        />
+        <button
+          className="refresh-button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing}
+          title="Импортировать архив трасс (.zip или .json)"
+        >
+          {importing ? <RefreshCw size={14} className="spin" /> : <Upload size={14} aria-hidden="true" />}
+          <span>{importing ? 'Импорт...' : 'Импорт архива'}</span>
+        </button>
+        <button
+          className="refresh-button export-archive-btn"
+          onClick={exportArchive}
+          disabled={archiving}
+          title="Выгрузить полный архив всех трасс в ZIP"
+        >
+          {archiving ? <Check size={14} className="good" /> : <FileArchive size={14} aria-hidden="true" />}
+          <span>{archiving ? 'Выгружен' : 'Архив (ZIP)'}</span>
+        </button>
         <button
           className="refresh-button export-golden-btn"
           onClick={exportGoldenSet}

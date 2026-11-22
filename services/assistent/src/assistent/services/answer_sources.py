@@ -35,12 +35,24 @@ _CJK = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+")
 MIN_TITLE_MATCH_LEN = 4
 
 
+def is_ontology_or_graph(title: str, identifier: str = "") -> bool:
+    """Проверяет, относится ли источник к онтологии или графу знаний (они не должны быть источниками)."""
+    if identifier == "doc-ontology" or identifier.startswith("graph:"):
+        return True
+    t = title.casefold().replace("ё", "е")
+    return any(k in t for k in ("онтолог", "ontology", "граф знаний", "memgraph"))
+
+
 def _source(item: Any) -> AnswerSource | None:
     """Приводит источник от любого инструмента к {title, document_id}; без обоих полей отбрасывает."""
     if not isinstance(item, dict):
         return None
+    if item.get("type") == "graph":
+        return None
     title = str(item.get("title") or "")
     identifier = str(item.get("document_id") or item.get("id") or "")
+    if is_ontology_or_graph(title, identifier):
+        return None
     if not title and not identifier:
         return None
     result: dict[str, Any] = {"title": title, "document_id": identifier}
@@ -63,7 +75,11 @@ def sources_from_reference(reference: str) -> list[AnswerSource]:
     sources = []
     seen = set()
     for title, identifier, body in CONTEXT.findall(reference):
-        source = {"title": reference_title(title, body), "document_id": html.unescape(identifier)}
+        ref_id = html.unescape(identifier)
+        ref_title = reference_title(title, body)
+        if is_ontology_or_graph(ref_title, ref_id):
+            continue
+        source = {"title": ref_title, "document_id": ref_id}
         identity = (source["title"], source["document_id"])
         if identity not in seen:
             sources.append(source)
@@ -136,9 +152,13 @@ def clean_answer(text: str, sources: list[AnswerSource], *, strip_cjk: bool = Tr
         part = re.sub(r"(?im)^\s*(?:chunk_index|chunk_id|similarity_score|vector_score)\s*[:=][^\n]*\n?", "", part)
         part = re.sub(r"(?im)^\s*Чанк\s*(?:№|#)?\s*\d+\s*[:—-]?[^\n]*\n?", "", part)
         part = re.sub(r"[ \t]*\(doc_id:[ \t]*[^\s)]+\)", "", part)
+        # Удаляем строки со ссылками на граф знаний и онтологию
+        part = re.sub(r"(?im)^\s*[-*•]?\s*[\"«`']?(?:онтология[^\n]*|граф знаний[^\n]*|memgraph[^\n]*)\n?", "", part)
         for identifier in identifiers:
             part = re.sub(r"(?<![\w./%=:-])\(?[ \t]*(?:(?:doc_id|document_id)[ \t]*[:=][ \t]*)?[\"`]?"
                           + re.escape(identifier) + r"(?![\w./-])[\"`]?[ \t]*\)?", "", part)
+        # Если блок «Источники:» остался пустым после очистки, убираем его заголовок
+        part = re.sub(r"(?im)^\s*(?:источник[и]?|документ[ы]?)\s*[:—-]*\s*$\n?", "", part)
         sections[index] = part
     return "".join(sections).strip()
 
@@ -174,6 +194,8 @@ def cited_sources(text: str, candidates: list[AnswerSource]) -> list[AnswerSourc
         title = " ".join(source["title"].casefold().replace("ё", "е").split())
         stem = re.sub(r'\.(pdf|docx|odt|txt|md)$', '', title).strip()
         identifier = source["document_id"]
+        if is_ontology_or_graph(source["title"], identifier):
+            continue
         key = identifier if identifier not in {"", "unknown"} else (identifier, title)
         # Короткие названия («1С», «ИС») совпадали бы почти с любым ответом
         if (len(title) >= MIN_TITLE_MATCH_LEN and title in normalized) or \
@@ -208,8 +230,8 @@ def turn_provenance(messages):
         elif message.name == "list_documents":
             add(artifact.get("sources"))
         elif message.name == "search_knowledge_graph":
-            for s in artifact.get("sources", []):
-                add([{**s, "type": "graph"}])
+            # Граф знаний и онтология служат справочным контекстом и не добавляются в источники документов
+            pass
         elif message.name == "coding_agent":
             add(artifact.get("sources"))
             active = artifact.get("active_specialist")
