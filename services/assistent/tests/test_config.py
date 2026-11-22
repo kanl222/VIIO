@@ -1,7 +1,16 @@
 """Тесты для модуля конфигурации Settings с поддержкой LM Studio и Ollama."""
 
 import pytest
-from assistent.config import Settings
+from assistent.config import (
+    DatabaseSettings,
+    LLMSettings,
+    MemgraphSettings,
+    ObservabilitySettings,
+    RAGClientSettings,
+    ServerSettings,
+    Settings,
+    ToolsSettings,
+)
 from viio_documents.config import Settings as DocumentSettings
 
 
@@ -57,3 +66,53 @@ def test_settings_override_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert DocumentSettings(_env_file=None).qdrant_collection_name == "custom_docs"
     assert settings.api_host == "127.0.0.1"
     assert settings.api_port == 9000
+
+
+def test_modular_base_settings_classes() -> None:
+    """Проверка независимой инициализации модульных BaseSettings классов."""
+    llm = LLMSettings(_env_file=None)
+    assert llm.llm_provider == "lmstudio"
+    assert llm.coding_agent_enabled is True
+    assert llm.lmstudio_base_url == "http://localhost:1234/v1"
+    assert llm.parse_coding_allowed_roles("admin, dev") == ["admin", "dev"]
+    assert llm.empty_routing_provider("") is None
+
+    db = DatabaseSettings(_env_file=None)
+    assert db.postgres_host == "localhost"
+    assert db.postgres_port == 5432
+    assert db.database_migrations_enabled is True
+
+    mg = MemgraphSettings(_env_file=None)
+    assert mg.memgraph_enabled is False
+    assert mg.memgraph_uri == "bolt://localhost:7687"
+
+    rag = RAGClientSettings(_env_file=None)
+    assert rag.documents_url == "http://localhost:8002"
+    assert rag.rag_url == "http://localhost:8001"
+    assert rag.assistant_rag_backend == "local"
+
+    tools = ToolsSettings(_env_file=None)
+    assert tools.agent_max_tool_calls == 24
+    assert tools.skills_dir == "Skills"
+    assert tools.parse_github_allowed_repositories("org/repo1, org/repo2") == ["org/repo1", "org/repo2"]
+
+    obs = ObservabilitySettings(_env_file=None)
+    assert obs.phoenix_enabled is False
+    assert obs.phoenix_project_name == "viio"
+
+    server = ServerSettings(_env_file=None)
+    assert server.api_host == "0.0.0.0"
+    assert server.api_port == 8000
+    assert server.runtime_keys() == ("chat_api_key", "documents_read_key")
+
+
+def test_composite_settings_inheritance() -> None:
+    """Проверка наследования и совместимости Settings со всеми модульными классами."""
+    settings = Settings(_env_file=None)
+    assert isinstance(settings, LLMSettings)
+    assert isinstance(settings, DatabaseSettings)
+    assert isinstance(settings, MemgraphSettings)
+    assert isinstance(settings, RAGClientSettings)
+    assert isinstance(settings, ToolsSettings)
+    assert isinstance(settings, ObservabilitySettings)
+    assert isinstance(settings, ServerSettings)
