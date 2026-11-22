@@ -35,7 +35,12 @@ def init_phoenix_tracing(
     if _PHOENIX_INITIALIZED:
         return True
 
-    ep = endpoint or os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces")
+    ep = (
+        endpoint
+        or os.getenv("PHOENIX_COLLECTOR_ENDPOINT")
+        or os.getenv("PHOENIX_ENDPOINT")
+        or "http://localhost:6006/v1/traces"
+    )
     proj = project_name or os.getenv("PHOENIX_PROJECT_NAME", "viio")
 
     try:

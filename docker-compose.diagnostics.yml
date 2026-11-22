@@ -28,6 +28,9 @@ services:
       - PHOENIX_PORT=6006
       - PHOENIX_HOST=0.0.0.0
       - PHOENIX_ENABLE_AUTH=false
+      - PHOENIX_WORKING_DIR=/data
+    volumes:
+      - phoenix_data:/data
     restart: unless-stopped
     networks:
       - viio_net
@@ -80,6 +83,7 @@ volumes:
   documents_traces:
   document_worker_traces:
   rag_traces:
+  phoenix_data:
 
 networks:
   viio_net:

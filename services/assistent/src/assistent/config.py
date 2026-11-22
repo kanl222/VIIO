@@ -6,7 +6,7 @@
 
 import json
 from typing import Literal, Any
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,8 +50,14 @@ class Settings(BaseSettings):
     skills_enabled: bool = False
     skills_dir: str = "Skills"
     phoenix_enabled: bool = False
-    phoenix_endpoint: str = "http://localhost:6006/v1/traces"
-    phoenix_project_name: str = "viio"
+    phoenix_endpoint: str = Field(
+        default="http://localhost:6006/v1/traces",
+        validation_alias=AliasChoices("PHOENIX_ENDPOINT", "PHOENIX_COLLECTOR_ENDPOINT", "phoenix_endpoint"),
+    )
+    phoenix_project_name: str = Field(
+        default="viio",
+        validation_alias=AliasChoices("PHOENIX_PROJECT_NAME", "phoenix_project_name"),
+    )
     github_mcp_enabled: bool = False
     github_mcp_token: str = Field(default="", repr=False)
     github_repository: str = ""
