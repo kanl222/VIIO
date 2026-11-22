@@ -27,6 +27,7 @@ services:
     environment:
       - PHOENIX_PORT=6006
       - PHOENIX_HOST=0.0.0.0
+      - PHOENIX_ENABLE_AUTH=false
     restart: unless-stopped
     networks:
       - viio_net
@@ -82,4 +83,5 @@ volumes:
 
 networks:
   viio_net:
+    name: viio_viio_net
     external: true
