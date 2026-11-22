@@ -1,10 +1,32 @@
-"""RAG retrieval evaluation metrics (Recall@k, Precision@k, MRR, NDCG@k) based on the evaluate-rag skill."""
+"""RAG retrieval and generation evaluation metrics (Recall@k, MRR, NDCG@k, Ragas)."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Hashable, Mapping, Sequence
 from typing import Any
+
+try:
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=DeprecationWarning)
+        from ragas import EvaluationDataset, SingleTurnSample, evaluate as ragas_evaluate
+        from ragas.metrics import (
+            faithfulness,
+            answer_relevancy,
+            context_precision,
+            context_recall,
+        )
+    RAGAS_AVAILABLE = True
+except ImportError:
+    EvaluationDataset = None  # type: ignore
+    SingleTurnSample = None  # type: ignore
+    ragas_evaluate = None  # type: ignore
+    faithfulness = None  # type: ignore
+    answer_relevancy = None  # type: ignore
+    context_precision = None  # type: ignore
+    context_recall = None  # type: ignore
+    RAGAS_AVAILABLE = False
 
 
 def calculate_recall_at_k(
@@ -181,3 +203,93 @@ def is_lost_in_the_middle_layout(
         return max(first_rank, last_rank) <= min(mid_ranks)
     except TypeError:
         return False
+
+
+def build_ragas_dataset(samples: Sequence[Mapping[str, Any]]) -> Any:
+    """Converts a sequence of sample dicts into a Ragas EvaluationDataset.
+
+    Standard keys per sample:
+    - 'user_input' (or 'query', 'question'): The user query.
+    - 'response' (or 'answer'): The generated answer.
+    - 'retrieved_contexts' (or 'contexts'): List of retrieved text chunks.
+    - 'reference' (or 'ground_truth'): Expected ground-truth answer.
+    """
+    if not RAGAS_AVAILABLE or EvaluationDataset is None or SingleTurnSample is None:
+        raise ImportError(
+            "Пакет 'ragas' не установлен. Установите его: uv add --group dev ragas"
+        )
+
+    ragas_samples: list[Any] = []
+    for item in samples:
+        user_input = str(item.get("user_input") or item.get("query") or item.get("question") or "")
+        response = str(item.get("response") or item.get("answer") or "")
+        raw_ctx = item.get("retrieved_contexts") or item.get("contexts") or []
+        if isinstance(raw_ctx, Sequence) and not isinstance(raw_ctx, (str, bytes)):
+            retrieved_contexts = [str(c) for c in raw_ctx]
+        else:
+            retrieved_contexts = [str(raw_ctx)] if raw_ctx else []
+
+        ref = item.get("reference") or item.get("ground_truth")
+        reference = str(ref) if ref is not None else None
+
+        ragas_samples.append(
+            SingleTurnSample(
+                user_input=user_input,
+                response=response,
+                retrieved_contexts=retrieved_contexts,
+                reference=reference,
+            )
+        )
+
+    return EvaluationDataset(samples=ragas_samples)
+
+
+def evaluate_with_ragas(
+    dataset_or_samples: Any,
+    metrics: Sequence[Any] | None = None,
+    llm: Any = None,
+    embeddings: Any = None,
+    raise_exceptions: bool = False,
+) -> dict[str, float]:
+    """Evaluates RAG generation and retrieval quality using Ragas.
+
+    Supports evaluating Faithfulness, Answer Relevancy, Context Precision, and Context Recall.
+    Accepts an EvaluationDataset or a list of sample dicts.
+    Returns a dictionary of metric names to rounded float scores.
+    """
+    if not RAGAS_AVAILABLE or ragas_evaluate is None:
+        raise ImportError(
+            "Пакет 'ragas' не установлен. Установите его: uv add --group dev ragas"
+        )
+
+    if not isinstance(dataset_or_samples, EvaluationDataset):
+        dataset = build_ragas_dataset(dataset_or_samples)
+    else:
+        dataset = dataset_or_samples
+
+    if metrics is None:
+        metrics = [m for m in (faithfulness, answer_relevancy) if m is not None]
+
+    result = ragas_evaluate(
+        dataset=dataset,
+        metrics=list(metrics),
+        llm=llm,
+        embeddings=embeddings,
+        raise_exceptions=raise_exceptions,
+        show_progress=False,
+    )
+
+    if hasattr(result, "_repr_dict"):
+        return {
+            metric: round(float(val), 4)
+            for metric, val in result._repr_dict.items()
+            if val is not None and not math.isnan(val)
+        }
+
+    raw_scores = getattr(result, "scores", result)
+    scores: dict[str, float] = {}
+    if isinstance(raw_scores, list) and raw_scores and isinstance(raw_scores[0], dict):
+        for k in raw_scores[0].keys():
+            vals = [row[k] for row in raw_scores if row.get(k) is not None and not math.isnan(row[k])]
+            scores[k] = round(sum(vals) / len(vals), 4) if vals else 0.0
+    return scores

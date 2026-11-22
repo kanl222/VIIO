@@ -8,6 +8,8 @@ from viio_rag.evaluation import (
     calculate_faithfulness,
     calculate_context_utilization,
     is_lost_in_the_middle_layout,
+    build_ragas_dataset,
+    evaluate_with_ragas,
 )
 from viio_rag.retrieval import reorder_lost_in_the_middle
 
@@ -96,3 +98,72 @@ def test_reorder_lost_in_the_middle():
     reordered4 = reorder_lost_in_the_middle(items4)
     assert reordered4 == [1, 3, 4, 2]
     assert is_lost_in_the_middle_layout(reordered4)
+
+
+def test_build_ragas_dataset_normalizes_keys():
+    raw_samples = [
+        {
+            "query": "Как взять отпуск?",
+            "answer": "Подать заявление за 2 недели.",
+            "contexts": ["Регламент отпусков: заявление подается за 2 недели."],
+            "ground_truth": "Заявление за две недели.",
+        },
+        {
+            "user_input": "Какой срок испытательного срока?",
+            "response": "До 3 месяцев.",
+            "retrieved_contexts": ["Испытательный срок составляет не более 3 месяцев."],
+            "reference": "3 месяца.",
+        },
+    ]
+
+    dataset = build_ragas_dataset(raw_samples)
+    assert len(dataset) == 2
+
+    # Check first sample normalized attributes
+    s0 = dataset[0]
+    assert s0.user_input == "Как взять отпуск?"
+    assert s0.response == "Подать заявление за 2 недели."
+    assert len(s0.retrieved_contexts) == 1
+    assert "Регламент отпусков" in s0.retrieved_contexts[0]
+    assert s0.reference == "Заявление за две недели."
+
+    # Check second sample
+    s1 = dataset[1]
+    assert s1.user_input == "Какой срок испытательного срока?"
+    assert s1.response == "До 3 месяцев."
+    assert s1.reference == "3 месяца."
+
+    # DataFrame conversion works cleanly
+    df = dataset.to_pandas()
+    assert "user_input" in df.columns
+    assert "retrieved_contexts" in df.columns
+    assert "response" in df.columns
+    assert "reference" in df.columns
+
+
+def test_evaluate_with_ragas_mocked(monkeypatch):
+    from unittest.mock import MagicMock
+    from ragas.evaluation import EvaluationResult
+
+    fake_result = MagicMock()
+    fake_result._repr_dict = {
+        "faithfulness": 0.95,
+        "answer_relevancy": 0.88,
+    }
+
+    mock_ragas_eval = MagicMock(return_value=fake_result)
+    monkeypatch.setattr("viio_rag.evaluation.ragas_evaluate", mock_ragas_eval)
+
+    samples = [
+        {
+            "user_input": "Тест?",
+            "response": "Ответ.",
+            "retrieved_contexts": ["Контекст."],
+        }
+    ]
+
+    scores = evaluate_with_ragas(samples)
+    assert scores["faithfulness"] == 0.95
+    assert scores["answer_relevancy"] == 0.88
+    assert mock_ragas_eval.called
+
