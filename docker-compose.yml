@@ -420,7 +420,7 @@ services:
     volumes:
     - assistant_traces:/traces
     - ./services/assistent/src:/app/services/assistent/src:ro
-    - ./Skills:/app/Skills:ro
+    - ./skills:/app/skills:ro
     - ./.agents/skills:/app/.agents/skills:ro
     healthcheck:
       test:

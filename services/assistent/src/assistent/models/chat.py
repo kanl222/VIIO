@@ -67,6 +67,7 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
     if provider == "lmstudio":
         return ChatOpenAI(
             stream_usage=True,
+            stream_chunk_timeout=timeout_seconds,
             metadata={'viio_provider': provider},
             callbacks=[token_usage],
             base_url=settings.lmstudio_base_url,
@@ -79,6 +80,7 @@ def create_chat_model(settings: Settings, *, model_name: str | None = None, codi
             timeout=timeout_seconds,
         )
     return ChatOllama(
+        
         metadata={'viio_provider': provider},
         callbacks=[token_usage],
         base_url=settings.ollama_base_url,

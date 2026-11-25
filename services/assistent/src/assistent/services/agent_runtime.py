@@ -380,9 +380,6 @@ def build_runtime(llm, tools, checkpointer, system_prompt, context_max_chars,
 
             if is_database_diagnostic(question) and can_access_database(_safe_ctx(runtime).get('user_context')):
                 record('route', mode='database', tools=['postgresql_readonly'])
-                # В подграф базы данных передается только последнее сообщение текущего запроса (history[-1:]),
-                # чтобы изолировать выполнение диагностических SQL-запросов от остальной истории диалога.
-                # Уточняющие вопросы, требующие контекста предыдущих ответов, требуют контекста в самом вопросе.
                 result = await database_runtime.ainvoke(
                     {'messages': history[-1:]}, context=ctx(runtime))
                 return {**boundary, 'messages': result['messages'][-1:]}
