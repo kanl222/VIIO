@@ -33,7 +33,7 @@ from assistent.services.answer_sources import strip_thinking
 from assistent.services.diagnostics import record
 from assistent.security import has_role_access
 from assistent.tools.postgres_tool import DATABASE_ROLES
-fom assistent.prompts import (
+from assistent.prompts import (
     INSPECT_TABLES_PROMPT,
     GENERATE_SQL_PROMPT,
     FIX_SQL_PROMPT,
