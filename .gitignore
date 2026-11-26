@@ -49,8 +49,7 @@ Assistent/tests/repro_bug.py
 Assistent/tests/scratch_debug.py
 
 # Local document originals
-/data/*
-!/data/knowledge_graph/
+/data/
 Diagnostics/DESIGN-BRIEF.md
 Diagnostics/PRODUCT.md
 
@@ -92,3 +91,5 @@ reports/*
 /scripts/cpu-quality-oracle-probes.py
 /scripts/evaluate_cpu_quality.py
 /scripts/reindex_quality_trial.py
+data/*
+data/knowledge_graph/*
