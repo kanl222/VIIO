@@ -7,8 +7,8 @@ from langchain_core.documents import Document
 
 from test_pdf_extraction import pdf_bytes
 from viio_documents.config import Settings
-from viio_rag.retrieval import EnhancedRetrieval
-from viio_documents.services.pdf_extraction import PdfExtractionError, PdfExtractionService
+from viio_rag.application.retrieval import EnhancedRetrieval
+from viio_documents.infrastructure.extraction.pdf_extraction import PdfExtractionError, PdfExtractionService
 
 
 def read_trace(directory):

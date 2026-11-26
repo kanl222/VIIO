@@ -3,14 +3,14 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.config import Settings
-from assistent.services.agent_service import AgentService
-from assistent.services.graph_builder import build_agent_graph
-from assistent.services.database_subgraph import (
+from assistent.application.agent_service import AgentService
+from assistent.application.graph_builder import build_agent_graph
+from assistent.application.database_subgraph import (
     build_database_analyst_graph,
     clean_sql,
 )
-from assistent.services.supervisor_graph import build_supervisor_graph
-from assistent.tools.postgres_tool import create_postgres_readonly_tool
+from assistent.application.supervisor_graph import build_supervisor_graph
+from assistent.infrastructure.tools.postgres_tool import create_postgres_readonly_tool
 from test_required_retrieval import NoToolCallsModel
 
 
@@ -342,7 +342,7 @@ async def test_main_agent_handles_database_diagnostics_with_bounded_checks(scena
 @pytest.mark.asyncio
 async def test_supervisor_routes_db_optimization_and_log_error():
     """Проверяет, что супервизор корректно направляет запросы оптимизации и ошибок логов в Database Specialist."""
-    from assistent.services.supervisor_graph import classify_route
+    from assistent.application.supervisor_graph import classify_route
 
     tools = {"postgresql_readonly", "github_repository"}
     user_context = {"user_id": "p1", "role": "programmer"}

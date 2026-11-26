@@ -6,13 +6,15 @@ import base64
 import pytest
 
 from assistent.config import Settings
-from assistent.tools.github_tool import GitHubMCPClient, create_github_tool
+from assistent.tool_config import GitHubToolConfig
+from assistent.infrastructure.tools.github_tool import GitHubMCPClient, create_github_tool
 
 
 @pytest.fixture
 def setup_tool():
     settings = Settings(_env_file=None, github_mcp_enabled=True,
                         github_repository="company/HandbookBot2", github_mcp_token="test-only")
+    settings = GitHubToolConfig.from_settings(settings)
     backend = AsyncMock()
     backend.call.return_value = "repository data"
     return settings, backend, create_github_tool(settings, backend)
@@ -85,7 +87,7 @@ async def test_list_available_repositories(setup_tool):
 
 @pytest.mark.asyncio
 async def test_repository_listing_uses_authenticated_api_and_pagination(monkeypatch):
-    from assistent.tools import github_tool
+    from assistent.infrastructure.tools import github_tool
     requests = []
     def respond(request):
         requests.append(request)
@@ -142,7 +144,7 @@ async def test_repository_override_cannot_escape_fixed_scope(setup_tool):
 
 @pytest.mark.asyncio
 async def test_mcp_handshake_headers_and_output_limit(monkeypatch):
-    from assistent.tools import github_tool
+    from assistent.infrastructure.tools import github_tool
     backend = AsyncMock(return_value=('x' * 2000, False))
     monkeypatch.setattr(github_tool, 'call_read_tool', backend)
     settings = Settings(_env_file=None, github_mcp_token='test-only', github_mcp_max_chars=1000)
@@ -157,7 +159,7 @@ async def test_mcp_handshake_headers_and_output_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_symlink_parser_error_reads_same_file_through_rest(monkeypatch):
-    from assistent.tools import github_tool
+    from assistent.infrastructure.tools import github_tool
     monkeypatch.setattr(github_tool, 'call_read_tool', AsyncMock(return_value=(
         'failed to inspect repository file: blob "abc" is not a valid internal symbolic link target', True)))
     requests = []
@@ -178,7 +180,7 @@ async def test_mcp_symlink_parser_error_reads_same_file_through_rest(monkeypatch
 
 @pytest.mark.asyncio
 async def test_other_mcp_errors_do_not_trigger_rest_fallback(monkeypatch):
-    from assistent.tools import github_tool
+    from assistent.infrastructure.tools import github_tool
     monkeypatch.setattr(github_tool, 'call_read_tool', AsyncMock(return_value=('Forbidden', True)))
     client = GitHubMCPClient(Settings(_env_file=None, github_mcp_token='test-only'))
     client._read_file_rest = AsyncMock()
@@ -193,7 +195,7 @@ async def test_other_mcp_errors_do_not_trigger_rest_fallback(monkeypatch):
     {'type': 'file', 'submodule_git_url': 'https://untrusted.invalid', 'encoding': 'base64', 'content': 'YQ=='},
 ])
 async def test_rest_fallback_does_not_follow_external_links(monkeypatch, payload):
-    from assistent.tools import github_tool
+    from assistent.infrastructure.tools import github_tool
     requests = []
     def respond(request):
         requests.append(request)
@@ -218,7 +220,7 @@ async def test_structure_operation(setup_tool):
 
 @pytest.mark.asyncio
 async def test_get_tree_rest_api(monkeypatch):
-    from assistent.tools import github_tool
+    from assistent.infrastructure.tools import github_tool
     requests = []
     def respond(request):
         requests.append(request)
@@ -300,8 +302,8 @@ async def test_search_query_allows_double_colon_and_quotes(setup_tool):
 async def test_agent_runtime_auto_invokes_repositories_on_inquiry():
     from langchain_core.messages import AIMessage
     from langgraph.checkpoint.memory import MemorySaver
-    from assistent.services.graph_builder import build_agent_graph
-    from assistent.services.agent_service import AgentService
+    from assistent.application.graph_builder import build_agent_graph
+    from assistent.application.agent_service import AgentService
     from assistent.prompts import UNIFIED_SYSTEM_PROMPT
     from test_required_retrieval import NoToolCallsModel
 

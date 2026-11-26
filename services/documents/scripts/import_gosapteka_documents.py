@@ -20,8 +20,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from viio_documents import create_app
 from viio_documents.config import Settings
-from viio_documents.services.bulk_queue import BulkUploadTask
-from viio_documents.services.text_normalization import normalize_document_text
+from viio_documents.application.bulk_queue import BulkUploadTask
+from viio_documents.infrastructure.extraction.text_normalization import normalize_document_text
 
 ROOT=Path(os.environ.get('GOSAPTEKA_IMPORT_ROOT', '/tmp/gosapteka-import'))
 OWNER='gosapteka56-public-import-2026-10-27'

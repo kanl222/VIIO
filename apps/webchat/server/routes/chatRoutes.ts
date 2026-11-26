@@ -18,6 +18,9 @@ export function createChatRouter(
   documentsUrlProvider: () => string = () => process.env.DOCUMENTS_URL || agentUrlProvider()
 ): Router {
   const router = Router();
+  const configuredTimeout = Number(process.env.AGENT_TIMEOUT_SECONDS || 270);
+  const agentTimeoutMs = (Number.isFinite(configuredTimeout) && configuredTimeout >= 10 && configuredTimeout <= 600
+    ? configuredTimeout : 270) * 1000;
   const middleware = authMw || createAuthMiddleware(poolProvider);
 
   // Защита маршрута отправки сообщений
@@ -33,6 +36,15 @@ export function createChatRouter(
 
     const { conversation_id, message, attachments } = req.body || {};
     const { rag_backend, confirmed_public_for_external_cloud } = req.body || {};
+    const { agent_mode } = req.body || {};
+    if (agent_mode !== undefined && !['assistant', 'coding', 'database'].includes(agent_mode)) {
+      res.status(400).json({ detail: 'Некорректный режим работы.' });
+      return;
+    }
+    if (['coding', 'database'].includes(agent_mode) && !['programmer', 'admin'].includes(req.user?.role || '')) {
+      res.status(403).json({ detail: 'Режим доступен только программистам и администраторам.' });
+      return;
+    }
     if ((rag_backend !== undefined && !['local', 'yandex'].includes(rag_backend)) ||
         (confirmed_public_for_external_cloud !== undefined && typeof confirmed_public_for_external_cloud !== 'boolean')) {
       res.status(400).json({ detail: 'Некорректный режим базы знаний или подтверждение публичности.' });
@@ -57,7 +69,7 @@ export function createChatRouter(
     const streaming = req.body.stream === true;
     const controller = new AbortController();
     res.on?.('close', () => controller.abort());
-    const databaseRequest = /^\/db(?:\s|$)/i.test(cleanMessage);
+    const databaseRequest = agent_mode === 'database' || /^\/db(?:\s|$)/i.test(cleanMessage);
     if (databaseRequest && !['programmer', 'admin'].includes(req.user?.role || '')) {
       res.status(403).json({ detail: 'Доступ к PostgreSQL разрешён только программистам и администраторам.' });
       return;
@@ -118,10 +130,11 @@ export function createChatRouter(
             message: cleanMessage,
             thread_id: conversation.agent_thread_id,
             user_context: userContext,
+            ...(agent_mode !== undefined ? { agent_mode } : {}),
             ...(rag_backend !== undefined ? { rag_backend } : {}),
             ...(confirmed_public_for_external_cloud !== undefined ? { confirmed_public_for_external_cloud } : {}),
           }),
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(streaming ? 300_000 : 120_000)]),
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(agentTimeoutMs)]),
         });
       } catch (networkErr: any) {
         if (userMsgId) {

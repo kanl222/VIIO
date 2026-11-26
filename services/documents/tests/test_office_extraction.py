@@ -3,8 +3,8 @@ from zipfile import ZipFile, ZIP_DEFLATED
 
 import pytest
 from viio_documents.config import Settings
-from viio_documents.services.office_extraction import OfficeExtractionService, OfficeExtractionError
-from viio_documents.services.text_normalization import normalize_document_text
+from viio_documents.infrastructure.extraction.office_extraction import OfficeExtractionService, OfficeExtractionError
+from viio_documents.infrastructure.extraction.text_normalization import normalize_document_text
 from office_samples import office_sample
 
 

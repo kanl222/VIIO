@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from assistent.config import Settings
-from assistent.tools.postgres_tool import create_postgres_readonly_tool
+from assistent.infrastructure.tools.postgres_tool import create_postgres_readonly_tool
 
 
 async def main(config_path):

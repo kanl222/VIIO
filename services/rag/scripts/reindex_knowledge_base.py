@@ -23,10 +23,10 @@ from qdrant_client import QdrantClient, models
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "RAG" / "src"))
 
-from viio_rag.chunks import document_chunks
+from viio_rag.application.chunks import document_chunks
 from viio_rag.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_rag.sparse_bm25 import get_sparse_encoder
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_rag.infrastructure.models.sparse_bm25 import get_sparse_encoder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("reindex_kb")

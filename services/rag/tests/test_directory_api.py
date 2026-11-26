@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from viio_rag.document_directory import search_selected_documents
+from viio_rag.application.document_directory import search_selected_documents
 from test_rag_api import rag_fixture, READ_KEY
-from viio_documents.services.document_catalog import normalize_catalog_metadata
+from viio_documents.infrastructure.persistence.document_catalog import normalize_catalog_metadata
 
 
 @pytest.mark.asyncio

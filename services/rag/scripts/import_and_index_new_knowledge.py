@@ -27,12 +27,12 @@ if _src_path not in sys.path:
 if "/app/src" not in sys.path:
     sys.path.insert(0, "/app/src")
 
-from viio_rag.chunks import document_chunks
+from viio_rag.application.chunks import document_chunks
 from viio_rag.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_rag.publication_index import PublicationIndex
-from viio_rag.sparse_bm25 import get_sparse_encoder
-from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_rag.infrastructure.publication_index import PublicationIndex
+from viio_rag.infrastructure.models.sparse_bm25 import get_sparse_encoder
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("import_index_kb")
@@ -245,7 +245,7 @@ async def main():
 
         # 3.1. Синхронизация с онтологическим графом знаний Memgraph
         try:
-            from viio_documents.services.graph_sync import GraphSyncService
+            from viio_documents.infrastructure.clients.graph_sync import GraphSyncService
             sync_service = GraphSyncService(uri=os.getenv("MEMGRAPH_URI", "bolt://memgraph:7687"))
             await sync_service.sync_document(
                 doc_id=doc_id,

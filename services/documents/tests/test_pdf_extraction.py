@@ -9,7 +9,7 @@ from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
 
 from viio_documents import create_app
 from viio_documents.config import Settings
-from viio_documents.services.pdf_extraction import PdfExtractionService, PdfExtractionError
+from viio_documents.infrastructure.extraction.pdf_extraction import PdfExtractionService, PdfExtractionError
 
 
 def pdf_bytes(text="Approval takes 3 working days.", pages=1, encrypted=False):

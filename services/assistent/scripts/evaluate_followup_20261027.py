@@ -2,7 +2,7 @@
 import asyncio,hashlib,json,time,uuid
 import httpx
 from assistent.config import Settings
-from assistent.utils.postgres_saver import init_async_postgres_saver
+from assistent.infrastructure.persistence.postgres_saver import init_async_postgres_saver
 from evaluate_live_20261027 import python_check
 
 async def main():

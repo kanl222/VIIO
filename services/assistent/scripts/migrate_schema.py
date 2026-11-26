@@ -3,8 +3,8 @@ import asyncio
 from types import SimpleNamespace
 from psycopg.conninfo import make_conninfo
 from assistent.config import Settings
-from assistent.services.personal_memory import PersonalFacts
-from assistent.utils.postgres_saver import init_async_postgres_saver
+from assistent.application.memory.personal_memory import PersonalFacts
+from assistent.infrastructure.persistence.postgres_saver import init_async_postgres_saver
 
 MEMORY_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS user_facts (

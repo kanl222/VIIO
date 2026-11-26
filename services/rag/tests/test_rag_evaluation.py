@@ -1,5 +1,5 @@
 import pytest
-from viio_rag.evaluation import (
+from viio_rag.application.evaluation import (
     calculate_recall_at_k,
     calculate_precision_at_k,
     calculate_mrr,
@@ -11,7 +11,7 @@ from viio_rag.evaluation import (
     build_ragas_dataset,
     evaluate_with_ragas,
 )
-from viio_rag.retrieval import reorder_lost_in_the_middle
+from viio_rag.application.retrieval import reorder_lost_in_the_middle
 
 
 def test_recall_at_k():
@@ -152,7 +152,7 @@ def test_evaluate_with_ragas_mocked(monkeypatch):
     }
 
     mock_ragas_eval = MagicMock(return_value=fake_result)
-    monkeypatch.setattr("viio_rag.evaluation.ragas_evaluate", mock_ragas_eval)
+    monkeypatch.setattr("viio_rag.application.evaluation.ragas_evaluate", mock_ragas_eval)
 
     samples = [
         {

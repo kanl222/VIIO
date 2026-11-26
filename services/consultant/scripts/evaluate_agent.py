@@ -3,10 +3,10 @@ import asyncio
 import json
 
 import httpx
-from viio_consultant.agent import PublicConsultant
+from viio_consultant.application.agent import PublicConsultant
 from viio_consultant.config import ConsultantSettings
-from viio_consultant.models import create_model
-from viio_consultant.source import HttpPublicationSource
+from viio_consultant.infrastructure.models import create_model
+from viio_consultant.infrastructure.source import HttpPublicationSource
 
 
 class ObservedModel:

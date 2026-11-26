@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from assistent.utils.postgres_saver import (
+from assistent.infrastructure.persistence.postgres_saver import (
     AsyncCompatiblePostgresSaver,
     init_async_postgres_saver,
 )
@@ -33,8 +33,8 @@ async def test_init_async_postgres_saver_initializes_pool_and_setup() -> None:
     mock_saver = MagicMock(spec=AsyncPostgresSaver)
     mock_saver.setup = AsyncMock()
 
-    with patch("assistent.utils.postgres_saver.AsyncConnectionPool", return_value=mock_pool) as mock_pool_cls, \
-         patch("assistent.utils.postgres_saver.AsyncPostgresSaver", return_value=mock_saver) as mock_saver_cls:
+    with patch("assistent.infrastructure.persistence.postgres_saver.AsyncConnectionPool", return_value=mock_pool) as mock_pool_cls, \
+         patch("assistent.infrastructure.persistence.postgres_saver.AsyncPostgresSaver", return_value=mock_saver) as mock_saver_cls:
 
         saver, pool = await init_async_postgres_saver(conn_string, timeout=3.0)
 

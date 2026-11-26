@@ -3,9 +3,9 @@ from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.services.supervisor_graph import build_supervisor_graph, classify_route
-from assistent.tools.postgres_tool import create_postgres_readonly_tool
-from assistent.tools.github_tool import create_github_tool
+from assistent.application.supervisor_graph import build_supervisor_graph, classify_route
+from assistent.infrastructure.tools.postgres_tool import create_postgres_readonly_tool
+from assistent.infrastructure.tools.github_tool import create_github_tool
 from assistent.config import Settings
 from test_required_retrieval import NoToolCallsModel
 
@@ -140,7 +140,7 @@ async def test_supervisor_review_node_provenance():
 
 
 def test_build_agent_graph_supervisor_flag():
-    from assistent.services.graph_builder import build_agent_graph
+    from assistent.application.graph_builder import build_agent_graph
     llm = NoToolCallsModel(messages=iter([]))
     graph = build_agent_graph(
         llm=llm,

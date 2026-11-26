@@ -7,16 +7,16 @@ from langchain_core.tools import tool
 from langgraph.store.memory import InMemoryStore
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.services.agent_service import AgentService
-from assistent.services.graph_builder import build_agent_graph
-from assistent.services.personal_memory import PersonalFacts, migrate_legacy_facts
-from assistent.tools.mcp_adapter import call_read_tool
+from assistent.application.agent_service import AgentService
+from assistent.application.graph_builder import build_agent_graph
+from assistent.application.memory.personal_memory import PersonalFacts, migrate_legacy_facts
+from assistent.infrastructure.tools.mcp_adapter import call_read_tool
 from test_required_retrieval import NoToolCallsModel
 
 
 @pytest.mark.asyncio
 async def test_real_mcp_adapter_discovers_and_calls_only_allowed_tool(monkeypatch):
-    from assistent.tools import mcp_adapter
+    from assistent.infrastructure.tools import mcp_adapter
     server = FastMCP('test')
 
     @server.tool()
@@ -61,7 +61,7 @@ async def test_store_legacy_migration_idempotence_and_no_fact_resurrection():
     store = InMemoryStore()
     facts = PersonalFacts(store=store)
     context = {'user_id': 'one', 'role': 'programmer'}
-    from assistent.services.graph_builder import scope_key
+    from assistent.application.graph_builder import scope_key
     import uuid
     identifier = str(uuid.uuid4())
     rows = [dict(id=identifier, owner_id='one', access_scope=scope_key(context),
@@ -148,7 +148,7 @@ async def test_ready_tool_limit_bounds_parallel_batch_and_resets_next_turn():
 
 @pytest.mark.asyncio
 async def test_mcp_retries_only_transport_failures(monkeypatch):
-    from assistent.tools import mcp_adapter
+    from assistent.infrastructure.tools import mcp_adapter
     from langchain_core.messages import ToolMessage
     from types import SimpleNamespace
     from unittest.mock import AsyncMock

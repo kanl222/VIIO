@@ -3,9 +3,9 @@ from types import SimpleNamespace
 from langchain_core.messages import AIMessage, ToolCall
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.tools.graph_tool import create_graph_search_tool
-from assistent.services.graph_builder import build_agent_graph
-from assistent.services.agent_service import AgentService
+from assistent.infrastructure.tools.graph_tool import create_graph_search_tool
+from assistent.application.graph_builder import build_agent_graph
+from assistent.application.agent_service import AgentService
 
 
 @pytest.mark.asyncio

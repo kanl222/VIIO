@@ -16,7 +16,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from qdrant_client import QdrantClient, models
 from viio_documents.config import Settings
-from viio_documents.services.file_store import LocalFileStore
+from viio_documents.infrastructure.storage.file_store import LocalFileStore
 
 
 async def main(technical=False):

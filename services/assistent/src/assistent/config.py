@@ -204,7 +204,7 @@ class ToolsSettings(BaseSettings):
     agent_max_tool_calls: int = Field(default=24, ge=3, le=64)
     hitl_enabled: bool = False
     text_to_sql_enabled: bool = True
-    skills_enabled: bool = False
+    skills_enabled: bool = True
     skills_dir: str = "skills"
 
     github_mcp_enabled: bool = False
@@ -275,6 +275,9 @@ class ServerSettings(BaseSettings):
         extra="ignore",
     )
 
+    cpu_profile: bool = False
+    generation_concurrency: int = Field(default=1, ge=1, le=8)
+    request_timeout_seconds: int = Field(default=240, ge=10, le=280)
     service_role: Literal["assistent"] = "assistent"
     api_host: str = Field(
         default="0.0.0.0",

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from viio_documents.config import Settings
-from viio_documents.services.file_store import (
+from viio_documents.infrastructure.storage.file_store import (
     IFileStore,
     LocalFileStore,
     S3FileStore,

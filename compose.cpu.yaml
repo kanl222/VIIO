@@ -1,0 +1,29 @@
+# CPU demonstration override. Keep credentials and embedding model in the main .env.
+services:
+  assistent:
+    environment:
+      CPU_PROFILE: 'true'
+      LMSTUDIO_MODEL: ${CPU_LMSTUDIO_MODEL:?Set CPU_LMSTUDIO_MODEL to the loaded text model ID}
+      CHAT_MODEL: ${CPU_LMSTUDIO_MODEL:?Set CPU_LMSTUDIO_MODEL to the loaded text model ID}
+      CODING_MODEL: ${CPU_LMSTUDIO_MODEL:?Set CPU_LMSTUDIO_MODEL to the loaded text model ID}
+      DATABASE_MODEL: ${CPU_LMSTUDIO_MODEL:?Set CPU_LMSTUDIO_MODEL to the loaded text model ID}
+      ROUTING_MODEL: ''
+      LLM_PROVIDER: lmstudio
+      CHAT_PROVIDER: lmstudio
+      CODING_PROVIDER: lmstudio
+      CODING_AGENT_ENABLED: 'true'
+      DATABASE_PROVIDER: lmstudio
+      ASSISTANT_RAG_BACKEND: local
+      CHAT_MAX_TOKENS: '384'
+      CHAT_TEMPERATURE: '0'
+      CODING_MAX_TOKENS: '512'
+      CHAT_TIMEOUT_SECONDS: '180'
+      REQUEST_TIMEOUT_SECONDS: '240'
+      GENERATION_CONCURRENCY: '1'
+      RAG_CONTEXT_MAX_CHARS: '3000'
+      CONVERSATION_SUMMARY_ENABLED: 'false'
+      CORRECTIVE_RAG_ENABLED: 'false'
+      PHOENIX_ENABLED: 'false'
+  webchat:
+    environment:
+      AGENT_TIMEOUT_SECONDS: '270'

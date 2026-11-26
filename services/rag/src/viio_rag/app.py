@@ -12,22 +12,22 @@ from psycopg_pool import AsyncConnectionPool
 from qdrant_client import QdrantClient
 
 from viio_rag.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_rag.schemas import PublicQuestion, PublishedIdsRequest, KnowledgeQuestion, ManagedRagQuestion
-from viio_rag.security import authorize, authorize_publication
-from viio_rag.catalog import ReadCatalog
-from viio_rag.cache import get_cache
-from viio_rag.reranker import get_reranker
-from viio_rag.retrieval import EnhancedRetrieval, fragment_snapshot
-from viio_rag.diagnostics import capture, record
-from viio_rag.knowledge_data import KnowledgeData
-from viio_rag.publication_index import PublicationIndex
-from viio_rag.publication_search import search_publications
-from viio_rag.search_tool import format_documents
-from viio_rag.schemas import DocumentListRequest
-from viio_rag.document_directory import list_documents, search_selected_documents
-from viio_rag.vector_store import QdrantVectorStoreAdapter
-from viio_rag.graph_retrieval import MemgraphRetriever
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_rag.contracts.schemas import PublicQuestion, PublishedIdsRequest, KnowledgeQuestion, ManagedRagQuestion
+from viio_rag.api.security import authorize, authorize_publication
+from viio_rag.infrastructure.catalog import ReadCatalog
+from viio_rag.infrastructure.cache import get_cache
+from viio_rag.infrastructure.models.reranker import get_reranker
+from viio_rag.application.retrieval import EnhancedRetrieval, fragment_snapshot
+from viio_rag.observability.diagnostics import capture, record
+from viio_rag.application.knowledge_data import KnowledgeData
+from viio_rag.infrastructure.publication_index import PublicationIndex
+from viio_rag.application.publication_search import search_publications
+from viio_rag.application.search_tool import format_documents
+from viio_rag.contracts.schemas import DocumentListRequest
+from viio_rag.application.document_directory import list_documents, search_selected_documents
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
+from viio_rag.infrastructure.graph_retrieval import MemgraphRetriever
 
 
 def create_app(settings=None, *, data=None, vector_store=None):
@@ -114,12 +114,12 @@ def create_app(settings=None, *, data=None, vector_store=None):
 
     @app.post('/api/v1/knowledge/yandex/chat', dependencies=[Depends(internal)])
     async def yandex_assistant(question: ManagedRagQuestion):
-        from viio_rag.managed import answer
+        from viio_rag.infrastructure.clients.managed import answer
         return await answer(s, data, question, 'assistant')
 
     @app.post('/api/v1/consultant-materials/yandex/chat', dependencies=[Depends(public)])
     async def yandex_consultant(question: ManagedRagQuestion):
-        from viio_rag.managed import answer
+        from viio_rag.infrastructure.clients.managed import answer
         return await answer(s, data, question, 'consultant')
 
     @app.post('/api/v1/knowledge/search', dependencies=[Depends(internal)])
@@ -179,7 +179,19 @@ def create_app(settings=None, *, data=None, vector_store=None):
                 graph_count = sum(len(v) for v in graph_data.values() if isinstance(v, list)) if graph_data else 0
                 diagnostic['graph_facts_count'] = graph_count
                 diagnostic['graph_data'] = graph_data
-        return {'context': text, **({'diagnostics': diagnostic} if diagnostic is not None else {})}
+        parents = await data.evidence_parents(docs, question.query, context)
+        fragments = []
+        for doc in docs:
+            meta = doc.metadata
+            fragments.append({
+                'document_id': meta.get('document_id'), 'version': meta.get('version'),
+                'title': meta.get('title', ''), 'section_path': meta.get('section_path', []),
+                'chunk_index': meta.get('chunk_index'), 'content': doc.page_content,
+                'parent_context': (parents.get(meta.get('document_id')) if not meta.get('publication_id') else None)
+                    or meta.get('parent_context') or meta.get('window_context') or doc.page_content,
+            })
+        return {'context': text, 'fragments': fragments,
+                **({'diagnostics': diagnostic} if diagnostic is not None else {})}
 
     @app.post('/api/v1/knowledge/documents', dependencies=[Depends(internal)])
     async def documents(request: DocumentListRequest):

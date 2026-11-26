@@ -61,7 +61,7 @@ def init_collections() -> None:
     vector_size = 768  # Надежное значение по умолчанию для nomic-embed-text
     try:
         from viio_rag.config import Settings
-        from viio_rag.embeddings import create_embeddings
+        from viio_rag.infrastructure.models.embeddings import create_embeddings
 
         s = Settings()
         embeddings = create_embeddings(s)

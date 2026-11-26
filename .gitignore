@@ -78,3 +78,17 @@ Diagnostics/PRODUCT.md
 scripts/verify_warehouse_graph.py
 scripts/test_live_agent_and_consultant.py
 .tmp/
+reports/*
+
+# Local investigation notes and CPU quality experiments
+/compose.quality.yaml
+/docs/cpu-demo-runbook.md
+/docs/project-improvement-plan-*.md
+/docs/rag-quality-fix-plan-*.md
+/docs/quality-improvements-result-*.md
+/scripts/benchmark_cpu_stand.py
+/scripts/cpu-demo-cases.json
+/scripts/cpu-quality-cases.json
+/scripts/cpu-quality-oracle-probes.py
+/scripts/evaluate_cpu_quality.py
+/scripts/reindex_quality_trial.py

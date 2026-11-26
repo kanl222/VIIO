@@ -15,7 +15,7 @@ import uuid
 
 import httpx
 from psycopg.conninfo import make_conninfo
-from assistent.utils.postgres_saver import init_async_postgres_saver
+from assistent.infrastructure.persistence.postgres_saver import init_async_postgres_saver
 
 CASES=[
     {'id':'recipe_snils','prompt':'В аптеку пришёл пациент с электронным льготным рецептом. Как найти его рецепт по СНИЛС или социальной карте?','category':'shared'},

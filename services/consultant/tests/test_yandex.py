@@ -58,7 +58,7 @@ def test_knowledge_consultant_requires_question_confirmation():
 @pytest.mark.asyncio
 async def test_cloud_materials_require_exact_content_approval():
     import hashlib
-    from viio_consultant.source import HttpPublicationSource
+    from viio_consultant.infrastructure.source import HttpPublicationSource
     public = {'id': 'approved', 'title': 'Title', 'content': 'Public content'}
     changed = {**public, 'id': 'changed', 'content': 'Changed content'}
     digest = hashlib.sha256(b'Title\nPublic content').hexdigest()
@@ -70,10 +70,10 @@ async def test_cloud_materials_require_exact_content_approval():
 
 def test_yandex_model_factory():
     from unittest.mock import patch
-    from viio_consultant.models import create_model
+    from viio_consultant.infrastructure.models import create_model
     settings = ConsultantSettings(provider='yandex', api_key='a' * 40,
         yandex_api_key='test', yandex_folder_id='folder')
-    with patch('viio_consultant.models.ChatOpenAI') as model:
+    with patch('viio_consultant.infrastructure.models.ChatOpenAI') as model:
         create_model(settings)
         assert model.call_args.kwargs['model'] == 'gpt://folder/aliceai-llm'
         assert model.call_args.kwargs['base_url'] == 'https://ai.api.cloud.yandex.net/v1'
@@ -93,7 +93,7 @@ def test_yandex_model_factory():
 
 @pytest.mark.asyncio
 async def test_cloud_accepts_only_explicit_public_access_class():
-    from viio_consultant.source import HttpPublicationSource
+    from viio_consultant.infrastructure.source import HttpPublicationSource
     base = {'id': 'doc', 'title': 'Title', 'content': 'Public text'}
     rows = [base, {**base, 'id': 'restricted', 'access_class': 'restricted'},
         {**base, 'id': 'public', 'access_class': 'public'}]

@@ -3,8 +3,8 @@ from io import BytesIO
 import pytest
 
 from viio_documents.config import Settings
-from viio_rag.chunks import document_chunks
-from viio_documents.services.office_extraction import OfficeExtractionService
+from viio_rag.application.chunks import document_chunks
+from viio_documents.infrastructure.extraction.office_extraction import OfficeExtractionService
 
 
 def test_adjacent_empty_section_is_not_dropped():
@@ -21,7 +21,7 @@ def test_fenced_pipe_lines_are_not_reformatted_as_a_table():
 
 
 def test_table_cells_preserve_literal_pipes_empty_columns_and_line_breaks():
-    from viio_documents.services.office_extraction import markdown_table
+    from viio_documents.infrastructure.extraction.office_extraction import markdown_table
     table = markdown_table([['Name', 'Value'], ['A | B', 'first\nsecond'], ['', '42']])
     assert '| A &#124; B | first<br>second |' in table
     assert '|  | 42 |' in table

@@ -3,7 +3,7 @@
 from unittest.mock import patch
 from assistent import create_app
 from assistent.config import Settings
-from assistent.tools.skills_tool import SkillRegistry, create_skills_tools
+from assistent.infrastructure.tools.skills_tool import SkillRegistry, create_skills_tools
 
 
 def test_skill_registry_discovers_skills():
@@ -29,7 +29,7 @@ def test_activate_agent_skill_returns_instructions():
 
 
 def test_skills_enabled_registers_tools_in_app():
-    settings = Settings(_env_file=None, skills_enabled=True, skills_dir="Skills", documents_catalog_enabled=False)
+    settings = Settings(_env_file=None, skills_dir="skills")
     with patch("assistent.create_chat_model"), patch("assistent.build_agent_graph") as build:
         create_app(settings=settings)
     tools = {t.name for t in build.call_args.kwargs["tools"]}
@@ -38,14 +38,29 @@ def test_skills_enabled_registers_tools_in_app():
 
 
 def test_skill_registry_prioritizes_skills_folder(tmp_path):
-    skill_dir = tmp_path / "Skills" / "custom-test-skill"
+    skill_dir = tmp_path / "skills" / "custom-test-skill"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         "---\nname: custom-test-skill\ndescription: Custom skill for testing\n---\n\n# Custom Guide",
         encoding="utf-8",
     )
-    reg = SkillRegistry(skills_dir=tmp_path / "Skills")
+    reg = SkillRegistry(skills_dir=tmp_path / "skills")
     skill = reg.get_skill("custom-test-skill")
     assert skill is not None
     assert skill["name"] == "custom-test-skill"
     assert "Custom Guide" in skill["instructions"]
+
+
+def test_registry_finds_project_skills_outside_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    registry = SkillRegistry(skills_dir="skills")
+    assert registry.get_skill("google-agents-cli-eval") is not None
+
+
+def test_explicit_skills_take_priority_over_fallback(tmp_path):
+    for folder, content in (("skills", "Preferred guide"), ("fallback", "Other guide")):
+        skill = tmp_path / folder / "example" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("---\nname: example\ndescription: Example\n---\n" + content, encoding="utf-8")
+    registry = SkillRegistry(skills_dir=tmp_path / "skills", search_paths=[tmp_path / "fallback"])
+    assert registry.get_skill("example")["instructions"] == "Preferred guide"

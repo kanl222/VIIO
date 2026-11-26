@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from assistent import create_app
 from assistent.config import Settings
-from assistent.services.documents_client import create_remote_search_tool
+from assistent.infrastructure.clients.documents_client import create_remote_search_tool
 from viio_documents.service_profiles import configure_service
 from viio_documents import create_app as create_documents
 from viio_documents.config import Settings as DocumentSettings
@@ -51,7 +51,7 @@ async def test_remote_search_sends_only_trusted_scope_and_no_personal_notes(monk
         assert 'PRIVATE_NOTE' not in request.content.decode()
         assert payload['user_context']==({k:context[k] for k in ['user_id','role','departments']} if context else None)
         return httpx.Response(200,json={'context':'<context source="Guide">Allowed text</context>'})
-    monkeypatch.setattr('assistent.services.documents_client.httpx.AsyncClient',
+    monkeypatch.setattr('assistent.infrastructure.clients.documents_client.httpx.AsyncClient',
         lambda **kwargs: original(**kwargs,transport=httpx.MockTransport(handle)))
     tool = create_remote_search_tool(
         Settings(
@@ -90,7 +90,7 @@ async def test_document_api_forwards_heavy_work_but_retains_control_routes(monke
     configure_service(app)
     from fastapi.responses import JSONResponse
     async def forward(request, url, settings):
-        from viio_documents.services.documents_client import require_internal
+        from viio_documents.infrastructure.clients.documents_client import require_internal
         require_internal(request,settings)
         assert url=='http://document-worker:8000'
         return JSONResponse({'document_id':'worker-owned'},status_code=201)
@@ -105,7 +105,7 @@ async def test_document_api_forwards_heavy_work_but_retains_control_routes(monke
 @pytest.mark.asyncio
 async def test_remote_search_fails_closed_without_local_fallback(monkeypatch):
     original=httpx.AsyncClient
-    monkeypatch.setattr('assistent.services.documents_client.httpx.AsyncClient',lambda **kwargs: original(
+    monkeypatch.setattr('assistent.infrastructure.clients.documents_client.httpx.AsyncClient',lambda **kwargs: original(
         **kwargs,transport=httpx.MockTransport(lambda _:httpx.Response(503))))
     result=await create_remote_search_tool(Settings()).ainvoke({'query':'секрет'})
     assert 'Ошибка' in result and 'секрет' not in result
@@ -113,7 +113,7 @@ async def test_remote_search_fails_closed_without_local_fallback(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bulk_processing_waits_for_shared_worker_slot():
-    from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
+    from viio_documents.application.persistent_bulk_queue import PersistentBulkQueue
     slots=asyncio.Semaphore(1)
     queue=PersistentBulkQueue(MagicMock(),MagicMock(),MagicMock(),processing_slots=slots)
     queue._process_unlimited=AsyncMock(return_value=('document',1))

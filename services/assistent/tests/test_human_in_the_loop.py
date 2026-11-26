@@ -5,10 +5,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.config import Settings
-from assistent.services.agent_service import AgentService
-from assistent.services.graph_builder import build_agent_graph
-from assistent.services.human_in_the_loop import is_confirmed, request_human_confirmation
-from assistent.tools.knowledge_write import create_knowledge_write_tool
+from assistent.application.agent_service import AgentService
+from assistent.application.graph_builder import build_agent_graph
+from assistent.application.human_in_the_loop import is_confirmed, request_human_confirmation
+from assistent.infrastructure.tools.knowledge_write import create_knowledge_write_tool
 from test_required_retrieval import NoToolCallsModel
 
 

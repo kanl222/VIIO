@@ -11,13 +11,13 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from assistent import create_app
 from assistent.config import Settings
-from assistent.services.agent_service import AgentService
-from assistent.services.coding_agent import (
+from assistent.application.agent_service import AgentService
+from assistent.application.coding_agent import (
     CODING_SYSTEM_PROMPT, CodingAgentService, MultiAgentService,
     create_coding_delegation_tool, is_coding_request,
 )
-from assistent.services.graph_builder import build_agent_graph
-from viio_rag.search_tool import create_knowledge_search_tool
+from assistent.application.graph_builder import build_agent_graph
+from viio_rag.application.search_tool import create_knowledge_search_tool
 
 PROGRAMMER = {"user_id": "programmer-1", "role": "programmer"}
 ADMIN = {"user_id": "admin-1", "role": "admin"}
@@ -104,7 +104,7 @@ async def test_automatic_route():
 @pytest.mark.parametrize("provider, client", [("lmstudio", "ChatOpenAI"), ("ollama", "ChatOllama")])
 def test_factory_uses_one_model_without_a_separate_coder(provider, client):
     settings = Settings(_env_file=None, llm_provider=provider, coding_model="dedicated-coder")
-    with patch("assistent.models.chat." + client) as models, \
+    with patch("assistent.infrastructure.llm.chat." + client) as models, \
          patch("assistent.build_agent_graph") as graphs:
         create_app(settings=settings)
     general_name = settings.lmstudio_model if provider == "lmstudio" else settings.ollama_model

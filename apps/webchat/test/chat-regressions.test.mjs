@@ -15,7 +15,7 @@ function loadSource(path, mocks) {
   });
   const exports = {};
   vm.runInNewContext(outputText, {
-    exports, require: name => mocks[name] ?? require(name), Date, console,
+    exports, require: name => mocks[name] ?? require(name), Date, console, AbortController,
   });
   return exports;
 }
@@ -147,35 +147,50 @@ function deferred() {
 }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
-test('composer sends messages without a knowledge base selector or cloud consent', () => {
-  const slots = []; let cursor = 0; const sent = [];
-  const react = { memo: fn => fn,
-    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial;
-      return [slots[i], value => { slots[i] = value; }]; },
-    useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
-    useEffect() {},
-  };
-  const { ChatInput } = loadSource('../src/components/ChatInput.tsx', { react });
-  const render = () => { cursor = 0; return ChatInput({ onSendMessage: (...args) => sent.push(args) }); };
-  const find = (node, predicate) => {
-    if (!node || typeof node !== 'object') return;
-    if (predicate(node)) return node;
-    for (const child of [node.props?.children].flat()) { const found = find(child, predicate); if (found) return found; }
-  };
-  assert.equal(find(render(), n => n.type === 'select'), undefined);
-  assert.equal(find(render(), n => n.props?.type === 'checkbox'), undefined);
-  const input = () => find(render(), n => n.type === 'textarea');
-  const send = () => find(render(), n => n.props?.['aria-label'] === 'Отправить сообщение');
-  assert.equal(send().props.disabled, true);
-  send().props.onClick(); assert.equal(sent.length, 0);
-  input().props.onChange({ target: { value: 'Question', style: {}, scrollHeight: 20 } });
-  assert.equal(send().props.disabled, false);
-  send().props.onClick();
-  assert.deepEqual(sent[0], ['Question']);
-  assert.equal(input().props.value, '');
-  assert.equal(send().props.disabled, true);
-  input().props.onChange({ target: { value: 'Next question', style: {}, scrollHeight: 20 } });
-  assert.equal(send().props.disabled, false);
+test('manual mode belongs to the upper chat toolbar and is forwarded separately', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const input = readFileSync(new URL('../src/components/ChatInput.tsx', import.meta.url), 'utf8');
+  assert.ok(app.indexOf('className="chat-toolbar"') < app.indexOf('<ChatInput'));
+  assert.match(app, /agent_mode: canUseSpecialists \? agentMode : 'assistant'/);
+  assert.match(app, /id="agent-mode"/);
+  assert.doesNotMatch(input, /<select/);
+});
+
+test('toolbar selection drives the next request and specialist modes respect the user role', async () => {
+  for (const role of ['programmer', 'employee']) {
+    const slots = []; let cursor = 0; let captured;
+    const component = () => null;
+    const { App } = loadSource('../src/App.tsx', {
+      react: { useState(initial) {
+        const index = cursor++;
+        if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
+        return [slots[index], value => { slots[index] = value; }];
+      } },
+      './hooks/useAuth': { useAuth: () => ({ user: { id: 'user', role } }) },
+      './hooks/useConversations': { useConversations: () => ({ conversations: [], currentId: 'chat' }) },
+      './hooks/useChat': { useChat: () => ({ sendMessage: (...args) => { captured = args; } }) },
+      ...Object.fromEntries(['Header', 'Sidebar', 'ChatView', 'ChatInput', 'AuthModal', 'AdminView'].map(name => [
+        `./components/${name}`, { [name]: component },
+      ])),
+    });
+    const find = (node, predicate) => {
+      if (!node || typeof node !== 'object') return;
+      if (predicate(node)) return node;
+      for (const child of [node.props?.children].flat(Infinity)) {
+        const result = find(child, predicate); if (result) return result;
+      }
+    };
+    const render = () => { cursor = 0; return App(); };
+    let select = find(render(), node => node.props?.id === 'agent-mode');
+    const options = select.props.children.flat(Infinity).filter(child => child?.type === 'option');
+    assert.equal(options.length, role === 'programmer' ? 3 : 1);
+    select.props.onChange({ target: { value: 'database' } });
+    const tree = render();
+    select = find(tree, node => node.props?.id === 'agent-mode');
+    assert.equal(select.props.value, role === 'programmer' ? 'database' : 'assistant');
+    await find(tree, node => node.props?.onSendMessage).props.onSendMessage('show schemas');
+    assert.equal(captured[2].agent_mode, role === 'programmer' ? 'database' : 'assistant');
+  }
 });
 
 test('cloud selection survives chat creation and hook forwarding', async () => {
@@ -186,6 +201,21 @@ test('cloud selection survives chat creation and hook forwarding', async () => {
   await render(null).sendMessage('Public question', 'new-public-chat', options);
   assert.equal(captured[0], 'new-public-chat');
   assert.equal(captured[2], options);
+});
+
+test('user can abort an in-flight request from the chat hook', async () => {
+  const pending = deferred();
+  let signal;
+  const render = chatHarness({ getConversation: async () => ({ messages: [] }),
+    sendMessage: (...args) => { signal = args[5]; return pending.promise; } });
+  const sending = render('abort-chat').sendMessage('Question');
+  assert.equal(signal.aborted, false);
+  render('abort-chat').cancelRequest();
+  assert.equal(signal.aborted, true);
+  const error = new Error('Aborted'); error.name = 'AbortError';
+  pending.reject(error);
+  await sending;
+  assert.equal(render('abort-chat').submitting, false);
 });
 
 test('chat gateway rejects missing cloud consent and forwards explicit RAG selection', async () => {
@@ -211,6 +241,38 @@ test('chat gateway rejects missing cloud consent and forwards explicit RAG selec
   assert.equal(forwarded.rag_backend, 'yandex');
   assert.equal(forwarded.confirmed_public_for_external_cloud, true);
   assert.equal(forwarded.user_context.user_id, 'trusted-user');
+});
+
+test('chat gateway validates manual modes and hides database content from history', async () => {
+  const { createChatRouter } = await import('../dist-server/routes/chatRoutes.js');
+  let forwarded;
+  const writes = [];
+  const pool = { query: async (sql, args) => {
+    if (sql.includes('INSERT INTO messages')) writes.push(args);
+    return { rows: sql.includes('SELECT id, agent_thread_id')
+      ? [{ id: 'conv', agent_thread_id: 'thread' }] : [{ id: 'message' }] };
+  } };
+  const router = createChatRouter(() => pool, () => {}, async (_url, options) => {
+    forwarded = JSON.parse(options.body);
+    return new Response(JSON.stringify({ reply: 'Private answer', sources: [] }));
+  });
+  const handler = router.stack.find(layer => layer.route?.methods.post).route.stack[0].handle;
+  const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } };
+  const req = { user: { id: 'user', role: 'employee' },
+    body: { conversation_id: 'conv', message: 'Private query', agent_mode: 'database' } };
+  await handler(req, res);
+  assert.equal(res.statusCode, 403);
+  assert.equal(forwarded, undefined);
+  req.user.role = 'programmer'; res.statusCode = 200;
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(forwarded.agent_mode, 'database');
+  assert.equal(forwarded.message, 'Private query');
+  assert(!JSON.stringify(writes).includes('Private query'));
+  assert(!JSON.stringify(writes).includes('Private answer'));
+  req.body.agent_mode = 'invalid';
+  await handler(req, res);
+  assert.equal(res.statusCode, 400);
 });
 
 test('a late history response cannot replace the selected conversation', async () => {

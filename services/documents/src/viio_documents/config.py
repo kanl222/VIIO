@@ -4,9 +4,8 @@
 на основе Pydantic Settings. Поддерживает работу с LM Studio и Ollama.
 """
 
-import json
-from typing import Literal, Any
-from pydantic import Field, field_validator, model_validator
+from typing import Literal
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,52 +44,10 @@ class Settings(BaseSettings):
         description="Активный провайдер языковых моделей: 'lmstudio' или 'ollama'.",
     )
 
-    coding_agent_enabled: bool = True
-    coding_model: str | None = None
-    coding_allowed_roles: list[str] | str = Field(default_factory=lambda: ["programmer", "admin"])
-
-    @field_validator('coding_allowed_roles', mode='before')
-    @classmethod
-    def parse_coding_allowed_roles(cls, value: Any) -> list[str]:
-        if value is None or value == "":
-            return ["programmer", "admin"]
-        if isinstance(value, str):
-            value = value.strip()
-            if not value:
-                return ["programmer", "admin"]
-            if value.startswith("[") and value.endswith("]"):
-                inner = value[1:-1].strip()
-                if not inner:
-                    return []
-                try:
-                    return json.loads(value)
-                except Exception:
-                    return [item.strip().strip("'\"") for item in inner.split(",") if item.strip()]
-            return [item.strip().strip("'\"") for item in value.split(",") if item.strip()]
-        if isinstance(value, (list, tuple, set)):
-            return list(value)
-        return value
-    coding_context_max_chars: int = Field(default=6000, ge=1000, le=24000)
-    conversation_summary_enabled: bool = True
-    conversation_summary_after: int = Field(default=24, ge=12, le=100)
-    conversation_history_max_chars: int = Field(default=18000, ge=4000, le=60000)
     consultant_enabled: bool = False
     consultant_api_key: str | None = None
     consultant_source_key: str | None = None
     consultant_url: str = 'http://consultant:8000'
-    # Независимые бюджеты генерации для консультанта и текстового кодера.
-    chat_temperature: float = Field(default=0.0, ge=0, le=2)
-    chat_top_p: float = Field(default=1.0, gt=0, le=1)
-    chat_max_tokens: int = Field(default=2048, ge=128, le=32768)
-    coding_temperature: float = Field(default=0.0, ge=0, le=2)
-    coding_top_p: float = Field(default=1.0, gt=0, le=1)
-    coding_max_tokens: int = Field(default=4096, ge=128, le=32768)
-
-    pgsql_enabled: bool = False
-    pgsql_mcp_url: str = "http://postgres-tool:8000/sse"
-    pgsql_max_rows: int = Field(default=100, ge=1, le=500)
-    pgsql_max_chars: int = Field(default=12000, ge=500, le=50000)
-    pgsql_timeout_seconds: int = Field(default=40, ge=5, le=90)
     # Настройки каталога документов и файлового хранилища
     documents_storage_backend: Literal["local", "s3"] = Field(
         default="local",
@@ -262,7 +219,7 @@ class Settings(BaseSettings):
 
     service_role: Literal['documents', 'document-worker', 'rag'] = 'documents'
     rag_url: str = 'http://rag:8000'
-    rag_timeout_seconds: int = Field(default=60, ge=5, le=180)
+    rag_timeout_seconds: int = Field(default=60, ge=5, le=600)
     documents_url: str = 'http://localhost:8002'
     document_worker_url: str = 'http://document-worker:8000'
 

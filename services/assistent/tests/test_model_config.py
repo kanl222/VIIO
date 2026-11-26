@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from assistent.config import Settings
-from assistent.models import create_chat_model, create_coding_model
+from assistent.infrastructure.llm import create_chat_model, create_coding_model
 
 
 @pytest.mark.parametrize("provider, client, budget", [
@@ -20,7 +20,7 @@ def test_independent_generation_settings(provider, client, budget, coder_name):
         chat_temperature=0.2, chat_top_p=0.8, chat_max_tokens=1536,
         coding_temperature=0.1, coding_top_p=0.9, coding_max_tokens=3072,
     )
-    with patch("assistent.models.chat." + client) as constructor:
+    with patch("assistent.infrastructure.llm.chat." + client) as constructor:
         create_chat_model(settings)
         create_coding_model(settings)
     chat, coder = [call.kwargs for call in constructor.call_args_list]

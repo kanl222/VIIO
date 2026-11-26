@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 import pytest
-from viio_rag import access
+from viio_rag.application import access
 
 
 def record(public):

@@ -21,16 +21,16 @@ from langchain_core.embeddings import DeterministicFakeEmbedding
 from qdrant_client import QdrantClient
 
 from viio_documents.config import Settings
-from viio_documents.router import create_api_router, DocumentCreateRequest
-from viio_documents.services.bulk_queue import BulkUploadTask
-from viio_documents.services.document_catalog import DocumentCatalogService
-from viio_documents.services.document_ingestion import DocumentIngestion
-from viio_rag.knowledge_data import KnowledgeData
-from viio_rag.publication_index import PublicationIndex
-from viio_documents.services.document_service import DocumentService
-from viio_documents.services.file_store import LocalFileStore
-from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
-from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_documents.api.router import create_api_router, DocumentCreateRequest
+from viio_documents.application.bulk_queue import BulkUploadTask
+from viio_documents.infrastructure.persistence.document_catalog import DocumentCatalogService
+from viio_documents.application.document_ingestion import DocumentIngestion
+from viio_rag.application.knowledge_data import KnowledgeData
+from viio_rag.infrastructure.publication_index import PublicationIndex
+from viio_documents.application.document_service import DocumentService
+from viio_documents.infrastructure.storage.file_store import LocalFileStore
+from viio_documents.application.persistent_bulk_queue import PersistentBulkQueue
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(
     not os.getenv('VIIO_TEST_PG_DSN'), reason='Set VIIO_TEST_PG_DSN to run isolated PostgreSQL integration tests')]
@@ -119,7 +119,7 @@ async def test_office_preview_extracts_clean_text_without_indexing(pipeline,suff
 @pytest.mark.parametrize('suffix',['.docx','.odt'])
 async def test_office_upload_indexes_clean_text_and_preserves_original(pipeline,suffix):
     from office_samples import office_sample
-    from viio_documents.services.office_extraction import OFFICE_MIMES
+    from viio_documents.infrastructure.extraction.office_extraction import OFFICE_MIMES
     client,queue,catalog,adapter,ingestion,store=pipeline
     original=office_sample(suffix)
     response=await client.post('/api/v1/documents/bulk-upload',params={'is_public':'true','allowed_roles':'','allowed_departments':''},
@@ -199,7 +199,7 @@ async def test_public_search_prefers_specific_title_over_long_generic_manual(pip
 
 
 async def test_public_vectors_merge_with_authorized_internal_and_redacted_snapshot(pipeline):
-    from viio_rag.retrieval import EnhancedRetrieval
+    from viio_rag.application.retrieval import EnhancedRetrieval
     _, _, _, adapter, ingestion, _ = pipeline
     root = await ingestion.index_text(DocumentCreateRequest(title='Private original',
         content='PRIVATE_CANARY payroll details', is_public=False, allowed_roles=['admin'], allowed_departments=[]))
@@ -262,7 +262,7 @@ async def test_failed_public_index_update_keeps_previous_approved_snapshot(pipel
 
 
 async def test_named_code_lookup_survives_large_public_manuals(pipeline):
-    from viio_rag.retrieval import EnhancedRetrieval
+    from viio_rag.application.retrieval import EnhancedRetrieval
     _, _, _, adapter, ingestion, _ = pipeline
     for i in range(18):
         result = await ingestion.index_text(DocumentCreateRequest(title=f'Инструкция {i}',
@@ -600,8 +600,8 @@ async def test_invalid_activation_does_not_remove_current_version(pipeline):
 
 
 async def test_code_is_private_even_to_owner_employee_and_has_line_references(pipeline):
-    from viio_rag.retrieval import EnhancedRetrieval
-    from viio_rag.search_tool import build_access_filter, create_knowledge_search_tool
+    from viio_rag.application.retrieval import EnhancedRetrieval
+    from viio_rag.application.search_tool import build_access_filter, create_knowledge_search_tool
     client, queue, catalog, adapter, ingestion, _ = pipeline
     source = b'import os\n\ndef CalculateInvoiceTotal(items):\n    return sum(items)\n'
     response = await client.post('/api/v1/documents/bulk-upload', params={'owner_id': 'former-admin', 'is_public': True, 'allowed_departments': 'general'},
@@ -641,7 +641,7 @@ async def test_identical_code_in_different_files_keeps_both_source_names(pipelin
 
 
 async def test_lexical_search_filters_departments_and_archived_versions(pipeline):
-    from viio_rag.retrieval import EnhancedRetrieval
+    from viio_rag.application.retrieval import EnhancedRetrieval
     _, _, _, adapter, ingestion, _ = pipeline
     await ingestion.index_text(DocumentCreateRequest(title='Policy', content='Согласование служебных поездок',
         allowed_roles=[], allowed_departments=['hr']))
@@ -656,7 +656,7 @@ async def test_lexical_search_filters_departments_and_archived_versions(pipeline
 
 
 async def test_personal_facts_persist_deduplicate_and_follow_access_scope(pipeline):
-    from assistent.services.personal_memory import PersonalFacts
+    from assistent.application.memory.personal_memory import PersonalFacts
     _, _, catalog, _, _, _ = pipeline
     facts = PersonalFacts(catalog)
     await facts.setup()
@@ -676,7 +676,7 @@ async def test_personal_facts_persist_deduplicate_and_follow_access_scope(pipeli
 
 
 async def test_public_api_never_uses_internal_public_documents_or_client_roles(pipeline):
-    from viio_consultant.agent import PublicConsultant
+    from viio_consultant.application.agent import PublicConsultant
     from langchain_core.messages import AIMessage
     client, _, catalog, _, ingestion, _ = pipeline
     root = await ingestion.index_text(DocumentCreateRequest(title='Internal policy', content='INTERNAL_SECRET internal details', is_public=True))
@@ -714,7 +714,7 @@ async def test_public_api_never_uses_internal_public_documents_or_client_roles(p
 
 
 async def test_publication_is_withdrawn_on_new_version_and_during_generation(pipeline):
-    from viio_consultant.agent import PublicConsultant
+    from viio_consultant.application.agent import PublicConsultant
     from langchain_core.messages import AIMessage
     _, _, _, _, ingestion, store = pipeline
     root = await ingestion.index_text(DocumentCreateRequest(title='Support', content='Internal support'))
@@ -739,8 +739,8 @@ async def test_publication_is_withdrawn_on_new_version_and_during_generation(pip
 async def test_standalone_consultant_http_gateway_preserves_publication_boundary(pipeline):
     from viio_consultant import create_app as create_consultant
     from viio_consultant.config import ConsultantSettings
-    from viio_consultant.source import HttpPublicationSource
-    from viio_consultant.agent import PublicConsultant
+    from viio_consultant.infrastructure.source import HttpPublicationSource
+    from viio_consultant.application.agent import PublicConsultant
     from langchain_core.messages import AIMessage
     _, _, catalog, _, ingestion, _ = pipeline
     root = await ingestion.index_text(DocumentCreateRequest(title='Private', content='PRIVATE_INTERNAL_BODY', is_public=True))
@@ -777,7 +777,7 @@ async def test_standalone_consultant_http_gateway_preserves_publication_boundary
 
 async def test_large_pdf_review_retains_parser_structure_but_indexes_edited_sections(pipeline, monkeypatch):
     from test_pdf_extraction import pdf_bytes
-    from viio_documents.services.pdf_extraction import PdfExtractionService
+    from viio_documents.infrastructure.extraction.pdf_extraction import PdfExtractionService
     client, queue, catalog, adapter, ingestion, store = pipeline
     original = pdf_bytes() + b'\n%' + b' ' * (11 * 1024 * 1024)
     document = {'schema_name': 'DoclingDocument', 'pages': {'1': {'page_no': 1}}}

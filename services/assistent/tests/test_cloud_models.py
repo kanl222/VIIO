@@ -6,18 +6,18 @@ from langchain_core.messages import HumanMessage
 from pydantic import ValidationError
 
 from assistent.config import Settings
-from assistent.models.chat import create_chat_model
+from assistent.infrastructure.llm.chat import create_chat_model
 
 
 @pytest.mark.parametrize("role", ["chat", "coding", "database"])
 def test_global_yandex_and_local_override(role):
     settings = Settings(_env_file=None, llm_provider="yandex",
                         yandex_api_key="test-key", yandex_folder_id="folder")
-    with patch("assistent.models.chat.ChatOpenAI") as constructor:
+    with patch("assistent.infrastructure.llm.chat.ChatOpenAI") as constructor:
         create_chat_model(settings, coding=role == "coding", agent=role)
         assert constructor.call_args.kwargs["model"] == "gpt://folder/aliceai-llm"
     overridden = settings.model_copy(update={f"{role}_provider": "ollama"})
-    with patch("assistent.models.chat.ChatOllama") as constructor:
+    with patch("assistent.infrastructure.llm.chat.ChatOllama") as constructor:
         create_chat_model(overridden, coding=role == "coding", agent=role)
         constructor.assert_called_once()
 
@@ -42,7 +42,7 @@ def test_cloud_selected_independently(role, name, expected):
     settings = Settings(_env_file=None, yandex_api_key="test-key", yandex_folder_id="folder",
                         **{f"{role}_provider": "yandex", f"{role}_model": name},
                         coding_temperature=0.1, coding_max_tokens=3000)
-    with patch("assistent.models.chat.ChatOpenAI") as constructor:
+    with patch("assistent.infrastructure.llm.chat.ChatOpenAI") as constructor:
         create_chat_model(settings, coding=role == "coding", agent=role)
         args = constructor.call_args.kwargs
         assert args["model"] == expected

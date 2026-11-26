@@ -4,8 +4,8 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from viio_documents.config import Settings
-from viio_documents.services.document_catalog import DocumentCatalogService
-from viio_documents.services.upload_jobs import UploadJobs
+from viio_documents.infrastructure.persistence.document_catalog import DocumentCatalogService
+from viio_documents.application.upload_jobs import UploadJobs
 
 async def main():
     s=Settings()

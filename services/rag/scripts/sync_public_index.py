@@ -8,11 +8,11 @@ from psycopg_pool import AsyncConnectionPool
 from qdrant_client import QdrantClient
 
 from viio_documents.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_documents.services.document_catalog import DocumentCatalogService
-from viio_rag.knowledge_data import KnowledgeData
-from viio_rag.publication_index import PublicationIndex
-from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_documents.infrastructure.persistence.document_catalog import DocumentCatalogService
+from viio_rag.application.knowledge_data import KnowledgeData
+from viio_rag.infrastructure.publication_index import PublicationIndex
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 
 
 async def main():

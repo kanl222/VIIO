@@ -12,11 +12,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-from assistent.services.agent_service import AgentService
-from assistent.services.coding_agent import CodingAgentService, is_coding_request
-from assistent.services.graph_builder import build_agent_graph, messages_with_retrieved_context
-from viio_rag.search_tool import create_knowledge_search_tool
-from viio_rag.vector_store import QdrantVectorStoreAdapter
+from assistent.application.agent_service import AgentService
+from assistent.application.coding_agent import CodingAgentService, is_coding_request
+from assistent.application.graph_builder import build_agent_graph, messages_with_retrieved_context
+from viio_rag.application.search_tool import create_knowledge_search_tool
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 from test_required_retrieval import NoToolCallsModel
 
 

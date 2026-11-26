@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 from assistent import create_app
 from assistent.config import Settings
 from viio_documents.config import Settings as DocumentSettings
-from viio_documents.router import create_api_router as document_router
+from viio_documents.api.router import create_api_router as document_router
 from fastapi import FastAPI
-from assistent.interfaces._protocols import IAgentService
-from viio_documents.interfaces._protocols import DocumentMetadata,IDocumentService
+from assistent.contracts._protocols import IAgentService
+from viio_documents.contracts._protocols import DocumentMetadata,IDocumentService
 
 
 class MockAgentService(IAgentService):

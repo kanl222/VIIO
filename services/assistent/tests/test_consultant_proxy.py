@@ -1,7 +1,7 @@
 import json
 import httpx
 import pytest
-from assistent.services.public_consultant import ConsultantProxy
+from assistent.infrastructure.clients.public_consultant import ConsultantProxy
 
 
 @pytest.mark.asyncio

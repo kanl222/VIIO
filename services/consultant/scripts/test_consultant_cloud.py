@@ -11,10 +11,10 @@ import httpx
 from dotenv import dotenv_values
 from fastapi.testclient import TestClient
 from viio_consultant import create_app
-from viio_consultant.agent import PublicConsultant
+from viio_consultant.application.agent import PublicConsultant
 from viio_consultant.config import ConsultantSettings
-from viio_consultant.models import create_model
-from viio_consultant.source import HttpPublicationSource
+from viio_consultant.infrastructure.models import create_model
+from viio_consultant.infrastructure.source import HttpPublicationSource
 
 
 def main():
@@ -34,7 +34,7 @@ def main():
     searches = []
     validations = []
     generations = []
-    import viio_consultant.agent as agent_module
+    import viio_consultant.application.agent as agent_module
     original_model_call = agent_module.model_call
     async def inspect_call(model, messages):
         result = await original_model_call(model, messages)

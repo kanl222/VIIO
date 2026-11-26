@@ -5,14 +5,14 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.services.multi_hop import (
+from assistent.application.multi_hop import (
     MultiHopPlan,
     SubQuery,
     decompose_query,
     execute_multi_hop_retrieval,
     heuristic_decompose,
 )
-from assistent.services.supervisor_graph import build_supervisor_graph
+from assistent.application.supervisor_graph import build_supervisor_graph
 from test_required_retrieval import NoToolCallsModel
 
 

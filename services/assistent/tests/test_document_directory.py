@@ -9,9 +9,9 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.services.documents_client import create_document_list_tool, create_remote_search_tool
-from assistent.services.graph_builder import build_agent_graph, messages_with_retrieved_context
-from assistent.services.agent_service import AgentService
+from assistent.infrastructure.clients.documents_client import create_document_list_tool, create_remote_search_tool
+from assistent.application.graph_builder import build_agent_graph, messages_with_retrieved_context
+from assistent.application.agent_service import AgentService
 
 
 class DirectoryModel(GenericFakeChatModel):
@@ -57,7 +57,7 @@ async def test_search_keeps_the_source_card_when_model_uses_a_readable_name(cita
     @tool('search_knowledge_base', response_format='content_and_artifact')
     async def search(query: str):
         """Read document content."""
-        from assistent.services.answer_sources import readable_reference, sources_from_reference
+        from assistent.application.answer_sources import readable_reference, sources_from_reference
         reference = (
             '<context source="06_is_lo_rukovodstvo_polzovatelya" doc_id="doc-guide">'
             '# Руководство пользователя ИС ЛО\nНажмите «Продолжить».</context>'
@@ -89,7 +89,7 @@ async def test_remote_tools_keep_identity_out_of_model_arguments(monkeypatch):
         return httpx.Response(200, json={'context': '<context source="Guide" doc_id="one">Steps</context>'})
 
     client_type = httpx.AsyncClient
-    monkeypatch.setattr('assistent.services.documents_client.httpx.AsyncClient',
+    monkeypatch.setattr('assistent.infrastructure.clients.documents_client.httpx.AsyncClient',
                         lambda **kwargs: client_type(transport=httpx.MockTransport(respond), **kwargs))
     settings = SimpleNamespace(documents_url='http://documents', documents_read_key='read',
                                internal_api_key='', secure_runtime=True, rag_context_max_chars=12000)

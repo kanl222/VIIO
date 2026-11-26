@@ -11,7 +11,7 @@ import uuid
 import httpx
 from psycopg.conninfo import make_conninfo
 from assistent.config import Settings
-from assistent.utils.postgres_saver import init_async_postgres_saver
+from assistent.infrastructure.persistence.postgres_saver import init_async_postgres_saver
 
 
 CASES = [

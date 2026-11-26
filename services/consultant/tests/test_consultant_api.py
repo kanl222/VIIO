@@ -6,8 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from viio_consultant import create_app
 from viio_consultant.config import ConsultantSettings
-from viio_consultant.source import HttpPublicationSource
-from viio_consultant.agent import clean_reply
+from viio_consultant.infrastructure.source import HttpPublicationSource
+from viio_consultant.application.agent import clean_reply
 
 
 def settings():

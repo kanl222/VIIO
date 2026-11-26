@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from assistent import create_app
 from viio_documents.config import Settings
-from viio_documents.services.document_catalog import DocumentListResult, DocumentRecord
+from viio_documents.infrastructure.persistence.document_catalog import DocumentListResult, DocumentRecord
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def api_client():
     mock_file_store = MagicMock()
     mock_bulk_queue = MagicMock()
 
-    from viio_documents.router import create_api_router
+    from viio_documents.api.router import create_api_router
     from fastapi import FastAPI
 
     app = FastAPI()

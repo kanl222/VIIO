@@ -6,8 +6,8 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
 from assistent.config import Settings
-from assistent.router import create_api_router
-from assistent.services.token_usage import TokenUsageCounter
+from assistent.api.router import create_api_router
+from assistent.observability.token_usage import TokenUsageCounter
 
 
 def result(usage=None, raw=None):
@@ -40,7 +40,7 @@ def test_missing_usage_is_not_estimated_and_raw_openai_usage_is_supported():
 
 def test_health_returns_selected_provider_model_and_usage_requires_service_key(monkeypatch):
     counter = TokenUsageCounter()
-    monkeypatch.setattr('assistent.services.token_usage.token_usage', counter)
+    monkeypatch.setattr('assistent.observability.token_usage.token_usage', counter)
     settings = Settings(_env_file=None, llm_provider='yandex', yandex_api_key='test-key',
                         yandex_folder_id='test-folder', chat_model='selected-model', chat_api_key='test-chat-key')
     app = FastAPI()
@@ -56,7 +56,7 @@ def test_health_returns_selected_provider_model_and_usage_requires_service_key(m
 
 
 def test_model_factory_attaches_usage_callback():
-    from assistent.models.chat import create_chat_model
-    from assistent.services.token_usage import token_usage
+    from assistent.infrastructure.llm.chat import create_chat_model
+    from assistent.observability.token_usage import token_usage
     model = create_chat_model(Settings(_env_file=None))
     assert token_usage in model.callbacks

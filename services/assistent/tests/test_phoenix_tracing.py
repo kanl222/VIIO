@@ -5,7 +5,7 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from assistent.config import Settings
-from assistent.telemetry import (
+from assistent.observability.telemetry import (
     ExcludeHealthSpanProcessor,
     HealthFilterSampler,
     init_phoenix_tracing,
@@ -40,7 +40,7 @@ def test_init_phoenix_tracing_registers_provider():
         mock_instrumentor.return_value = mock_inst_instance
 
         # Reset global state for test
-        import assistent.telemetry as tm
+        import assistent.observability.telemetry as tm
 
         tm._PHOENIX_INITIALIZED = False
 
@@ -67,7 +67,7 @@ def test_init_phoenix_tracing_registers_provider():
 
 def test_init_phoenix_tracing_handles_exception_gracefully():
     with patch("phoenix.otel.register", side_effect=Exception("Connection refused")):
-        import assistent.telemetry as tm
+        import assistent.observability.telemetry as tm
 
         tm._PHOENIX_INITIALIZED = False
 
@@ -105,7 +105,7 @@ def test_health_filter_sampler_drops_health_and_metrics():
         None,
         1,
         "fastapi.endpoint",
-        attributes={"code.function.name": "assistent.router.health"},
+        attributes={"code.function.name": "assistent.api.router.health"},
     )
     assert res_func.decision.name == "DROP"
 
@@ -134,7 +134,7 @@ def test_exclude_health_span_processor_filters_spans():
     fastapi_span = MagicMock()
     fastapi_span.name = "fastapi.serialization"
     fastapi_span.attributes = {
-        "code.function.name": "assistent.router.create_api_router.<locals>.health"
+        "code.function.name": "assistent.api.router.create_api_router.<locals>.health"
     }
     processor.on_end(fastapi_span)
     mock_wrapped.on_end.assert_not_called()

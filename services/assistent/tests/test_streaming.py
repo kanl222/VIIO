@@ -8,11 +8,11 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 
 from assistent.config import Settings
-from assistent.router import create_api_router
-from assistent.services.agent_service import AgentService
-from assistent.services.graph_builder import build_agent_graph
-from assistent.services.streaming import event_sink
-from assistent.tools.planning import manage_plan
+from assistent.api.router import create_api_router
+from assistent.application.agent_service import AgentService
+from assistent.application.graph_builder import build_agent_graph
+from assistent.application.streaming import event_sink
+from assistent.infrastructure.tools.planning import manage_plan
 from test_required_retrieval import NoToolCallsModel
 
 
@@ -78,7 +78,7 @@ def test_sse_revocation_suppresses_provisional_and_final_private_text(monkeypatc
         nonlocal calls
         calls += 1
         return 'a'*32 if calls < 3 else 'b'*32
-    monkeypatch.setattr('assistent.router.access_revision', revision)
+    monkeypatch.setattr('assistent.api.router.access_revision', revision)
     class Service:
         async def chat(self, *args):
             await event_sink.get()({'type': 'delta', 'text': 'PRIVATE TEXT'})

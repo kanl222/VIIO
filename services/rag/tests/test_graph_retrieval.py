@@ -7,7 +7,7 @@ from langchain_core.documents import Document
 
 from viio_rag.app import create_app
 from viio_rag.config import Settings
-from viio_rag.graph_retrieval import MemgraphRetriever, extract_keywords
+from viio_rag.infrastructure.graph_retrieval import MemgraphRetriever, extract_keywords
 
 READ_KEY = "r" * 40
 PUBLIC_KEY = "p" * 40

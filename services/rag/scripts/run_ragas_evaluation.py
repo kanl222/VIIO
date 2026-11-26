@@ -13,7 +13,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from viio_rag.evaluation import (
+from viio_rag.application.evaluation import (
     calculate_recall_at_k,
     calculate_mrr,
     calculate_ndcg_at_k,

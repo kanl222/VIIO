@@ -1,10 +1,10 @@
 from unittest.mock import AsyncMock
 import pytest
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from assistent.services.dialogue_summary import compact_dialogue
-from assistent.services.personal_memory import MemoryAgent
-from viio_documents.services.code_documents import split_code
-from viio_rag.retrieval import rank_documents
+from assistent.application.dialogue_summary import compact_dialogue
+from assistent.application.memory.personal_memory import MemoryAgent
+from viio_documents.application.code_documents import split_code
+from viio_rag.application.retrieval import rank_documents
 from langchain_core.documents import Document
 
 
@@ -76,7 +76,7 @@ async def test_langmem_extends_existing_checkpoint_summary():
     llm = AsyncMock()
     llm.ainvoke.return_value = AIMessage(content='Extended summary')
     state = {'history_scope': 'owner', 'dialogue_summary': 'Old decision', 'summary_upto': 4}
-    with patch('assistent.services.dialogue_summary.asummarize_messages', wraps=asummarize_messages) as ready:
+    with patch('assistent.application.dialogue_summary.asummarize_messages', wraps=asummarize_messages) as ready:
         prepared, update = await compact_dialogue(messages, state, {'history_scope': 'owner'}, llm, 12)
     ready.assert_awaited_once()
     assert ready.call_args.kwargs['running_summary'].summary == 'Old decision'
@@ -109,7 +109,7 @@ async def test_disabled_summary_never_calls_langmem():
     from unittest.mock import patch
 
     messages = [HumanMessage(content='x' * 10000)]
-    with patch('assistent.services.dialogue_summary.asummarize_messages', new_callable=AsyncMock) as ready:
+    with patch('assistent.application.dialogue_summary.asummarize_messages', new_callable=AsyncMock) as ready:
         prepared, _ = await compact_dialogue(messages, {}, {}, AsyncMock(), 0, 1000)
     ready.assert_not_awaited()
     assert prepared == messages
@@ -137,7 +137,7 @@ async def test_memory_commands_are_explicit_and_untrusted_client_notes_are_remov
 async def test_graph_persists_summary_and_clears_it_on_scope_change():
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
     from langgraph.checkpoint.memory import MemorySaver
-    from assistent.services.graph_builder import build_agent_graph
+    from assistent.application.graph_builder import build_agent_graph
     saver = MemorySaver()
     model = FakeListChatModel(responses=['Brief response'])
     graph = build_agent_graph(model, checkpointer=saver, system_prompt='Test assistant', summary_after=12)

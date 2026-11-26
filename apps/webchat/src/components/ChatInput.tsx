@@ -8,6 +8,7 @@ const useCallback: <T extends (...args: any[]) => any>(callback: T, deps: any[])
 
 interface ChatInputProps {
   onSendMessage: (text: string, options?: RagOptions, attachments?: MessageAttachment[]) => void | Promise<void>;
+  onCancel?: () => void;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -47,6 +48,7 @@ const ACCEPTED_EXTENSIONS = '.pdf,.docx,.txt,.md,.py,.sql,.js,.ts,.tsx,.jsx,.jso
 export const ChatInput: React.FC<ChatInputProps> = memo(({
   onSendMessage,
   disabled = false,
+  onCancel,
   placeholder = 'Спросите о документах или опишите задачу…',
 }) => {
   const [text, setText] = useState('');
@@ -104,11 +106,12 @@ export const ChatInput: React.FC<ChatInputProps> = memo(({
 
   const submit = () => {
     const trimmed = text.trim();
+    const message = trimmed || 'Анализ прикреплённых файлов';
     if (!disabled && (trimmed || attachments.length > 0)) {
       if (attachments.length > 0) {
-        void onSendMessage(trimmed || 'Анализ прикреплённых файлов', undefined, attachments);
+        void onSendMessage(message, undefined, attachments);
       } else {
-        void onSendMessage(trimmed);
+        void onSendMessage(message);
       }
       setText('');
       setAttachments([]);
@@ -145,6 +148,10 @@ export const ChatInput: React.FC<ChatInputProps> = memo(({
       onDrop={handleDrop}
     >
       {/* Список прикреплённых файлов */}
+      {onCancel && <button type="button" onClick={onCancel}
+        className="mb-2 rounded-lg border border-zinc-300 px-3 py-2 dark:border-zinc-700">
+        Остановить ответ
+      </button>}
       <div className="composer">
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-3 pt-3">

@@ -5,9 +5,9 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.documents import Document
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.services.agent_service import AgentService
-from assistent.services.graph_builder import build_agent_graph
-from viio_rag.search_tool import create_knowledge_search_tool
+from assistent.application.agent_service import AgentService
+from assistent.application.graph_builder import build_agent_graph
+from viio_rag.application.search_tool import create_knowledge_search_tool
 
 
 class MockVectorStore:

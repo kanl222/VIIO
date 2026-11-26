@@ -10,11 +10,11 @@ import zipfile
 from pathlib import Path
 
 from viio_documents.config import Settings
-from viio_documents.services.pdf_extraction import PdfExtractionService
+from viio_documents.infrastructure.extraction.pdf_extraction import PdfExtractionService
 import openpyxl
 
-from viio_documents.services.text_normalization import normalize_document_text
-from viio_documents.services.office_extraction import OfficeExtractionService
+from viio_documents.infrastructure.extraction.text_normalization import normalize_document_text
+from viio_documents.infrastructure.extraction.office_extraction import OfficeExtractionService
 
 ROOT = Path(os.environ.get('GOSAPTEKA_IMPORT_ROOT', str(Path(__file__).resolve().parents[2] / 'data/gosapteka56/2026-10-27')))
 sys.path.insert(0,str(ROOT/'_libs'))

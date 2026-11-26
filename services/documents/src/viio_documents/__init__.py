@@ -10,18 +10,20 @@ from psycopg_pool import AsyncConnectionPool
 from qdrant_client import QdrantClient
 
 from viio_documents.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_documents.router import create_api_router
-from viio_documents.services.document_catalog import DocumentCatalogService
-from viio_documents.services.document_ingestion import DocumentIngestion
-from viio_documents.services.document_service import DocumentService
-from viio_documents.services.file_store import LocalFileStore, create_file_store
-from viio_documents.services.project_memory import COLLECTION as PROJECT_MEMORY_COLLECTION, register_project_memory
-from viio_rag.knowledge_data import KnowledgeData
-from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
-from viio_rag.publication_index import PublicationIndex
+from viio_documents.storage_config import StorageConfig
+from viio_documents.infrastructure.persistence.index_status import DocumentIndexStatus
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_documents.api.router import create_api_router
+from viio_documents.infrastructure.persistence.document_catalog import DocumentCatalogService
+from viio_documents.application.document_ingestion import DocumentIngestion
+from viio_documents.application.document_service import DocumentService
+from viio_documents.infrastructure.storage.file_store import LocalFileStore, create_file_store
+from viio_documents.application.project_memory import COLLECTION as PROJECT_MEMORY_COLLECTION, register_project_memory
+from viio_rag.application.knowledge_data import KnowledgeData
+from viio_documents.application.persistent_bulk_queue import PersistentBulkQueue
+from viio_rag.infrastructure.publication_index import PublicationIndex
 from viio_documents.service_profiles import configure_service
-from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 
 logger=logging.getLogger(__name__)
 
@@ -63,25 +65,28 @@ async def lifespan(app):
 def create_app(settings=None, agent_service=None, document_service=None, checkpointer=None):
     s=settings or Settings()
     s.validate_runtime()
+    worker = s.service_role == 'document-worker'
     client=QdrantClient(url=s.qdrant_url,api_key=s.qdrant_api_key) if document_service is None else None
     vectors=None
-    if client:
+    if client and worker:
         embeddings=create_embeddings(s)
         vectors=QdrantVectorStoreAdapter(client,embeddings,s.qdrant_collection_name)
         document_service=DocumentService(vectors,chunk_size=s.rag_chunk_size,
             chunk_overlap=s.rag_chunk_overlap,chunk_unit=s.rag_chunk_unit)
+    elif client:
+        document_service = DocumentIndexStatus(client, s.qdrant_collection_name)
     catalog=DocumentCatalogService(None)
     data=KnowledgeData(catalog,PublicationIndex(QdrantVectorStoreAdapter(client,embeddings,
-        s.qdrant_public_collection_name)) if client else None)
-    store=create_file_store(s)
+        s.qdrant_public_collection_name)) if client and worker else None)
+    store=create_file_store(StorageConfig.from_settings(s))
     slots=asyncio.Semaphore(s.bulk_max_workers)
-    ingestion=DocumentIngestion(document_service,catalog,store,s,knowledge_data=data)
+    ingestion=DocumentIngestion(document_service,catalog,store,s,knowledge_data=data) if worker else None
     queue=PersistentBulkQueue(ingestion,catalog,store,max_workers=s.bulk_max_workers,processing_slots=slots)
     app=FastAPI(title='VIIO Documents',lifespan=lifespan,docs_url=None if s.secure_runtime else '/docs',redoc_url=None if s.secure_runtime else '/redoc')
     @app.middleware('http')
     async def service_boundary(request,call_next):
         if request.url.path.startswith(('/api/v1/documents','/api/v1/knowledge/','/api/v1/project-memory/')):
-            from viio_documents.security import authorize
+            from viio_documents.api.security import authorize
             from fastapi import HTTPException
             from fastapi.responses import JSONResponse
             try:authorize(request,s)
@@ -94,7 +99,7 @@ def create_app(settings=None, agent_service=None, document_service=None, checkpo
     router=create_api_router(None,document_service,s,catalog,store,queue,ingestion,data)
     configure_service(app,router)
     app.include_router(router)
-    if client and s.service_role != 'documents':
+    if client and worker:
         if PROJECT_MEMORY_COLLECTION in {s.qdrant_collection_name, s.qdrant_public_collection_name}:
             raise ValueError('Память проектов требует отдельной коллекции Qdrant')
         register_project_memory(app,QdrantVectorStoreAdapter(client,embeddings,PROJECT_MEMORY_COLLECTION))

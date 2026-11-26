@@ -1,7 +1,7 @@
 from test_document_pipeline_integration import pipeline, pytestmark
-from viio_documents.router import DocumentCreateRequest
-from viio_rag.document_directory import list_documents, search_selected_documents
-from viio_rag.schemas import DocumentListRequest, UserContext
+from viio_documents.api.router import DocumentCreateRequest
+from viio_rag.application.document_directory import list_documents, search_selected_documents
+from viio_rag.contracts.schemas import DocumentListRequest, UserContext
 
 
 async def test_catalog_filters_acl_before_count_and_paging_and_updates_tags(pipeline):

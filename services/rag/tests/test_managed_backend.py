@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 from viio_rag.config import Settings
-from viio_rag.schemas import ManagedRagQuestion
-from viio_rag.managed import answer
+from viio_rag.contracts.schemas import ManagedRagQuestion
+from viio_rag.infrastructure.clients.managed import answer
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def setup(tmp_path, monkeypatch):
     client.__aenter__ = AsyncMock(return_value=SimpleNamespace(responses=SimpleNamespace(create=create)))
     client.__aexit__ = AsyncMock(return_value=False)
     factory = MagicMock(return_value=client)
-    monkeypatch.setattr('viio_rag.managed.AsyncOpenAI', factory)
+    monkeypatch.setattr('viio_rag.infrastructure.clients.managed.AsyncOpenAI', factory)
     data = SimpleNamespace(cloud_corpus_is_public=AsyncMock(return_value=True))
     return settings, data, create, factory
 
@@ -94,7 +94,7 @@ async def test_real_routes_fix_role_and_require_different_service_capabilities(m
     from viio_rag.app import create_app
     settings = Settings(_env_file=None, documents_read_key='r' * 40, consultant_source_key='p' * 40)
     responder = AsyncMock(return_value={'reply': 'Answer', 'sources': []})
-    monkeypatch.setattr('viio_rag.managed.answer', responder)
+    monkeypatch.setattr('viio_rag.infrastructure.clients.managed.answer', responder)
     app = create_app(settings, data=SimpleNamespace(), vector_store=SimpleNamespace())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://rag') as client:
         body = {'message': 'Public question', 'confirmed_public_for_external_cloud': True}

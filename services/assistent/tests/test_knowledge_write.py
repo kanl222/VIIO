@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 
 from assistent import create_app
 from assistent.config import Settings
-from assistent.services.answer_sources import AgentReply
-from assistent.tools.knowledge_write import create_knowledge_write_tool
-from assistent.services.agent_service import AgentService
-from assistent.services.graph_builder import build_agent_graph
+from assistent.application.answer_sources import AgentReply
+from assistent.infrastructure.tools.knowledge_write import create_knowledge_write_tool
+from assistent.application.agent_service import AgentService
+from assistent.application.graph_builder import build_agent_graph
 from langchain_core.messages import AIMessage
 from test_required_retrieval import NoToolCallsModel
 
@@ -24,7 +24,7 @@ def client_tool(monkeypatch, response):
         requests.append(request)
         return response(request)
     factory = httpx.AsyncClient
-    monkeypatch.setattr('assistent.tools.knowledge_write.httpx.AsyncClient',
+    monkeypatch.setattr('assistent.infrastructure.tools.knowledge_write.httpx.AsyncClient',
         lambda **kw: factory(transport=httpx.MockTransport(respond), **kw))
     settings = Settings(_env_file=None, documents_url='http://documents', documents_admin_key='write-key')
     return create_knowledge_write_tool(settings), requests
@@ -83,7 +83,7 @@ async def test_graph_carries_verified_save_receipt_to_api_result(monkeypatch):
 
 
 def test_write_receipt_survives_access_epoch_change_without_leaking_old_answer(monkeypatch):
-    monkeypatch.setattr('assistent.router.access_revision', AsyncMock(side_effect=['a'*32, 'b'*32]))
+    monkeypatch.setattr('assistent.api.router.access_revision', AsyncMock(side_effect=['a'*32, 'b'*32]))
     receipt = {'document_id': 'doc-'+'a'*32, 'title': 'Shared fact', 'chunks_count': 1}
     service = AsyncMock()
     service.chat.return_value = (AgentReply('OLD PRIVATE DATA', saved_documents=[receipt]), 'thread')

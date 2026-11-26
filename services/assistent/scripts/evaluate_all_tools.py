@@ -26,10 +26,10 @@ from langgraph.checkpoint.memory import MemorySaver
 
 import assistent
 from assistent.config import Settings
-from assistent.services.database_agent import DatabaseAgentService
-from assistent.services.graph_builder import build_agent_graph, scope_key
-from assistent.services.agent_service import AgentService
-from assistent.tools.postgres_tool import PostgresMCPClient
+from assistent.application.database_agent import DatabaseAgentService
+from assistent.application.graph_builder import build_agent_graph, scope_key
+from assistent.application.agent_service import AgentService
+from assistent.infrastructure.tools.postgres_tool import PostgresMCPClient
 from assistent.prompts import DEFAULT_SYSTEM_PROMPT, CODING_SYSTEM_PROMPT, DELEGATION_PROMPT
 
 

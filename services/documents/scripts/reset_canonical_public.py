@@ -13,16 +13,16 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from qdrant_client import QdrantClient, models
 from viio_documents.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_documents.services.document_catalog import DocumentCatalogService
-from viio_documents.services.document_ingestion import DocumentIngestion
-from viio_documents.services.document_service import DocumentService
-from viio_documents.services.file_store import LocalFileStore
-from viio_rag.knowledge_data import KnowledgeData
-from viio_rag.publication_index import PublicationIndex
-from viio_documents.services.bulk_queue import BulkUploadTask
-from viio_rag.access import can_read_document
-from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_documents.infrastructure.persistence.document_catalog import DocumentCatalogService
+from viio_documents.application.document_ingestion import DocumentIngestion
+from viio_documents.application.document_service import DocumentService
+from viio_documents.infrastructure.storage.file_store import LocalFileStore
+from viio_rag.application.knowledge_data import KnowledgeData
+from viio_rag.infrastructure.publication_index import PublicationIndex
+from viio_documents.application.bulk_queue import BulkUploadTask
+from viio_rag.application.access import can_read_document
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 
 ROOT = Path(__file__).resolve().parents[2]
 

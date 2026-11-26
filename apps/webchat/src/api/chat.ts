@@ -8,8 +8,9 @@ export type ChatStreamEvent = { type: 'delta'; text: string } | { type: 'reset' 
   | { type: 'status'; message: string } | { type: 'plan'; steps: TaskStep[] };
 
 export interface RagOptions {
-  rag_backend: 'local' | 'yandex';
-  confirmed_public_for_external_cloud: boolean;
+  rag_backend?: 'local' | 'yandex';
+  confirmed_public_for_external_cloud?: boolean;
+  agent_mode?: 'assistant' | 'coding' | 'database';
 }
 
 export async function sendMessage(
@@ -17,7 +18,8 @@ export async function sendMessage(
   message: string,
   options?: RagOptions,
   onEvent?: (event: ChatStreamEvent) => void,
-  attachments?: MessageAttachment[]
+  attachments?: MessageAttachment[],
+  signal?: AbortSignal
 ): Promise<ChatResponse> {
   const payload = {
     conversation_id: conversationId,
@@ -32,6 +34,7 @@ export async function sendMessage(
       credentials: 'include',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify({ ...payload, stream: true }),
+      signal,
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -47,5 +50,6 @@ export async function sendMessage(
   return await apiFetch<ChatResponse>('/api/chat', {
     method: 'POST',
     body: JSON.stringify(payload),
+    signal,
   });
 }

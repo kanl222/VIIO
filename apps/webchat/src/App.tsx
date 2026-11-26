@@ -29,6 +29,8 @@ export const App: React.FC = () => {
   const { user, loading: authLoading, login, register, logout, checkAuth } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768);
   const [view, setView] = useState<'chat' | 'admin'>('chat');
+  const [agentMode, setAgentMode] = useState<'assistant' | 'coding' | 'database'>('assistant');
+  const canUseSpecialists = user?.role === 'admin' || user?.role === 'programmer';
 
   const {
     conversations,
@@ -53,6 +55,7 @@ export const App: React.FC = () => {
     plan,
     progressText,
     sendMessage,
+    cancelRequest,
     error: chatError,
   } = useChat(currentId, reloadConversations);
 
@@ -73,6 +76,7 @@ export const App: React.FC = () => {
       options?: import('./api/chat').RagOptions,
       attachments?: import('./types').MessageAttachment[]
     ) => {
+      options = { ...options, agent_mode: canUseSpecialists ? agentMode : 'assistant' };
       if (!currentId) {
         try {
           const title = text.slice(0, 30) + (text.length > 30 ? '...' : '');
@@ -87,7 +91,7 @@ export const App: React.FC = () => {
         await sendMessage(text, currentId, options, attachments);
       }
     },
-    [currentId, createConversation, sendMessage]
+    [currentId, createConversation, sendMessage, agentMode, canUseSpecialists]
   );
 
   useEffect(() => {
@@ -181,6 +185,16 @@ export const App: React.FC = () => {
           />
 
           <main id="main-content" className="chat-main">
+            <div className="chat-toolbar">
+              <label htmlFor="agent-mode">Режим</label>
+              <select id="agent-mode" value={canUseSpecialists ? agentMode : 'assistant'}
+                disabled={submitting || !user}
+                onChange={event => setAgentMode(event.target.value as 'assistant' | 'coding' | 'database')}>
+                <option value="assistant">Ассистент</option>
+                {canUseSpecialists && <option value="coding">Кодинг</option>}
+                {canUseSpecialists && <option value="database">База данных</option>}
+              </select>
+            </div>
             {(conversationError || chatError) && (
               <div className="notice notice-error chat-notice" role="alert">
                 {conversationError || chatError}
@@ -198,6 +212,7 @@ export const App: React.FC = () => {
 
             <ChatInput
               onSendMessage={handleSendMessage}
+              onCancel={submitting ? cancelRequest : undefined}
               disabled={submitting || !user}
               placeholder={
                 !user

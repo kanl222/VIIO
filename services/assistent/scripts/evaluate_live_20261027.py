@@ -16,7 +16,7 @@ import httpx
 import psycopg
 
 from assistent.config import Settings
-from assistent.utils.postgres_saver import init_async_postgres_saver
+from assistent.infrastructure.persistence.postgres_saver import init_async_postgres_saver
 
 
 def emit(record):

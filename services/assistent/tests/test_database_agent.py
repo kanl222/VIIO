@@ -6,8 +6,8 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.runnables import RunnableConfig
 
 from assistent.config import Settings
-from assistent.services.database_agent import DatabaseAgentService
-from assistent.tools.postgres_tool import create_postgres_readonly_tool, PostgresMCPClient
+from assistent.application.database_agent import DatabaseAgentService
+from assistent.infrastructure.tools.postgres_tool import create_postgres_readonly_tool, PostgresMCPClient
 
 
 def tool_fixture(enabled=True):
@@ -101,7 +101,7 @@ async def test_mcp_disallows_arbitrary_upstream_tools():
 @pytest.mark.asyncio
 async def test_mcp_returns_safe_sqlstate_without_exposing_upstream_message(monkeypatch):
     upstream = AsyncMock(return_value=("Error: SQLSTATE 42703. Private server details.", True))
-    monkeypatch.setattr("assistent.tools.postgres_tool.call_read_tool", upstream)
+    monkeypatch.setattr("assistent.infrastructure.tools.postgres_tool.call_read_tool", upstream)
     client = PostgresMCPClient(Settings(_env_file=None))
 
     result = await client.call("execute_sql", {"sql": "SELECT missing_column FROM orders"})

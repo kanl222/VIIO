@@ -7,9 +7,9 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 import anyio.to_thread
 from pydantic import BaseModel, ConfigDict, Field
 
-from viio_documents.router import UserContext
-from viio_documents.services.documents_client import require_internal, forward_documents
-from viio_documents.services.rag_client import forward_rag
+from viio_documents.api.router import UserContext
+from viio_documents.infrastructure.clients.documents_client import require_internal, forward_documents
+from viio_documents.infrastructure.clients.rag_client import forward_rag
 
 PROJECT_MEMORY_PATHS = {'/api/v1/project-memory/save', '/api/v1/project-memory/search'}
 
@@ -64,7 +64,7 @@ def configure_service(app: FastAPI, api_router: APIRouter | None = None) -> None
         '/api/v1/consultant-materials/search', '/api/v1/consultant-materials/validate'}]
 
     def authorize(request: Request):
-        from viio_documents.security import authorize as check
+        from viio_documents.api.security import authorize as check
         check(request, settings)
 
     if role == 'document-worker':

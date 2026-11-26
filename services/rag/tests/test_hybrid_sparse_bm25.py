@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.documents import Document
 
-from viio_rag.sparse_bm25 import SparseBM25Encoder, get_sparse_encoder
-from viio_rag.retrieval import EnhancedRetrieval, reciprocal_rank_fusion
+from viio_rag.infrastructure.models.sparse_bm25 import SparseBM25Encoder, get_sparse_encoder
+from viio_rag.application.retrieval import EnhancedRetrieval, reciprocal_rank_fusion
 
 
 def test_sparse_bm25_encoder_generates_vectors():
@@ -135,7 +135,7 @@ async def test_enhanced_retrieval_runs_qdrant_hybrid_branch_and_diagnostics():
 def test_qdrant_vector_store_adapter_hybrid_search_in_memory():
     from langchain_core.embeddings import FakeEmbeddings
     from qdrant_client import QdrantClient
-    from viio_rag.vector_store import QdrantVectorStoreAdapter
+    from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 
     client = QdrantClient(":memory:")
     embeddings = FakeEmbeddings(size=8)

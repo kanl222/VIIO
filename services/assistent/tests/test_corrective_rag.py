@@ -4,11 +4,11 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.prompts import NOT_FOUND_PHRASE
-from assistent.services.corrective_rag import (
+from assistent.application.corrective_rag import (
     build_corrective_rag_graph,
     is_affirmative,
 )
-from assistent.services.supervisor_graph import build_supervisor_graph
+from assistent.application.supervisor_graph import build_supervisor_graph
 from test_required_retrieval import NoToolCallsModel
 
 

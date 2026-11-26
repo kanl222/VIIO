@@ -1,7 +1,7 @@
 import httpx
 from viio_documents.config import Settings
 from viio_rag.app import create_app
-from viio_documents.router import DocumentCreateRequest
+from viio_documents.api.router import DocumentCreateRequest
 from test_document_pipeline_integration import pipeline, pytestmark
 
 

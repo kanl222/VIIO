@@ -12,8 +12,8 @@ from psycopg.rows import dict_row
 from qdrant_client import QdrantClient, models
 
 from viio_documents.config import Settings
-from viio_documents.services.file_store import LocalFileStore
-from assistent.utils.postgres_saver import init_async_postgres_saver
+from viio_documents.infrastructure.storage.file_store import LocalFileStore
+from assistent.infrastructure.persistence.postgres_saver import init_async_postgres_saver
 
 
 def emit(**row):

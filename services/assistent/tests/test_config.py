@@ -93,7 +93,8 @@ def test_modular_base_settings_classes() -> None:
 
     tools = ToolsSettings(_env_file=None)
     assert tools.agent_max_tool_calls == 24
-    assert tools.skills_dir == "Skills"
+    assert tools.skills_dir == "skills"
+    assert tools.skills_enabled is True
     assert tools.parse_github_allowed_repositories("org/repo1, org/repo2") == ["org/repo1", "org/repo2"]
 
     obs = ObservabilitySettings(_env_file=None)

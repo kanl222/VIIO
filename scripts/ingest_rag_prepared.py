@@ -31,10 +31,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services" / "rag" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "viio-core" / "src"))
 
-from viio_rag.chunks import document_chunks
+from viio_rag.application.chunks import document_chunks
 from viio_rag.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_rag.sparse_bm25 import get_sparse_encoder
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_rag.infrastructure.models.sparse_bm25 import get_sparse_encoder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ingest_rag_prepared")
@@ -205,7 +205,8 @@ async def main():
             conn.commit()
 
         # 2. Нарезка на чанки
-        doc_parts = list(document_chunks(content, size=800, overlap=100, unit="characters"))
+        doc_parts = [(text, meta) for text, meta in document_chunks(content, size=800, overlap=100, unit="characters")
+                     if not meta.get('heading_only')]
         if not doc_parts:
             doc_parts = [(content, {"window_context": content})]
 
@@ -232,6 +233,7 @@ async def main():
             payload = {
                 "page_content": text,
                 "metadata": {
+                    **extra,
                     "document_id": doc_id,
                     "title": title,
                     "filename": filename,

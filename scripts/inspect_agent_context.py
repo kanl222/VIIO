@@ -17,8 +17,8 @@ async def main(folder,agent):
     def markers(text,patterns):return {name:bool(re.search(pattern,text,re.I|re.S)) for name,pattern in patterns.items()}
     if agent=='main':
         from langchain_core.messages import AIMessage,HumanMessage,ToolMessage
-        from assistent.services.graph_builder import messages_with_retrieved_context
-        from assistent.services.dialogue_summary import compact_dialogue
+        from assistent.application.graph_builder import messages_with_retrieved_context
+        from assistent.application.dialogue_summary import compact_dialogue
         budget=int(os.getenv('RAG_CONTEXT_MAX_CHARS','12000'))
         for row in rows:
             path=folder/'contexts'/(row['case']+'-'+row['variant'])
@@ -36,7 +36,7 @@ async def main(folder,agent):
                 counts[mode]={'characters':len(text),'contains':markers(text,snapshot['patterns'])}
             result.append({'case':row['case'],'variant':row['variant'],'configured_rag_context_max_chars':budget,**counts})
     else:
-        from viio_consultant.agent import excerpt
+        from viio_consultant.application.agent import excerpt
         for row in rows:
             path=folder/'contexts'/(row['case']+'-'+row['variant'])
             snapshot=json.loads(Path(str(path)+'-public-snapshots.json').read_text(encoding='utf-8'))

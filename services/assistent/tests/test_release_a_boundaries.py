@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage,AIMessage
 from assistent import create_app
 from assistent.config import Settings
-from assistent.services.graph_builder import history_for_turn
+from assistent.application.graph_builder import history_for_turn
 from viio_documents.config import Settings as DocumentSettings
-from viio_documents.security import authorize
+from viio_documents.api.security import authorize
 
 KEYS=dict(documents_read_key='r'*40,documents_admin_key='a'*40,document_worker_key='w'*40,consultant_source_key='s'*40)
 
@@ -58,7 +58,7 @@ def test_legacy_consultant_env_cannot_require_a_consultant_model_or_secret(monke
 
 def test_mid_generation_revocation_suppresses_answer(monkeypatch):
     epoch=AsyncMock(side_effect=['a'*32,'b'*32])
-    monkeypatch.setattr('assistent.router.access_revision',epoch)
+    monkeypatch.setattr('assistent.api.router.access_revision',epoch)
     service=SimpleNamespace(chat=AsyncMock(return_value=('PRIVATE OLD ANSWER','thread')))
     app=create_app(Settings(_env_file=None,secure_runtime=True,chat_api_key='c'*40,documents_read_key='r'*40),agent_service=service)
     response=TestClient(app).post('/api/v1/chat',headers={'X-Internal-Token':'c'*40},json={'message':'вопрос'})
@@ -67,7 +67,7 @@ def test_mid_generation_revocation_suppresses_answer(monkeypatch):
     assert service.chat.call_args.args[2]['_knowledge_epoch']=='a'*32
 
 def test_revision_outage_prevents_generation(monkeypatch):
-    monkeypatch.setattr('assistent.router.access_revision',AsyncMock(side_effect=HTTPException(503,'Unavailable')))
+    monkeypatch.setattr('assistent.api.router.access_revision',AsyncMock(side_effect=HTTPException(503,'Unavailable')))
     service=SimpleNamespace(chat=AsyncMock())
     app=create_app(Settings(_env_file=None,secure_runtime=True,chat_api_key='c'*40,documents_read_key='r'*40),agent_service=service)
     response=TestClient(app).post('/api/v1/chat',headers={'X-Internal-Token':'c'*40},json={'message':'вопрос'})

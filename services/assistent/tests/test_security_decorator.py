@@ -1,7 +1,7 @@
-"""Unit tests for assistent.security module and role decorators."""
+"""Unit tests for assistent.api.security module and role decorators."""
 
 import pytest
-from assistent.security import (
+from assistent.api.security import (
     DEFAULT_ACCESS_DENIED_MESSAGE,
     ensure_role_access,
     has_role_access,

@@ -2,7 +2,7 @@
 
 import asyncio
 import pytest
-from viio_documents.services.bulk_queue import BulkQueue, BulkUploadTask, BulkUploadResult
+from viio_documents.application.bulk_queue import BulkQueue, BulkUploadTask, BulkUploadResult
 
 
 @pytest.mark.asyncio

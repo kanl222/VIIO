@@ -22,7 +22,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from viio_documents import create_app
 from viio_documents.config import Settings
-from viio_documents.services.bulk_queue import BulkUploadTask
+from viio_documents.application.bulk_queue import BulkUploadTask
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("import_cf")

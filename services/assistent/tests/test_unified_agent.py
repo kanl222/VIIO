@@ -8,10 +8,10 @@ from langgraph.checkpoint.memory import MemorySaver
 from assistent import create_app
 from assistent.config import Settings
 from assistent.prompts import UNIFIED_SYSTEM_PROMPT
-from assistent.services.agent_service import AgentService
-from assistent.services.graph_builder import build_agent_graph
-from assistent.tools.github_tool import create_github_tool
-from assistent.tools.postgres_tool import create_postgres_readonly_tool
+from assistent.application.agent_service import AgentService
+from assistent.application.graph_builder import build_agent_graph
+from assistent.infrastructure.tools.github_tool import create_github_tool
+from assistent.infrastructure.tools.postgres_tool import create_postgres_readonly_tool
 from test_required_retrieval import NoToolCallsModel
 
 

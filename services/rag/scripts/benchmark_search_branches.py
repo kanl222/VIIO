@@ -9,8 +9,8 @@ from langchain_core.embeddings import FakeEmbeddings
 from qdrant_client import QdrantClient
 
 from viio_rag.config import Settings
-from viio_rag.embeddings import create_embeddings
-from viio_rag.vector_store import QdrantVectorStoreAdapter
+from viio_rag.infrastructure.models.embeddings import create_embeddings
+from viio_rag.infrastructure.vector_store import QdrantVectorStoreAdapter
 
 BENCHMARK_DOCUMENTS = [
     {

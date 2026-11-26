@@ -1,15 +1,15 @@
 from unittest.mock import patch
 import pytest
 from assistent.config import Settings
-from assistent.models.chat import create_chat_model
-from assistent.models.coder import create_coding_model
+from assistent.infrastructure.llm.chat import create_chat_model
+from assistent.infrastructure.llm.coder import create_coding_model
 
 
 @pytest.mark.parametrize('role', ['chat', 'coding', 'database', 'routing'])
 def test_independent_agent_selection(role):
     settings = Settings(_env_file=None, llm_provider='lmstudio',
         **{f'{role}_provider': 'ollama', f'{role}_model': 'selected-model'})
-    with patch('assistent.models.chat.ChatOllama') as ollama, patch('assistent.models.chat.ChatOpenAI') as openai:
+    with patch('assistent.infrastructure.llm.chat.ChatOllama') as ollama, patch('assistent.infrastructure.llm.chat.ChatOpenAI') as openai:
         if role == 'coding':
             create_coding_model(settings)
         else:
@@ -20,7 +20,7 @@ def test_independent_agent_selection(role):
 
 def test_default_model_and_explicit_override():
     settings = Settings(_env_file=None, llm_provider='lmstudio', lmstudio_model='default-model')
-    with patch('assistent.models.chat.ChatOpenAI') as model:
+    with patch('assistent.infrastructure.llm.chat.ChatOpenAI') as model:
         create_chat_model(settings)
         assert model.call_args.kwargs['model'] == 'default-model'
         create_chat_model(settings, model_name='override')

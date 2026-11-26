@@ -1,10 +1,10 @@
 import pytest
 from unittest.mock import MagicMock
-from viio_documents.services.document_ingestion_graph import (
+from viio_documents.application.document_ingestion_graph import (
     build_document_ingestion_graph,
     IngestionState,
 )
-from viio_documents.services.document_service import DocumentService
+from viio_documents.application.document_service import DocumentService
 
 
 class MockVectorStore:

@@ -18,6 +18,7 @@ export function useChat(
   const activeId = useRef(conversationId);
   const loadVersion = useRef(0);
   const pendingSend = useRef<{ id: string; messages: Message[] } | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
   const historyRef = useRef(history);
   historyRef.current = history;
   const onConversationUpdatedRef = useRef(onConversationUpdated);
@@ -105,6 +106,8 @@ export function useChat(
       setError(null);
 
       try {
+        const controller = new AbortController();
+        activeRequest.current = controller;
         setPlan([]);
         setProgressText('Обрабатываем запрос…');
         let partial = '';
@@ -130,7 +133,8 @@ export function useChat(
               }] });
             }
           },
-          attachments
+          attachments,
+          controller.signal
         );
         const assistantMessage: Message = {
           id: response.message_id || `asst-${Date.now()}`,
@@ -147,7 +151,7 @@ export function useChat(
           onConversationUpdatedRef.current();
         }
       } catch (err: any) {
-        const errMsg = err.message || 'Не удалось получить ответ от агента';
+        const errMsg = err.name === 'AbortError' ? 'Запрос остановлен пользователем.' : err.message || 'Не удалось получить ответ от агента';
         if (isCurrent()) setError(errMsg);
         // Добавляем системное сообщение об ошибке в чат
         const errorSystemMessage: Message = {
@@ -159,6 +163,8 @@ export function useChat(
         };
         if (isCurrent()) setHistory({ id: targetId, messages: [...pending.messages, errorSystemMessage] });
       } finally {
+        activeRequest.current = null;
+        setProgressText('');
         pendingSend.current = null;
         setSubmitting(false);
       }
@@ -174,6 +180,7 @@ export function useChat(
     progressText,
     error,
     sendMessage,
+    cancelRequest: () => activeRequest.current?.abort(),
     reloadMessages: loadMessages,
   };
 }

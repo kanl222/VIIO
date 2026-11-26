@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.documents import Document
 
-from viio_rag.chunks import (
+from viio_rag.application.chunks import (
     split_into_sentences,
     sentence_window_chunks,
     document_chunks,
     sections,
 )
-from viio_rag.search_tool import format_documents
-from viio_rag.retrieval import EnhancedRetrieval
+from viio_rag.application.search_tool import format_documents
+from viio_rag.application.retrieval import EnhancedRetrieval
 
 
 def test_split_into_sentences_russian_and_english():

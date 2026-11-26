@@ -1,5 +1,5 @@
 import pytest
-from viio_documents.services.graph_sync import GraphSyncService
+from viio_documents.infrastructure.clients.graph_sync import GraphSyncService
 
 
 def test_extract_relations_regulations_and_systems():

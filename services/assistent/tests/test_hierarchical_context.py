@@ -2,12 +2,12 @@ import pytest
 from unittest.mock import MagicMock
 from langchain_core.documents import Document
 
-from assistent.services.answer_sources import (
+from assistent.application.answer_sources import (
     extract_section_path,
     readable_reference,
     reference_title,
 )
-from viio_rag.search_tool import format_documents
+from viio_rag.application.search_tool import format_documents
 
 
 def test_extract_section_path():

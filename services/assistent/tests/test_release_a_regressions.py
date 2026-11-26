@@ -8,15 +8,15 @@ from assistent.prompts import REWRITE_SYSTEM_PROMPT
 from langchain_core.documents import Document
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.services.agent_service import AgentService
-from assistent.services.coding_agent import CodingAgentService, MultiAgentService, is_coding_request
-from assistent.services.graph_builder import build_agent_graph
-from viio_rag.search_tool import create_knowledge_search_tool
+from assistent.application.agent_service import AgentService
+from assistent.application.coding_agent import CodingAgentService, MultiAgentService, is_coding_request
+from assistent.application.graph_builder import build_agent_graph
+from viio_rag.application.search_tool import create_knowledge_search_tool
 from test_coding_agent import CapturingModel, PROGRAMMER
 from test_required_retrieval import NoToolCallsModel
-from assistent.services.request_policy import calculate
-from assistent.services.coding_agent import create_coding_delegation_tool
-from assistent.services.answer_sources import AgentReply, clean_answer
+from assistent.application.request_policy import calculate
+from assistent.application.coding_agent import create_coding_delegation_tool
+from assistent.application.answer_sources import AgentReply, clean_answer
 
 
 def test_live_business_report_with_negative_code_instruction():
@@ -179,7 +179,7 @@ def test_api_sources_are_structured_and_reply_remains_compatible():
 
 
 def test_turn_provenance_extracts_github_sources():
-    from assistent.services.answer_sources import turn_provenance
+    from assistent.application.answer_sources import turn_provenance
     from langchain_core.messages import HumanMessage, ToolMessage
     messages = [
         HumanMessage(content="Покажи код сервиса"),

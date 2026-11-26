@@ -1,7 +1,7 @@
 """Standalone public API, intentionally independent of the assistent package."""
 import json
 import logging
-from viio_consultant.diagnostics import capture, record
+from viio_consultant.observability.diagnostics import capture, record
 from contextlib import asynccontextmanager
 from hmac import compare_digest
 import httpx
@@ -10,9 +10,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Literal
 from viio_consultant.config import ConsultantSettings
-from viio_consultant.models import create_model
-from viio_consultant.agent import PublicConsultant
-from viio_consultant.source import HttpPublicationSource
+from viio_consultant.infrastructure.models import create_model
+from viio_consultant.application.agent import PublicConsultant
+from viio_consultant.infrastructure.source import HttpPublicationSource
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def create_app(settings=None, *, agent=None):
 
     app = FastAPI(title='VIIO Public Consultant', version='0.1.0', lifespan=lifespan)
     app.state.agent = agent
-    from viio_consultant.yandex import cloud_router
+    from viio_consultant.api.yandex import cloud_router
     app.include_router(cloud_router(settings))
 
     @app.get('/health')
@@ -58,7 +58,7 @@ def create_app(settings=None, *, agent=None):
         if not request.message.strip():
             raise HTTPException(400, 'Укажите вопрос')
         if (request.rag_backend or settings.rag_backend) == 'yandex':
-            from viio_consultant.managed_rag import answer
+            from viio_consultant.application.managed_rag import answer
             return await answer(settings, request.message.strip(), request.confirmed_public_for_external_cloud)
         if app.state.agent is None:
             raise HTTPException(503, 'Внешний консультант не настроен')

@@ -10,14 +10,14 @@ from langchain_core.documents import Document
 from qdrant_client.http import models
 
 from assistent.config import Settings
-from assistent.router import (
+from assistent.api.router import (
     ChatRequest,
     UserContext,
     create_api_router,
 )
-from viio_documents.router import DocumentCreateRequest
-from viio_documents.services.document_service import DocumentService
-from viio_rag.search_tool import (
+from viio_documents.api.router import DocumentCreateRequest
+from viio_documents.application.document_service import DocumentService
+from viio_rag.application.search_tool import (
     build_access_filter,
     create_knowledge_search_tool,
 )

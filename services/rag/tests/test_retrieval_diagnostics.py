@@ -3,8 +3,37 @@ from unittest.mock import AsyncMock
 from contextlib import asynccontextmanager
 import pytest
 from langchain_core.documents import Document
-from viio_rag.retrieval import EnhancedRetrieval, rank_documents
-from viio_rag.knowledge_data import KnowledgeData
+from viio_rag.application.retrieval import EnhancedRetrieval, rank_documents, fragment_snapshot
+from viio_rag.application.knowledge_data import KnowledgeData, procedure_context
+
+
+def test_candidate_cache_snapshot_preserves_parent_but_summary_omits_text():
+    doc = Document(page_content='small instruction', metadata={
+        'document_id': 'd', 'parent_context': 'complete procedure',
+        'window_context': 'adjacent steps', 'chunker_version': 'markdown-procedure-v5'})
+    cached = fragment_snapshot(doc)
+    assert cached['parent_context'] == 'complete procedure'
+    assert cached['window_context'] == 'adjacent steps'
+    summary = fragment_snapshot(doc, include_text=False)
+    assert not {'text', 'parent_context', 'window_context'} & summary.keys()
+
+
+def test_parent_recovery_finds_late_procedure_in_large_manual():
+    content = '# Руководство\n## Запуск\n' + ('Настройки приложения. ' * 800)
+    content += '\n## Отпуск в отделение\nУправление запасами → Документы отпуска в отделение → Создать.\nВид цены: Закупочная.'
+    parent = procedure_context(content, 'Как создать «Отпуск в отделение» и какой вид цены?', 1800)
+    assert 'Вид цены: Закупочная.' in parent
+    assert len(parent) <= 1800
+
+
+@pytest.mark.asyncio
+async def test_parent_recovery_never_loads_denied_or_publication_canonical_source():
+    public = Document(page_content='approved snapshot', metadata={'document_id': 'private', 'publication_id': 'pub'})
+    denied = Document(page_content='secret', metadata={'document_id': 'denied'})
+    pool = SimpleNamespace(connection=AsyncMock(side_effect=AssertionError('must not load canonical source')))
+    data = KnowledgeData(SimpleNamespace(pool=pool))
+    data.authorized_candidates = AsyncMock(return_value=[public])
+    assert await data.evidence_parents([public, denied], 'question', {'role': 'employee'}) == {}
 
 
 @pytest.mark.asyncio
@@ -42,7 +71,8 @@ async def test_diagnostics_explain_title_bonus_ranks_and_threshold():
     vector = SimpleNamespace(similarity_search=lambda **_: [noise, doctor, pharmacy])
     diagnostic = {}
 
-    result = await EnhancedRetrieval(vector, data).search('как выписать рецепт', None, 2, diagnostics=diagnostic)
+    result = await EnhancedRetrieval(vector, data, branch_weights={'semantic': 1.0, 'lexical': 1.0}).search(
+        'как выписать рецепт', None, 2, diagnostics=diagnostic)
 
     assert result == [pharmacy, doctor]
     assert diagnostic['ranking_details']['query_terms'] == ['выписать', 'рецепт']
@@ -53,7 +83,7 @@ async def test_diagnostics_explain_title_bonus_ranks_and_threshold():
     assert scores['pharmacy']['score_rank'] == scores['pharmacy']['final_rank'] == 1
     assert scores['doctor']['matched_text'] == ['выписать', 'рецепт']
     assert scores['doctor']['term_score'] == 6 and scores['doctor']['final_rank'] == 2
-    assert 'score_rank' not in scores['noise'] and scores['noise']['final_rank'] is None
+    assert scores['noise']['score_rank'] == 3 and scores['noise']['final_rank'] is None
     assert diagnostic['branches']['public']['error'] == 'TimeoutError'
     assert 'PRIVATE_UPSTREAM_DETAIL' not in str(diagnostic)
 

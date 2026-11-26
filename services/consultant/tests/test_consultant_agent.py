@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage
-from viio_consultant.agent import PublicConsultant, NO_INFORMATION, excerpt
+from viio_consultant.application.agent import PublicConsultant, NO_INFORMATION, excerpt
 
 
 def search(query='Support', **args):

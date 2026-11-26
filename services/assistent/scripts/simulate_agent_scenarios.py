@@ -18,12 +18,12 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 
 from assistent.config import Settings
-from assistent.services.database_subgraph import build_database_analyst_graph
-from assistent.services.supervisor_graph import build_supervisor_graph
-from assistent.tools.postgres_tool import create_postgres_readonly_tool
-from assistent.services.coding_agent import CodingAgentService, MultiAgentService, CODING_SYSTEM_PROMPT
-from assistent.services.graph_builder import build_agent_graph
-from assistent.services.diagnostics import capture, record
+from assistent.application.database_subgraph import build_database_analyst_graph
+from assistent.application.supervisor_graph import build_supervisor_graph
+from assistent.infrastructure.tools.postgres_tool import create_postgres_readonly_tool
+from assistent.application.coding_agent import CodingAgentService, MultiAgentService, CODING_SYSTEM_PROMPT
+from assistent.application.graph_builder import build_agent_graph
+from assistent.observability.diagnostics import capture, record
 
 
 def print_banner(title: str):

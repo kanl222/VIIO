@@ -15,10 +15,10 @@ from psycopg.conninfo import make_conninfo
 from qdrant_client import QdrantClient, models
 from langchain_core.messages import HumanMessage, AIMessage
 from viio_documents.config import Settings
-from assistent.models import create_chat_model
-from assistent.services.graph_builder import build_agent_graph, scope_key
-from viio_documents.services.file_store import LocalFileStore
-from assistent.utils.postgres_saver import init_async_postgres_saver
+from assistent.infrastructure.llm import create_chat_model
+from assistent.application.graph_builder import build_agent_graph, scope_key
+from viio_documents.infrastructure.storage.file_store import LocalFileStore
+from assistent.infrastructure.persistence.postgres_saver import init_async_postgres_saver
 
 STATE = Path('/tmp/viio-knowledge-check.json')
 

@@ -5,15 +5,15 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
-from assistent.services.agent_service import AgentService
-from assistent.services.answer_sources import cited_sources
-from assistent.services.database_agent import DatabaseAgentService, is_database_request
-from assistent.services.graph_builder import build_agent_graph
-from viio_rag.knowledge_data import excerpt
-from viio_rag.search_tool import create_knowledge_search_tool
+from assistent.application.agent_service import AgentService
+from assistent.application.answer_sources import cited_sources
+from assistent.application.database_agent import DatabaseAgentService, is_database_request
+from assistent.application.graph_builder import build_agent_graph
+from viio_rag.application.knowledge_data import excerpt
+from viio_rag.application.search_tool import create_knowledge_search_tool
 from test_required_retrieval import NoToolCallsModel
 from test_database_agent import tool_fixture
-from assistent.services.coding_agent import CodingAgentService, MultiAgentService, create_coding_delegation_tool
+from assistent.application.coding_agent import CodingAgentService, MultiAgentService, create_coding_delegation_tool
 
 
 @pytest.mark.asyncio

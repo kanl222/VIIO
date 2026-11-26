@@ -4,8 +4,8 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 
-from viio_documents.services.bulk_queue import BulkUploadTask
-from viio_documents.services.persistent_bulk_queue import PersistentBulkQueue
+from viio_documents.application.bulk_queue import BulkUploadTask
+from viio_documents.application.persistent_bulk_queue import PersistentBulkQueue
 
 
 @pytest.mark.asyncio

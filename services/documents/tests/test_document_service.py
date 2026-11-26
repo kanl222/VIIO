@@ -2,7 +2,7 @@
 
 from typing import Any
 import pytest
-from viio_documents.services.document_service import DocumentService, split_document_text
+from viio_documents.application.document_service import DocumentService, split_document_text
 
 
 class MockVectorStore:
@@ -106,7 +106,7 @@ def test_markdown_sections_are_not_mixed_and_retain_heading_on_continuation():
 
 
 def test_large_markdown_table_repeats_headers_without_losing_rows():
-    from viio_rag.chunks import document_chunks
+    from viio_rag.application.chunks import document_chunks
     rows = [f'| Medicine{i} | {i} packages |' for i in range(30)]
     content = '# Inventory\n\n| Medicine | Quantity |\n| --- | --- |\n' + '\n'.join(rows)
     parts = list(document_chunks(content, 180, 20))
@@ -117,7 +117,7 @@ def test_large_markdown_table_repeats_headers_without_losing_rows():
 
 
 def test_fenced_heading_does_not_create_a_section():
-    from viio_rag.chunks import document_chunks
+    from viio_rag.application.chunks import document_chunks
     parts = list(document_chunks('# Real\n\n```python\n# Comment\nx = 1\n```\n\nEnd.', 300, 10))
     assert len(parts) == 1
     assert parts[0][1]['section_path'] == ['Real']

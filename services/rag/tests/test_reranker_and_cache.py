@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langchain_core.documents import Document
 
-from viio_rag.cache import InMemoryCache, ViioRedisCache
-from viio_rag.reranker import CrossEncoderReranker
-from viio_rag.retrieval import EnhancedRetrieval
+from viio_rag.infrastructure.cache import InMemoryCache, ViioRedisCache
+from viio_rag.infrastructure.models.reranker import CrossEncoderReranker
+from viio_rag.application.retrieval import EnhancedRetrieval
 
 
 @pytest.mark.asyncio
@@ -136,7 +136,7 @@ def test_cross_encoder_cache_key_collision_avoidance():
 
 
 def test_get_reranker_attaches_cache():
-    from viio_rag.reranker import get_reranker
+    from viio_rag.infrastructure.models.reranker import get_reranker
     mock_cache = ViioRedisCache(enabled=False)
     instance = get_reranker(cache=mock_cache)
     assert instance.cache is mock_cache
