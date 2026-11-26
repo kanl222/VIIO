@@ -46,6 +46,34 @@ async def test_empty_cpu_answer_is_an_error():
         await AgentService(graph).chat('Привет')
 
 
+@pytest.mark.asyncio
+async def test_cpu_uses_graph_definition_and_does_not_invent_document_sources():
+    prompts = []
+    @tool('search_knowledge_base', response_format='content_and_artifact')
+    async def search(query: str) -> tuple:
+        """Search authorized facts."""
+        return 'Old formatted dump', {'fragments': [{'document_id': 'narrow', 'content': 'Private procedure example'}],
+            'graph_definitions': [{'name': 'ИСЛО', 'short_form': 'ИС ЛО', 'full_name': 'Полное имя системы',
+                                   'description': 'Общее назначение системы'}]}
+    class Model:
+        async def ainvoke(self, messages, config=None):
+            prompts.extend(messages)
+            return AIMessage(content='Полное имя системы. [1]')
+    graph = build_cpu_knowledge(Model(), [search], 3000)
+    reply, _ = await AgentService(graph).chat('Что такео ИС ЛО?')
+    assert 'Общее назначение системы' in prompts[-1].content
+    assert 'Private procedure example' not in prompts[-1].content
+    assert '[1]' not in reply
+    assert reply.sources == []
+
+
+@pytest.mark.asyncio
+async def test_greeting_removes_citation_when_no_search_was_needed():
+    graph = build_cpu_knowledge(NoToolCallsModel(messages=iter([AIMessage(content='Привет [1].')])), [], 3000)
+    reply, _ = await AgentService(graph).chat('Привет')
+    assert reply == 'Привет.'
+
+
 def test_graph_tool_schema_does_not_expose_runtime_config():
     graph_tool = create_graph_search_tool(Settings(_env_file=None, memgraph_enabled=True))
     schema = graph_tool.tool_call_schema.model_json_schema()

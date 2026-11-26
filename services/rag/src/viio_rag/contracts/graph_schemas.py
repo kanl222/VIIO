@@ -83,7 +83,7 @@ class RelationType(str, Enum):
     PRODUCES = "PRODUCES"                         # (Step) -> (Document)
     COMPLIES_WITH = "COMPLIES_WITH"               # (Process|Step|Location|System) -> (Regulation)
     DESCRIBES = "DESCRIBES"                       # (Document) -> (Process|Regulation|System)
-    SUPERSEDES = "SUPERSEDES"                     # (Document) -> (Document)
+    SUPERSEDES = "SUPERSEDES"                     # (Document|Regulation) -> same type
     CONTAINS = "CONTAINS"                         # (Document) -> (Chunk)
     CONTAINS_ACTION = "CONTAINS_ACTION"           # (MenuPath) -> (Operation|Step)
     DOCUMENTED_BY = "DOCUMENTED_BY"               # (MenuPath) -> (Document)
@@ -226,6 +226,8 @@ class AbbreviationNode(BaseGraphNode):
     name: str                                     # Например, "ИСЛО", "МДЛП", "GDP"
     full_name: str                                # Полная расшифровка
     short_form: str | None = None                 # Альтернативная форма, например "ИС ЛО"
+    aliases: list[str] = Field(default_factory=list)
+    search_aliases: list[str] = Field(default_factory=list)
     description: str | None = None                # Контекст и значение термина
     category: str | None = "Общее"                # Система, Норматив, Категория, Склад, Организация
 

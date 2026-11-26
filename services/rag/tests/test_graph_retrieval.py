@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -19,6 +19,24 @@ def test_extract_keywords():
     assert "рецепта" in keywords
     assert "что" not in keywords
     assert "как" not in keywords
+    assert extract_keywords('ИС ЛО') == extract_keywords('ИСЛО') == ['исло']
+
+
+def test_short_abbreviation_reaches_graph_and_preserves_aliases():
+    driver = MagicMock()
+    session = driver.session.return_value.__enter__.return_value
+    def execute(query, **kwargs):
+        result = MagicMock()
+        result.data.return_value = ([{'name': 'ЭП', 'full_name': 'Электронная подпись',
+            'short_form': 'ЭП', 'aliases': ['цифровая подпись'], 'description': '',
+            'category': 'Термин', 'target_name': None}] if 'MATCH (a:Abbreviation)' in query else [])
+        return result
+    session.run.side_effect = execute
+    retriever = MemgraphRetriever()
+    with patch.object(retriever, 'get_driver', return_value=driver):
+        facts = retriever.search_graph('ЭП')
+    assert facts['abbreviations'][0]['aliases'] == ['цифровая подпись']
+    assert session.run.call_args_list[0].kwargs['tokens_lower'] == ['эп']
 
 
 def test_format_graph_context():
@@ -61,6 +79,7 @@ async def test_hybrid_graphrag_merges_graph_facts_and_vector_docs():
         access_revision=AsyncMock(return_value="a" * 32),
         public_search=AsyncMock(return_value=[]),
         public_ids=AsyncMock(return_value=set()),
+        evidence_parents=AsyncMock(return_value={}),
     )
     settings = Settings(
         _env_file=None,
@@ -69,6 +88,7 @@ async def test_hybrid_graphrag_merges_graph_facts_and_vector_docs():
         documents_read_key=READ_KEY,
         consultant_source_key=PUBLIC_KEY,
         memgraph_enabled=True,
+        reranker_enabled=False,
     )
     app = create_app(settings, data=data, vector_store=vectors)
 
@@ -103,6 +123,8 @@ async def test_hybrid_graphrag_merges_graph_facts_and_vector_docs():
             assert "### Регламентирующие документы:" in context
             assert "Пошаговая инструкция по выписке рецепта" in context
             assert data["diagnostics"]["graph_facts_count"] == 1
+            assert data['graph_definitions'][0]['full_name'] == 'Информационная система «Лекарственное обеспечение»'
+            assert 'document_id' not in data['graph_definitions'][0]
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@
 5. 05_systems.json — Информационные системы (ИС ЛО, ЕГИСЗ, МДЛП, Карта Оренбуржца)
 6. 06_documents.json — Регламенты и документы базы знаний (№ 70–78)
 7. 07_processes.json — Бизнес-процессы учета, льготного отпуска, маркировки и списания
+8. 08_abbreviations.json — Сокращения, определения и варианты написания
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from pathlib import Path
 from typing import Any
 
 from neo4j import GraphDatabase
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from knowledge_graph_validation import alias_key, load_branches, validate_identifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("graph_attacher")
@@ -51,6 +55,11 @@ def sync_nodes(session, nodes: list[dict[str, Any]]):
         label = node.get("label")
         match_key = node.get("match_key")
         props = node.get("properties", {})
+        validate_identifier(label)
+        validate_identifier(match_key)
+        if label == 'Abbreviation':
+            props = {**props, 'search_aliases': sorted({alias_key(value) for value in
+                [props['name'], props.get('short_form', ''), *props.get('aliases', [])] if value})}
         
         if not label or not match_key:
             logger.warning("Пропуск некорректного узла (нет label или match_key): %s", node)
@@ -72,6 +81,7 @@ def sync_relations(session, relations: list[dict[str, Any]]):
     """Синхронизирует связи между узлами через параметризованные MERGE-запросы."""
     for rel in relations:
         rel_type = rel.get("type")
+        validate_identifier(rel_type)
         from_spec = rel.get("from", {})
         to_spec = rel.get("to", {})
         props = rel.get("properties", {})
@@ -83,6 +93,8 @@ def sync_relations(session, relations: list[dict[str, Any]]):
         to_label = to_spec.get("label")
         to_key = to_spec.get("key")
         to_val = to_spec.get("value")
+        for identifier in (from_label, from_key, to_label, to_key):
+            validate_identifier(identifier)
 
         if not all([rel_type, from_label, from_key, from_val is not None, to_label, to_key, to_val is not None]):
             logger.warning("Пропуск некорректной связи: %s", rel)
@@ -99,65 +111,65 @@ def sync_relations(session, relations: list[dict[str, Any]]):
         session.run(query, from_val=from_val, to_val=to_val, props=props)
 
 
-def cleanup_obsolete_entities(session):
-    """Удаляет вымышленные и устаревшие тестовые узлы, если они остались в базе."""
-    obsolete_queries = [
-        "MATCH (e:Employee {name: 'Квасов Александр Владимирович'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Квасов Владимир Александрович'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Дебус Ирина Александровна'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Некрасова Ольга Владимировна'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Бурасова Светлана Сергеевна'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Вербина Евгения Андреевна'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Князев Алексей Николаевич'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Сумкин Евгений Владимирович'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Рагузин Сергей Владимирович'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Терентьева Наталья Ивановна'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Балябкина Елена Петровна'}) DETACH DELETE e;",
-        "MATCH (e:Employee {name: 'Серова Татьяна Николаевна'}) DETACH DELETE e;",
-    ]
-    for q in obsolete_queries:
-        result = session.run(q)
-        summary = result.consume()
-        if summary.counters.nodes_deleted > 0:
-            logger.info("Удален устаревший узел: %d шт.", summary.counters.nodes_deleted)
+def reconcile_nodes(transaction, operations):
+    """Apply explicitly reviewed local replacements; retain all incident relationships."""
+    for operation in operations:
+        old = operation['old']
+        target = operation.get('target')
+        for spec in (old, target):
+            if spec:
+                validate_identifier(spec['label'])
+                validate_identifier(spec['key'])
+        query = f"MATCH (n:{old['label']} {{{old['key']}: $value}}) RETURN id(n) AS id"
+        for row in transaction.run(query, value=old['value']).data():
+            old_id = row['id']
+            if target:
+                rows = transaction.run(
+                    f"MATCH (n:{target['label']} {{{target['key']}: $value}}) RETURN id(n) AS id",
+                    value=target['value']).data()
+                if len(rows) != 1:
+                    raise ValueError('Replacement target must resolve to exactly one node')
+                new_id = rows[0]['id']
+                if new_id == old_id:
+                    raise ValueError('Cannot replace a node with itself')
+                edges = transaction.run(
+                    'MATCH (a)-[r]->(b) WHERE id(a)=$id OR id(b)=$id '
+                    'RETURN id(a) AS source, id(b) AS target, type(r) AS type, properties(r) AS props', id=old_id).data()
+                for edge in edges:
+                    validate_identifier(edge['type'])
+                    source = new_id if edge['source'] == old_id else edge['source']
+                    destination = new_id if edge['target'] == old_id else edge['target']
+                    transaction.run(f"MATCH (a),(b) WHERE id(a)=$a AND id(b)=$b "
+                                    f"MERGE (a)-[r:{edge['type']}]->(b) SET r += $props",
+                                    a=source, b=destination, props=edge['props']).consume()
+            transaction.run('MATCH (n) WHERE id(n)=$id DETACH DELETE n', id=old_id).consume()
 
 
-def attach_knowledge_from_dir(data_dir: Path, uri: str = MEMGRAPH_URI, user: str = MEMGRAPH_USER, password: str = MEMGRAPH_PASSWORD):
+def attach_knowledge_from_dir(data_dir: Path, uri: str = MEMGRAPH_URI, user: str = MEMGRAPH_USER, password: str = MEMGRAPH_PASSWORD, reconcile_manifest: Path | None = None):
     """Считывает все JSON-файлы из указанной папки и загружает их в Memgraph."""
-    if not data_dir.exists() or not data_dir.is_dir():
-        raise FileNotFoundError(f"Каталог с ветками графа не найден: {data_dir}")
-
-    json_files = sorted(data_dir.glob("*.json"))
-    if not json_files:
-        raise ValueError(f"В каталоге {data_dir} не найдено .json файлов с данными графа!")
-
-    logger.info("Найдено %d файлов веток графа в каталоге %s", len(json_files), data_dir)
+    # Validate every branch before any cleanup or write; one failed branch writes nothing.
+    branches = load_branches(data_dir)
+    operations = json.loads(reconcile_manifest.read_text(encoding='utf8')) if reconcile_manifest else []
+    # Validate identifiers before opening a connection. Manifests contain local data only.
+    for operation in operations:
+        for spec in (operation['old'], operation.get('target')):
+            if spec:
+                validate_identifier(spec['label'])
+                validate_identifier(spec['key'])
+                if spec.get('value') is None:
+                    raise ValueError('Reconciliation identity requires a value')
     auth = (user, password) if user or password else None
     driver = GraphDatabase.driver(uri, auth=auth)
-
     with driver.session() as session:
-        logger.info("Подключение к Memgraph успешно. Очистка устаревших тестовых записей...")
-        cleanup_obsolete_entities(session)
-
-        for file_path in json_files:
-            try:
-                branch_data = load_branch_file(file_path)
-                branch_name = branch_data.get("branch", file_path.stem)
-                desc = branch_data.get("description", "")
-                nodes = branch_data.get("nodes", [])
-                relations = branch_data.get("relations", [])
-
-                logger.info("--> Загрузка ветки '%s' (%s): узлов: %d, связей: %d", branch_name, desc, len(nodes), len(relations))
-                
-                # 1. Синхронизация узлов
-                sync_nodes(session, nodes)
-
-                # 2. Синхронизация связей
-                sync_relations(session, relations)
-
-            except Exception as exc:
-                logger.error("Ошибка при обработке файла %s: %s", file_path.name, exc, exc_info=True)
-                raise
+        with session.begin_transaction() as transaction:
+            for branch in branches:
+                sync_nodes(transaction, branch['nodes'])
+            if operations:
+                reconcile_nodes(transaction, operations)
+            # All nodes exist before any cross-file relationship is created.
+            for branch in branches:
+                sync_relations(transaction, branch['relations'])
+            transaction.commit()
 
         # -------------------------------------------------------------------------
         # Итоговая статистика графа
@@ -178,7 +190,7 @@ def attach_knowledge_from_dir(data_dir: Path, uri: str = MEMGRAPH_URI, user: str
         total_r = 0
         for r in rels_stat:
             total_r += r["cnt"]
-            print(f"  {r['rel']}: {r['rel'] if 'rel' in r else r['cnt']}")
+            print(f"  {r['rel']}: {r['cnt']}")
         print(f"Всего связей: {total_r}")
         print("=======================================================================\n")
 
@@ -200,9 +212,15 @@ def main():
         default=MEMGRAPH_URI,
         help=f"URI подключения к Memgraph (по умолчанию: {MEMGRAPH_URI})",
     )
+    parser.add_argument("--validate-only", action="store_true", help="Validate all branches without connecting to Memgraph")
+    parser.add_argument("--reconcile-manifest", type=Path, help="Reviewed local JSON replacements/deletions, applied in the same transaction")
     args = parser.parse_args()
+    if args.validate_only:
+        from knowledge_graph_validation import validate_branches
+        print(json.dumps(validate_branches(load_branches(args.data_dir))))
+        return
 
-    attach_knowledge_from_dir(args.data_dir, uri=args.uri)
+    attach_knowledge_from_dir(args.data_dir, uri=args.uri, reconcile_manifest=args.reconcile_manifest)
 
 
 if __name__ == "__main__":

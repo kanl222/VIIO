@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from viio_core.text.search import normalize_search_text
 from collections import defaultdict
 from typing import Any
 
@@ -27,7 +28,7 @@ MIN_STEM_LEN = 3
 
 def extract_keywords(query: str) -> list[str]:
     """Извлекает значимые ключевые слова для запроса к графу."""
-    words = re.findall(r"[а-яёa-z0-9]+", query.lower())
+    words = re.findall(r"[а-яёa-z0-9]+", normalize_search_text(query))
     meaningful = [w for w in words if w not in STOP_WORDS and len(w) >= 3]
     return meaningful if meaningful else words
 
@@ -96,13 +97,12 @@ class MemgraphRetriever:
         if not self.enabled:
             return {}
 
+        query = normalize_search_text(query)
         keywords = extract_keywords(query)
         if not keywords:
             return {}
 
         all_stems = [stem_word(w) for w in keywords if len(w) >= MIN_STEM_LEN]
-        if not all_stems:
-            return {}
 
         is_contact_query = any(s in CONTACT_STEMS for s in all_stems)
         is_org_query = any(s in ORG_STEMS for s in all_stems)
@@ -125,16 +125,21 @@ class MemgraphRetriever:
                 if tokens:
                     tokens_lower = list(set(tokens))
                     tokens_upper = [w.upper() for w in tokens_lower]
-                    query_clean = query.lower().strip()
+                    query_clean = ' '.join(re.findall(r'[\w]+', query.lower()))
                     abbr_rows = session.run(
                         """
                         MATCH (a:Abbreviation)
                         WHERE toLower(a.name) IN $tokens_lower
                            OR (a.short_form IS NOT NULL AND toLower(a.short_form) IN $tokens_lower)
                            OR any(t IN $tokens_upper WHERE a.name = t)
+                           OR any(alias IN coalesce(a.aliases, []) WHERE
+                               (' ' + $query_clean + ' ') CONTAINS (' ' + toLower(alias) + ' '))
+                           OR any(alias IN coalesce(a.search_aliases, []) WHERE
+                               (' ' + $query_clean + ' ') CONTAINS (' ' + alias + ' '))
                            OR (size($query_clean) >= 4 AND toLower(a.full_name) CONTAINS $query_clean)
                         OPTIONAL MATCH (a)-[:EXPANDS_TO|REFERS_TO]->(target)
                         RETURN a.name AS name, a.full_name AS full_name, a.short_form AS short_form,
+                               a.aliases AS aliases,
                                a.description AS description, a.category AS category,
                                labels(target)[0] AS target_type,
                                coalesce(target.name, target.title, target.code) AS target_name
@@ -153,6 +158,7 @@ class MemgraphRetriever:
                                 "name": r["name"],
                                 "full_name": r["full_name"],
                                 "short_form": r["short_form"],
+                                "aliases": r.get('aliases') or [],
                                 "description": r["description"],
                                 "category": r["category"],
                                 "related": [],
@@ -172,6 +178,7 @@ class MemgraphRetriever:
                     f"""
                     MATCH (p:Process)
                     WHERE {_match_any("p.name")}
+                      AND coalesce(p.verification_status, '') <> 'needs_review'
                     OPTIONAL MATCH (p)-[:HAS_STEP]->(s:Step)
                     OPTIONAL MATCH (s)-[:NEXT]->(next:Step)
                     OPTIONAL MATCH (r:Role)-[:RESPONSIBLE_FOR]->(s)
@@ -236,6 +243,8 @@ class MemgraphRetriever:
                     WITH sys, collect(DISTINCT de.name) AS master_data
                     WHERE any(t IN $stems WHERE
                            {_norm("sys.name")} CONTAINS t
+                        OR (sys.short_name IS NOT NULL AND {_norm("sys.short_name")} CONTAINS t)
+                        OR (sys.description IS NOT NULL AND {_norm("sys.description")} CONTAINS t)
                         OR (sys.type IS NOT NULL AND {_norm("sys.type")} CONTAINS t)
                         OR any(m IN master_data WHERE {_norm("m")} CONTAINS t))
                     OPTIONAL MATCH (sys)-[:INTEGRATES_WITH]->(other:System)
@@ -256,7 +265,9 @@ class MemgraphRetriever:
                     MATCH (r:Regulation)
                     WHERE {_match_any("r.code", "r.title")}
                     OPTIONAL MATCH (entity)-[:COMPLIES_WITH]->(r)
-                    RETURN r.code AS code, r.title AS title, r.source AS source, r.edition AS edition,
+                    RETURN r.code AS code, r.title AS title, coalesce(r.source_uri, r.source) AS source, r.edition AS edition,
+                           r.legal_status AS legal_status, r.valid_from AS valid_from,
+                           r.valid_to_exclusive AS valid_to_exclusive,
                            collect(DISTINCT coalesce(entity.name, labels(entity)[0])) AS complies_entities
                     LIMIT $limit;
                     """,
@@ -434,7 +445,9 @@ class MemgraphRetriever:
         if regulations:
             blocks.append("#### Нормативные требования:")
             for r in regulations[:3]:
-                blocks.append(f"- **[{r.get('code')}]** «{r.get('title')}» ({r.get('source', '')})")
+                status = f"; статус: {r['legal_status']}" if r.get('legal_status') else ''
+                end = f"; не действует с {r['valid_to_exclusive']}" if r.get('legal_status') == 'repealed' and r.get('valid_to_exclusive') else ''
+                blocks.append(f"- **[{r.get('code')}]** «{r.get('title')}» ({r.get('source', '')}{status}{end})")
             blocks.append("")
 
         if organizations:

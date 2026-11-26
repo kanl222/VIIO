@@ -127,6 +127,7 @@ def create_app(settings=None, *, data=None, vector_store=None):
         context = question.user_context.model_dump() if question.user_context else None
         diagnostic = {} if question.diagnostics else None
         parent_trace_id = req.headers.get('x-trace-id')
+        graph_data = {}
         if question.document_ids is not None:
             with capture('search', question.query, parent_trace_id=parent_trace_id) as trace:
                 record('search_request', query=question.query, scope='internal', lookup_mode='document_ids')
@@ -191,6 +192,8 @@ def create_app(settings=None, *, data=None, vector_store=None):
                     or meta.get('parent_context') or meta.get('window_context') or doc.page_content,
             })
         return {'context': text, 'fragments': fragments,
+                'graph_definitions': [{key: item.get(key) for key in ('name', 'short_form', 'aliases', 'full_name', 'description')}
+                                      for item in graph_data.get('abbreviations', [])],
                 **({'diagnostics': diagnostic} if diagnostic is not None else {})}
 
     @app.post('/api/v1/knowledge/documents', dependencies=[Depends(internal)])

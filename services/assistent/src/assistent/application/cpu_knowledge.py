@@ -13,7 +13,7 @@ from assistent.application.agent_policy import (
 from assistent.application.streaming import event_sink
 from assistent.observability.diagnostics import record
 from assistent.application.answer_sources import cited_sources
-from assistent.application.evidence_context import build_evidence_context
+from assistent.application.evidence_context import build_evidence_context, graph_definition_context, strip_invalid_citations
 import re
 
 CPU_PROMPT = (
@@ -25,7 +25,8 @@ CPU_PROMPT = (
     'Не придумывай факты, ссылки и источники.'
     ' Названия кнопок, полей и меню переписывай точно из материалов. '
     'Не заменяй действия другой процедурой. Если нужного действия нет, скажи об этом. '
-    'В конце ответа укажи номера подтверждающих материалов, например [1].'
+    'Ссылайся только на пронумерованные материалы. Если их нет, не добавляй номера ссылок.'
+    'Определение термина бери из справочных фактов; не подменяй его отдельным примером применения.'
     ' Отвечай только на заданный вопрос, не повторяя его. '
     'Ответь на каждую часть составного вопроса. Сохраняй отрицания из материалов.'
 )
@@ -47,7 +48,11 @@ def build_cpu_knowledge(llm, tools, context_max_chars):
             })
             artifact = getattr(result, 'artifact', None) or {}
             fragments = artifact.get('fragments', [])
-            if fragments:
+            definition = graph_definition_context(question, artifact.get('graph_definitions', []), context_max_chars)
+            if definition:
+                reference = 'Справочные определения из графа знаний:\n' + definition
+                reference = reference[:context_max_chars]
+            elif fragments:
                 reference, sources = build_evidence_context(question, fragments, context_max_chars)
             else:
                 reference = str(getattr(result, 'content', result))[:context_max_chars]
@@ -65,6 +70,7 @@ def build_cpu_knowledge(llm, tools, context_max_chars):
         content = answer.content
         if not isinstance(content, str):
             content = ''.join(part.get('text', '') for part in content if isinstance(part, dict))
+        content = strip_invalid_citations(content, len(sources))
         markers = {int(index)-1 for index in re.findall(r'\[(\d+)\]', content)}
         selected_sources = [source for i, source in enumerate(sources) if i in markers]
         if not selected_sources:

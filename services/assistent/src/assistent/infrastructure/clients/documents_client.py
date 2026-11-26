@@ -114,7 +114,8 @@ def create_remote_search_tool(settings: Any, k: int = 5, *, tool_name: str = "se
                     duration_ms=duration_ms,
                     status="ok",
                 )
-                return text, {"sources": sources, "fragments": payload.get('fragments', [])}
+                return text, {"sources": sources, "fragments": payload.get('fragments', []),
+                              "graph_definitions": payload.get('graph_definitions', [])}
         except httpx.HTTPStatusError as exc:
             duration_ms = round((time.monotonic() - start) * 1000)
             logger.warning("Ошибка HTTP при обращении к базе знаний: %s (код %s)", exc, exc.response.status_code)

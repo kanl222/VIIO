@@ -1,12 +1,44 @@
 """Pack authorized instruction passages, not the prefix of a formatted search dump."""
 import re
 from collections import Counter
+from viio_core.text.search import normalize_search_text
 
 STOP_WORDS = set('какой какие какого каких нужно необходимо можно программа программе инструкция инструкции система системе информационной лекарственное обеспечение через после перед именно согласно ответь данные документа документе используется'.split())
 
 
 def terms(text):
-    return {word[:6] for word in re.findall(r'[а-яёa-z0-9]{3,}', text.lower()) if word not in STOP_WORDS}
+    return {word[:6] for word in re.findall(r'[а-яёa-z0-9]{3,}', normalize_search_text(text))
+            if word not in STOP_WORDS and word not in {'что', 'такое', 'как', 'это'}}
+
+
+def graph_definition_context(question, definitions, limit):
+    """Use only exact matching, server-returned definitions for a definition question."""
+    query = ' '.join(re.findall(r'\w+', normalize_search_text(question)))
+    matches = []
+    for item in definitions:
+        if not isinstance(item, dict) or not isinstance(item.get('full_name'), str):
+            continue
+        names = [item.get('name'), item.get('short_form'), *(item.get('aliases') or [])]
+        aliases = [' '.join(re.findall(r'\w+', normalize_search_text(str(name or '')))) for name in names]
+        if not any(alias and re.fullmatch(
+            r'(?:(?:что\s+\w+|расшифруй|как\s+расшифровывается)\s+)?' + re.escape(alias), query)
+            for alias in aliases):
+            continue
+        block = f"{item.get('name', '')}: {item['full_name']}. {item.get('description') or ''}"
+        if len(block) <= limit:
+            matches.append(block)
+            limit -= len(block) + 2
+    return '\n\n'.join(matches)
+
+
+def strip_invalid_citations(text, source_count):
+    """Validate prose markers without changing code examples containing [1]."""
+    parts = re.split(r'(```[\s\S]*?```|`[^`\n]*`)', text)
+    for index in range(0, len(parts), 2):
+        parts[index] = re.sub(r'(?<!\[)\[(\d+)\](?!\])',
+            lambda match: match[0] if 1 <= int(match[1]) <= source_count else '', parts[index])
+        parts[index] = re.sub(r'[ \t]+([.,!?;:])', r'\1', parts[index])
+    return ''.join(parts)
 
 
 def clean_passage(text):
